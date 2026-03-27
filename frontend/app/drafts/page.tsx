@@ -38,6 +38,8 @@ export default function DraftsPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
 
@@ -64,13 +66,19 @@ export default function DraftsPage() {
   async function handleApprove() {
     if (!selected) return;
     setActing(true);
+    setActionError(null);
     try {
       await approveDraft(selected.id);
-      setSelected(null);
-      setShowRejectInput(false);
-      await fetchDrafts();
+      // Flash success briefly before refreshing
+      setFlash('approved');
+      setTimeout(async () => {
+        setFlash(null);
+        setSelected(null);
+        setShowRejectInput(false);
+        await fetchDrafts();
+      }, 1200);
     } catch (e) {
-      setError((e as Error).message);
+      setActionError('Something went wrong. Try again.');
     } finally {
       setActing(false);
     }
@@ -79,14 +87,19 @@ export default function DraftsPage() {
   async function handleReject() {
     if (!selected || !rejectReason.trim()) return;
     setActing(true);
+    setActionError(null);
     try {
       await rejectDraft(selected.id, rejectReason.trim());
-      setSelected(null);
-      setRejectReason('');
-      setShowRejectInput(false);
-      await fetchDrafts();
+      setFlash('rejected');
+      setTimeout(async () => {
+        setFlash(null);
+        setSelected(null);
+        setRejectReason('');
+        setShowRejectInput(false);
+        await fetchDrafts();
+      }, 1200);
     } catch (e) {
-      setError((e as Error).message);
+      setActionError('Something went wrong. Try again.');
     } finally {
       setActing(false);
     }
@@ -137,7 +150,7 @@ export default function DraftsPage() {
             {drafts.map((d) => (
               <button
                 key={d.id}
-                onClick={() => { setSelected(d); setShowRejectInput(false); setRejectReason(''); }}
+                onClick={() => { setSelected(d); setShowRejectInput(false); setRejectReason(''); setActionError(null); setFlash(null); }}
                 className={`w-full rounded-lg border p-4 text-left transition-all ${
                   selected?.id === d.id
                     ? 'border-gray-900 bg-gray-50 ring-1 ring-gray-900'
@@ -204,14 +217,37 @@ export default function DraftsPage() {
 
                 {/* Actions */}
                 <div className="border-t border-gray-100 p-5">
-                  {showRejectInput ? (
+                  {/* Success flash */}
+                  {flash === 'approved' && (
+                    <div className="mb-3 flex items-center gap-2 rounded-md bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700">
+                      <span>Sent ✓</span>
+                      <span className="text-emerald-500 font-normal">— Scheduler will deliver on next cycle</span>
+                    </div>
+                  )}
+                  {flash === 'rejected' && (
+                    <div className="mb-3 flex items-center gap-2 rounded-md bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-600">
+                      <span>Rejected ✓</span>
+                      <span className="font-normal">— Draft removed from queue</span>
+                    </div>
+                  )}
+
+                  {/* Action error */}
+                  {actionError && !flash && (
+                    <div className="mb-3 rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
+                      {actionError}
+                    </div>
+                  )}
+
+                  {/* Buttons (hidden during flash) */}
+                  {!flash && showRejectInput ? (
                     <div className="space-y-3">
                       <textarea
                         value={rejectReason}
                         onChange={(e) => setRejectReason(e.target.value)}
+                        disabled={acting}
                         placeholder="Why are you rejecting this draft? This helps the AI improve..."
                         rows={3}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:bg-gray-50 disabled:text-gray-400"
                       />
                       <div className="flex gap-2">
                         <button
@@ -222,14 +258,15 @@ export default function DraftsPage() {
                           {acting ? 'Rejecting...' : 'Confirm Reject'}
                         </button>
                         <button
-                          onClick={() => { setShowRejectInput(false); setRejectReason(''); }}
-                          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                          onClick={() => { setShowRejectInput(false); setRejectReason(''); setActionError(null); }}
+                          disabled={acting}
+                          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                         >
                           Cancel
                         </button>
                       </div>
                     </div>
-                  ) : (
+                  ) : !flash ? (
                     <div className="flex gap-3">
                       <button
                         onClick={handleApprove}
@@ -239,14 +276,14 @@ export default function DraftsPage() {
                         {acting ? 'Approving...' : 'Approve & Send'}
                       </button>
                       <button
-                        onClick={() => setShowRejectInput(true)}
+                        onClick={() => { setShowRejectInput(true); setActionError(null); }}
                         disabled={acting}
                         className="rounded-md border border-gray-300 px-5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Reject
                       </button>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ) : (
