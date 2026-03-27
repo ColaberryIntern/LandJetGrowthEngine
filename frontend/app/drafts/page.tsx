@@ -179,11 +179,23 @@ export default function DraftsPage() {
       {loading ? (
         <div className="mt-8 text-center text-sm text-gray-400">Loading drafts...</div>
       ) : drafts.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-dashed border-gray-300 p-12 text-center">
-          <p className="text-sm text-gray-500">No drafts pending review</p>
-          <p className="mt-1 text-xs text-gray-400">
-            Run a draft cycle from the Campaigns page to generate new drafts.
+        <div className="mt-16 flex flex-col items-center justify-center text-center">
+          <div className="rounded-full bg-gray-100 p-4">
+            <svg className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5-1.382-.955.568A2.25 2.25 0 0 1 15.56 18l-1.982-1.068a2.25 2.25 0 0 0-2.134 0L9.382 18a2.25 2.25 0 0 1-2.09.045l-.955-.568" />
+            </svg>
+          </div>
+          <p className="mt-4 text-base font-medium text-gray-900">No drafts pending</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Generate drafts to start reviewing AI-written outreach emails.
           </p>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="mt-5 rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {generating ? 'Generating...' : 'Generate Drafts'}
+          </button>
         </div>
       ) : (
         <div className="mt-6 grid gap-6 lg:grid-cols-5">
