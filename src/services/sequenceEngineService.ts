@@ -181,13 +181,8 @@ export async function generateDraftForLead(
   });
 
   // Step 5: Advance lead (+4 days for next step)
-  await advanceLead(campaign.id, lead.id, stepIndex, generated.body);
-
-  // Update campaign_lead metadata with draft reference
-  const currentMeta = (campaignLead.metadata || {}) as Record<string, unknown>;
-  await campaignLead.update({
-    metadata: { ...currentMeta, last_draft_id: draft.id },
-  });
+  // Pass draftId so advanceLead owns ALL metadata updates (prevents stale overwrites)
+  await advanceLead(campaign.id, lead.id, stepIndex, generated.body, draft.id);
 
   return draft;
 }

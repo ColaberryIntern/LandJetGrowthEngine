@@ -21,6 +21,7 @@ export async function advanceLead(
   leadId: number,
   completedStepIndex: number,
   sentEmailBody?: string,
+  draftId?: string,
 ): Promise<void> {
   const campaignLead = await CampaignLead.findOne({
     where: { campaign_id: campaignId, lead_id: leadId },
@@ -66,6 +67,7 @@ export async function advanceLead(
       outreach_step: outreachStep,
       last_approved_at: new Date().toISOString(),
       last_email_sent: sentEmailBody || currentMetadata.last_email_sent,
+      ...(draftId ? { last_draft_id: draftId } : {}),
     },
   });
 
