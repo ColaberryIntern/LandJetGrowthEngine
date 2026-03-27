@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getDrafts, approveDraft, rejectDraft } from '@/lib/api';
+import { getDrafts, approveDraft, rejectDraft, runCycle } from '@/lib/api';
 
 interface DraftLead {
   id: number;
@@ -42,6 +42,8 @@ export default function DraftsPage() {
   const [flash, setFlash] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateMsg, setGenerateMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchDrafts = useCallback(async () => {
     try {
@@ -105,6 +107,27 @@ export default function DraftsPage() {
     }
   }
 
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateMsg(null);
+    try {
+      // run-cycle processes all active CEO intro campaigns regardless of ID
+      const res = await runCycle('_all') as { draftsCreated: number; leadsProcessed: number; errors: string[] };
+      if (res.draftsCreated > 0) {
+        setGenerateMsg({ type: 'success', text: `${res.draftsCreated} new draft${res.draftsCreated > 1 ? 's' : ''} generated` });
+      } else {
+        setGenerateMsg({ type: 'success', text: 'No leads due for drafts right now' });
+      }
+      await fetchDrafts();
+      setTimeout(() => setGenerateMsg(null), 4000);
+    } catch (e) {
+      setGenerateMsg({ type: 'error', text: 'Failed to generate drafts' });
+      setTimeout(() => setGenerateMsg(null), 4000);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   function leadName(d: Draft) {
     if (d.lead) return `${d.lead.first_name} ${d.lead.last_name}`;
     return `Lead #${d.lead_id}`;
@@ -123,10 +146,29 @@ export default function DraftsPage() {
             Review and approve AI-generated outreach
           </p>
         </div>
-        <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700">
-          {drafts.length} pending
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700">
+            {drafts.length} pending
+          </span>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {generating ? 'Generating...' : 'Generate Drafts'}
+          </button>
+        </div>
       </div>
+
+      {generateMsg && (
+        <div className={`mt-3 rounded-md px-4 py-2.5 text-sm font-medium ${
+          generateMsg.type === 'success'
+            ? 'bg-emerald-50 text-emerald-700'
+            : 'bg-red-50 text-red-700'
+        }`}>
+          {generateMsg.text}
+        </div>
+      )}
 
       {error && (
         <div className="mt-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
