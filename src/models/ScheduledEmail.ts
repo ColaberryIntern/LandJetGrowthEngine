@@ -1,7 +1,7 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
 
 export const SCHEDULED_EMAIL_STATUSES = [
-  'pending', 'processing', 'sent', 'failed', 'cancelled', 'paused',
+  'pending', 'processing', 'sent', 'failed', 'cancelled', 'paused', 'draft', 'approved',
 ] as const;
 export type ScheduledEmailStatus = (typeof SCHEDULED_EMAIL_STATUSES)[number];
 
@@ -17,6 +17,16 @@ export interface ScheduledEmailMetadata {
   ai_model?: string;
   step_goal?: string;
   step_number?: number;
+  // CEO Intro Engine (draft mode) fields
+  draft_mode?: boolean;
+  draft_version?: number;
+  polisher_changes?: string[];
+  polisher_quality_score?: number;
+  approved_by?: string;
+  approved_at?: string;
+  rejection_reason?: string;
+  ceo_signature_appended?: boolean;
+  last_email_sent?: string;
 }
 
 export interface ScheduledEmailAttributes {

@@ -19,7 +19,7 @@ export async function claimPendingActions(): Promise<ScheduledEmail[]> {
 
   const actions = await ScheduledEmail.findAll({
     where: {
-      status: 'pending',
+      status: { [Op.in]: ['pending', 'approved'] },
       scheduled_for: { [Op.lte]: now },
     },
     order: [['scheduled_for', 'ASC']],

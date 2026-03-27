@@ -12,6 +12,7 @@ import notificationRoutes from './routes/notifications';
 import leadRoutes from './routes/admin/leadRoutes';
 import campaignRoutes from './routes/admin/campaignRoutes';
 import mandrillWebhook from './routes/webhooks/mandrillWebhook';
+import ceoIntroRoutes from './routes/admin/ceoIntroRoutes';
 
 export function createApp() {
   const app = express();
@@ -56,6 +57,7 @@ export function createApp() {
   app.use('/api/admin/leads', leadRoutes);
   app.use('/api/admin/campaigns', campaignRoutes);
   app.use('/api/webhooks/mandrill', mandrillWebhook);
+  app.use('/api/admin/ceo-intro', ceoIntroRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
