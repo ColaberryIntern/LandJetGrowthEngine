@@ -61,3 +61,48 @@ export function getStats(campaignId?: string) {
 export function getHealth() {
   return request<{ status: string; db: string }>('/health');
 }
+
+// Sequences
+export function createSequence(data: object) {
+  return request<{ sequence: { id: string } }>('/admin/campaigns/sequences', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// CEO Intro Campaigns
+export function createCeoIntroCampaign(data: object) {
+  return request<{ campaign: { id: string; name: string; status: string } }>('/admin/ceo-intro/campaigns', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function approveCampaign(campaignId: string, status: string) {
+  return request(`/admin/campaigns/${campaignId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function linkSequence(campaignId: string, sequenceId: string) {
+  return request(`/admin/campaigns/${campaignId}/link-sequence`, {
+    method: 'POST',
+    body: JSON.stringify({ sequence_id: sequenceId }),
+  });
+}
+
+// Leads
+export function createLead(data: object) {
+  return request<{ lead: { id: number }; scoreBreakdown: object }>('/admin/leads', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function enrollLeads(campaignId: string, leadIds: number[]) {
+  return request<{ enrolled: number; skipped: number }>(`/admin/ceo-intro/campaigns/${campaignId}/enroll`, {
+    method: 'POST',
+    body: JSON.stringify({ lead_ids: leadIds }),
+  });
+}
