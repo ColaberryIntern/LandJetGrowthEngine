@@ -100,6 +100,10 @@ export function createLead(data: object) {
   });
 }
 
+export function getCampaignLeads(campaignId: string) {
+  return request<{ leads: object[]; total: number }>(`/admin/campaigns/${campaignId}/leads?limit=50`);
+}
+
 export function enrollLeads(campaignId: string, leadIds: number[]) {
   return request<{ enrolled: number; skipped: number }>(`/admin/ceo-intro/campaigns/${campaignId}/enroll`, {
     method: 'POST',

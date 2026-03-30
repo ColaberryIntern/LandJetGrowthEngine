@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getStats, runCycle } from '@/lib/api';
+import { getStats, runCycle, getDrafts, getCampaignLeads } from '@/lib/api';
 import Link from 'next/link';
 
 interface Stats {
@@ -13,6 +13,20 @@ interface Stats {
   active_leads: number;
   completed_leads: number;
 }
+
+interface LeadRow {
+  lead_id: number;
+  name: string;
+  company: string;
+  step: number;
+  status: 'active' | 'completed' | 'paused' | 'removed';
+  outreach_step: string;
+  last_action: string;
+  next_action: string;
+  draft_id: string | null;
+}
+
+const STEP_LABELS = ['Intro', 'Follow-up', 'Last Email'];
 
 const SEQUENCE_STEPS = [
   { name: 'Intro', delay: 'Day 0', goal: 'Re-establish connection', tone: 'Warm' },
@@ -25,17 +39,62 @@ export default function CampaignDetailPage() {
   const campaignId = params.id as string;
 
   const [stats, setStats] = useState<Stats | null>(null);
+  const [leads, setLeads] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [approvalMode, setApprovalMode] = useState<'manual' | 'autonomous'>('manual');
+  const [selectedLead, setSelectedLead] = useState<number | null>(null);
 
-  useEffect(() => {
-    getStats(campaignId)
-      .then((res) => setStats(res as Stats))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [campaignId]);
+  async function fetchData() {
+    try {
+      const [statsRes, leadsRes, draftsRes] = await Promise.all([
+        getStats(campaignId),
+        getCampaignLeads(campaignId).catch(() => ({ leads: [], total: 0 })),
+        getDrafts(campaignId).catch(() => ({ drafts: [], total: 0 })),
+      ]);
+      setStats(statsRes as Stats);
+
+      // Build name map from drafts (drafts have enriched lead data)
+      const nameMap = new Map<number, { name: string; company: string }>();
+      for (const d of (draftsRes as any).drafts) {
+        if (d.lead) {
+          nameMap.set(d.lead_id, {
+            name: `${d.lead.first_name} ${d.lead.last_name}`,
+            company: d.lead.company || '—',
+          });
+        }
+      }
+
+      // Draft ID map (most recent per lead)
+      const draftMap = new Map<number, string>();
+      for (const d of (draftsRes as any).drafts) {
+        draftMap.set(d.lead_id, d.id);
+      }
+
+      // Build lead rows from campaign leads
+      const rows: LeadRow[] = ((leadsRes as any).leads || []).map((cl: any) => {
+        const meta = cl.metadata || {};
+        const info = nameMap.get(cl.lead_id) || { name: `Lead #${cl.lead_id}`, company: '—' };
+        return {
+          lead_id: cl.lead_id,
+          name: info.name,
+          company: info.company,
+          step: cl.current_step_index + 1,
+          status: cl.status,
+          outreach_step: meta.outreach_step || '1st_outreach',
+          last_action: cl.last_activity_at ? new Date(cl.last_activity_at).toLocaleDateString() : 'Draft created',
+          next_action: cl.status === 'completed' ? 'Sequence done' :
+            cl.next_action_at ? new Date(cl.next_action_at).toLocaleDateString() : 'Pending approval',
+          draft_id: draftMap.get(cl.lead_id) || null,
+        };
+      });
+      setLeads(rows);
+    } catch {}
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchData(); }, [campaignId]);
 
   async function handleRunCycle() {
     setRunning(true);
@@ -48,9 +107,8 @@ export default function CampaignDetailPage() {
           ? `${res.draftsCreated} new draft${res.draftsCreated > 1 ? 's' : ''} generated`
           : 'No leads due for drafts right now',
       });
-      // Refresh stats
-      const updated = await getStats(campaignId);
-      setStats(updated as Stats);
+      // Refresh all data
+      await fetchData();
       setTimeout(() => setRunMsg(null), 4000);
     } catch {
       setRunMsg({ type: 'error', text: 'Failed to generate drafts' });
@@ -153,6 +211,76 @@ export default function CampaignDetailPage() {
               </Link>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* LEADS TABLE */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">Leads</h2>
+        <div className="mt-3 rounded-lg border border-gray-200 bg-white overflow-hidden">
+          {leads.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">
+              {loading ? 'Loading leads...' : 'No leads enrolled yet'}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-5 py-3">Name</th>
+                  <th className="px-5 py-3">Company</th>
+                  <th className="px-5 py-3">Step</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Last Action</th>
+                  <th className="px-5 py-3">Next</th>
+                  <th className="px-5 py-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map((lead) => (
+                  <tr
+                    key={lead.lead_id}
+                    onClick={() => setSelectedLead(selectedLead === lead.lead_id ? null : lead.lead_id)}
+                    className={`cursor-pointer border-b border-gray-50 transition-colors ${
+                      selectedLead === lead.lead_id ? 'bg-gray-50' : 'hover:bg-gray-50/50'
+                    }`}
+                  >
+                    <td className="px-5 py-3 font-medium text-gray-900">{lead.name}</td>
+                    <td className="px-5 py-3 text-gray-500">{lead.company}</td>
+                    <td className="px-5 py-3">
+                      <span className="text-gray-900">{lead.step}</span>
+                      <span className="text-gray-400">/{SEQUENCE_STEPS.length}</span>
+                      <span className="ml-1 text-xs text-gray-400">
+                        {STEP_LABELS[lead.step - 1] || ''}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                        lead.status === 'active' ? 'bg-blue-100 text-blue-700' :
+                        lead.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                        lead.status === 'paused' ? 'bg-amber-100 text-amber-700' :
+                        'bg-gray-100 text-gray-500'
+                      }`}>
+                        {lead.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-gray-500">{lead.last_action}</td>
+                    <td className="px-5 py-3 text-gray-500">{lead.next_action}</td>
+                    <td className="px-5 py-3">
+                      {lead.draft_id && (
+                        <Link
+                          href="/drafts"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700"
+                        >
+                          View Draft
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </section>
 
