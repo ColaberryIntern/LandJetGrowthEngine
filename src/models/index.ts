@@ -21,6 +21,10 @@ import { initIntelligenceDecisionModel, IntelligenceDecision } from './Intellige
 import { initVisitorModel, Visitor } from './Visitor';
 import { initVisitorSessionModel, VisitorSession } from './VisitorSession';
 import { initPageEventModel, PageEvent } from './PageEvent';
+import { initContactModel, Contact } from './Contact';
+import { initEmailThreadModel, EmailThread } from './EmailThread';
+import { initTopicThreadMapModel, TopicThreadMap } from './TopicThreadMap';
+import { initCommunicationFeedbackModel, CommunicationFeedback } from './CommunicationFeedback';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -45,6 +49,10 @@ export function initModels(sequelize: Sequelize) {
   initVisitorModel(sequelize);
   initVisitorSessionModel(sequelize);
   initPageEventModel(sequelize);
+  initContactModel(sequelize);
+  initEmailThreadModel(sequelize);
+  initTopicThreadMapModel(sequelize);
+  initCommunicationFeedbackModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -54,6 +62,10 @@ export function initModels(sequelize: Sequelize) {
   ScheduledEmail.belongsTo(Campaign, { foreignKey: 'campaign_id', as: 'campaign' });
   CommunicationLog.belongsTo(Lead, { foreignKey: 'lead_id', as: 'lead' });
   InteractionOutcome.belongsTo(Lead, { foreignKey: 'lead_id', as: 'lead' });
+
+  // Communication Intelligence associations
+  TopicThreadMap.hasMany(CommunicationFeedback, { foreignKey: 'topic_thread_map_id', as: 'feedback' });
+  CommunicationFeedback.belongsTo(TopicThreadMap, { foreignKey: 'topic_thread_map_id', as: 'topicMap' });
 }
 
 export {
@@ -64,4 +76,6 @@ export {
   CampaignHealth, CampaignError,
   CampaignVariant, CampaignInsight, IntelligenceDecision,
   Visitor, VisitorSession, PageEvent,
+  Contact,
+  EmailThread, TopicThreadMap, CommunicationFeedback,
 };
