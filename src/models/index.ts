@@ -25,6 +25,7 @@ import { initContactModel, Contact } from './Contact';
 import { initEmailThreadModel, EmailThread } from './EmailThread';
 import { initTopicThreadMapModel, TopicThreadMap } from './TopicThreadMap';
 import { initCommunicationFeedbackModel, CommunicationFeedback } from './CommunicationFeedback';
+import { initUncategorizedRequirementModel, UncategorizedRequirement } from './UncategorizedRequirement';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -53,6 +54,7 @@ export function initModels(sequelize: Sequelize) {
   initEmailThreadModel(sequelize);
   initTopicThreadMapModel(sequelize);
   initCommunicationFeedbackModel(sequelize);
+  initUncategorizedRequirementModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -62,6 +64,9 @@ export function initModels(sequelize: Sequelize) {
   ScheduledEmail.belongsTo(Campaign, { foreignKey: 'campaign_id', as: 'campaign' });
   CommunicationLog.belongsTo(Lead, { foreignKey: 'lead_id', as: 'lead' });
   InteractionOutcome.belongsTo(Lead, { foreignKey: 'lead_id', as: 'lead' });
+
+  // Outreach associations
+  Contact.belongsTo(Campaign, { foreignKey: 'campaign_id', as: 'campaign' });
 
   // Communication Intelligence associations
   TopicThreadMap.hasMany(CommunicationFeedback, { foreignKey: 'topic_thread_map_id', as: 'feedback' });
@@ -78,4 +83,5 @@ export {
   Visitor, VisitorSession, PageEvent,
   Contact,
   EmailThread, TopicThreadMap, CommunicationFeedback,
+  UncategorizedRequirement,
 };
