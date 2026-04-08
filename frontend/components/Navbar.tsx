@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/campaigns', label: 'Campaigns' },
   { href: '/activity', label: 'Activity' },
   { href: '/system', label: 'System' },
+  { href: '/jobs', label: 'Jobs' },
 ];
 
 export default function Navbar() {
