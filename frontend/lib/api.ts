@@ -116,6 +116,12 @@ export function getCampaignById(campaignId: string) {
   return request<{ campaign: any }>(`/admin/campaigns/${campaignId}`);
 }
 
+export function rewriteCampaignPrompts(campaignId: string) {
+  return request<{ campaign_prompt: string; steps: any[] }>(`/admin/outreach/campaigns/${campaignId}/rewrite-prompts`, {
+    method: 'POST',
+  });
+}
+
 export function updateCampaignFields(campaignId: string, updates: object) {
   return request<{ campaign: any }>(`/admin/campaigns/${campaignId}`, {
     method: 'PATCH',

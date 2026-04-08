@@ -67,6 +67,78 @@ router.post('/strategies', authorize('campaigns:write'), async (req: Request, re
   } catch (error) { next(error); }
 });
 
+// --- AI Prompt Rewrite ---
+
+router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const campaignId = req.params.campaignId as string;
+    const campaign = await Campaign.findByPk(campaignId);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const variables = (campaign.settings as any)?.variables || {};
+    const varList = Object.entries(variables).map(([k, v]) => `{{${k}}} = "${v}"`).join('\n');
+    const currentPrompt = campaign.ai_system_prompt || '';
+    const currentSteps = campaign.sequence_steps || [];
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured' });
+
+    const systemInstruction = `You are rewriting outreach email prompts for a campaign. You will be given the current campaign prompt, the current sequence step prompts, and a list of available variables with their values.
+
+Your job:
+1. Rewrite the campaign prompt to incorporate ALL available variables naturally using {{variable_name}} syntax
+2. Rewrite each sequence step prompt to use the variables appropriately
+3. Step 1 should be an initial outreach (warm, direct)
+4. Step 2 should be a follow-up with added value (reference proof points)
+5. Step 3 should be a graceful final touch (brief, leave door open)
+6. Keep the existing tone and structure but make sure every relevant variable is used
+7. Do NOT invent new variables. Only use the ones provided.
+8. Return JSON with "campaign_prompt" (string) and "steps" (array of {step, delay_days, prompt})
+
+Important: Keep prompts concise. Campaign prompt under 200 words. Step 1 under 100 words. Step 2 under 80 words. Step 3 under 70 words.`;
+
+    const userContent = `AVAILABLE VARIABLES:\n${varList}\n\nCURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: userContent },
+        ],
+        temperature: 0.5,
+        max_tokens: 2048,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+    if (!response.ok) return res.status(500).json({ error: 'AI request failed' });
+
+    const data = (await response.json()) as any;
+    const raw = (data.choices?.[0]?.message?.content || '').trim();
+    const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    // Update campaign
+    campaign.ai_system_prompt = parsed.campaign_prompt;
+    campaign.sequence_steps = parsed.steps;
+    await campaign.save();
+
+    res.json({
+      campaign_prompt: parsed.campaign_prompt,
+      steps: parsed.steps,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- Email Validation ---
 
 router.post('/validate-email', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {

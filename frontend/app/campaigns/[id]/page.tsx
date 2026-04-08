@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV } from '@/lib/api';
+import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV, rewriteCampaignPrompts } from '@/lib/api';
 
 type Tab = 'overview' | 'leads' | 'strategy' | 'settings';
 
@@ -151,45 +151,145 @@ export default function CampaignDetailPage() {
 
       <div className="mt-4">
         {/* OVERVIEW TAB */}
-        {tab === 'overview' && analytics && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {[
-                { label: 'Total', value: analytics.total_contacts },
-                { label: 'Active', value: analytics.active },
-                { label: 'Completed', value: analytics.completed },
-                { label: 'Never Contacted', value: analytics.never_contacted },
-              ].map(m => (
-                <div key={m.label} className="rounded-lg border border-gray-200 bg-white p-4">
-                  <p className="text-xs text-gray-400">{m.label}</p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">{m.value}</p>
+        {tab === 'overview' && analytics && (() => {
+          const total = analytics.total_contacts || 0;
+          const active = analytics.active || 0;
+          const completed = analytics.completed || 0;
+          const contacted = analytics.contacted || 0;
+          const neverContacted = analytics.never_contacted || 0;
+          const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const contactedPct = total > 0 ? Math.round((contacted / total) * 100) : 0;
+          const stages = Object.entries(analytics.by_stage || {}).sort(([a], [b]) => Number(a) - Number(b));
+          const verticals = Object.entries(analytics.by_vertical || {}).sort(([, a], [, b]) => (b as number) - (a as number));
+          const stageLabels: Record<string, string> = { '1': 'Initial Outreach', '2': 'Follow-up', '3': 'Final Touch', '4': 'Completed' };
+
+          return (
+            <div className="space-y-6">
+              {/* Hero Metrics */}
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Leads</p>
+                  <p className="mt-2 text-3xl font-bold text-gray-900">{total.toLocaleString()}</p>
                 </div>
-              ))}
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5">
+                  <p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Active</p>
+                  <p className="mt-2 text-3xl font-bold text-emerald-700">{active.toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-emerald-500">Ready for outreach</p>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-5">
+                  <p className="text-xs font-medium text-blue-600 uppercase tracking-wider">Contacted</p>
+                  <p className="mt-2 text-3xl font-bold text-blue-700">{contacted.toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-blue-500">{contactedPct}% of total</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-5">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Completed</p>
+                  <p className="mt-2 text-3xl font-bold text-gray-600">{completed.toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-gray-400">{progressPct}% done</p>
+                </div>
+              </div>
+
+              {/* Progress Section */}
+              <div className="rounded-lg border border-gray-200 bg-white p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-700">Campaign Progress</p>
+                  <span className="text-sm font-medium text-gray-500">{progressPct}% complete</span>
+                </div>
+                <div className="mt-3 h-3 rounded-full bg-gray-100">
+                  <div className="h-3 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.max(progressPct, 1)}%` }} />
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-gray-400">
+                  <span>{neverContacted.toLocaleString()} never contacted</span>
+                  <span>{contacted.toLocaleString()} contacted</span>
+                  <span>{completed.toLocaleString()} completed</span>
+                </div>
+              </div>
+
+              {/* Pipeline / Stages */}
+              {stages.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-4">Pipeline Stages</p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {stages.map(([stage, count]) => {
+                      const stagePct = total > 0 ? Math.round(((count as number) / total) * 100) : 0;
+                      const colors: Record<string, string> = {
+                        '1': 'bg-blue-500', '2': 'bg-amber-500', '3': 'bg-purple-500', '4': 'bg-emerald-500'
+                      };
+                      return (
+                        <div key={stage} className="rounded-lg bg-gray-50 p-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-xs text-gray-400">Stage {stage}</p>
+                              <p className="text-sm font-medium text-gray-700">{stageLabels[stage] || `Stage ${stage}`}</p>
+                            </div>
+                            <span className="text-lg font-bold text-gray-900">{(count as number).toLocaleString()}</span>
+                          </div>
+                          <div className="mt-2 h-1.5 rounded-full bg-gray-200">
+                            <div className={`h-1.5 rounded-full ${colors[stage] || 'bg-gray-400'}`} style={{ width: `${stagePct}%` }} />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-400">{stagePct}%</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Verticals */}
+              {verticals.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-4">By Vertical</p>
+                  <div className="space-y-3">
+                    {verticals.map(([v, count]) => {
+                      const vPct = total > 0 ? Math.round(((count as number) / total) * 100) : 0;
+                      return (
+                        <div key={v}>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium text-gray-700">{v}</span>
+                            <span className="text-gray-500">{(count as number).toLocaleString()} ({vPct}%)</span>
+                          </div>
+                          <div className="mt-1 h-2 rounded-full bg-gray-100">
+                            <div className="h-2 rounded-full bg-blue-400" style={{ width: `${vPct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Campaign Info */}
+              {!isVirtual && campaign && (
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Campaign Details</p>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-400">Sender</p>
+                      <p className="font-medium text-gray-700">{campaign.settings?.sender_name || 'Not set'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Role</p>
+                      <p className="font-medium text-gray-700">{campaign.settings?.sender_role || 'Not set'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Emails/Day</p>
+                      <p className="font-medium text-gray-700">{campaign.channel_config?.email?.daily_limit || 20}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">AI Drafts</p>
+                      <p className="font-medium text-gray-700">{campaign.settings?.ai_drafts_enabled !== false ? 'Enabled' : 'Disabled'}</p>
+                    </div>
+                  </div>
+                  {campaign.ai_system_prompt && (
+                    <div className="mt-4">
+                      <p className="text-gray-400 text-xs">AI Prompt</p>
+                      <p className="mt-1 text-sm text-gray-600 bg-gray-50 rounded-md p-3">{campaign.ai_system_prompt}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-
-            {Object.keys(analytics.by_stage).length > 0 && (
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">By Stage</p>
-                <div className="mt-2 flex gap-4">
-                  {Object.entries(analytics.by_stage).sort().map(([stage, count]) => (
-                    <div key={stage} className="text-sm"><span className="font-medium text-gray-900">Stage {stage}:</span> <span className="text-gray-500">{count as number}</span></div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {Object.keys(analytics.by_vertical).length > 0 && (
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">By Vertical</p>
-                <div className="mt-2 flex gap-4 flex-wrap">
-                  {Object.entries(analytics.by_vertical).sort((a, b) => (b[1] as number) - (a[1] as number)).map(([v, count]) => (
-                    <div key={v} className="text-sm"><span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">{v}</span> <span className="text-gray-500">{count as number}</span></div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* LEADS TAB */}
         {tab === 'leads' && (
@@ -380,8 +480,110 @@ export default function CampaignDetailPage() {
                 {saving === 'config' ? 'Saving...' : 'Save'}
               </button>
             </div>
+
+            {/* Variables Editor */}
+            <VariablesEditor campaign={campaign} campaignId={id} onSave={(vars: Record<string, string>) => saveField('variables', { settings: { ...(campaign?.settings || {}), variables: vars } })} saving={saving === 'variables'} flash={flash === 'variables'} onPromptsRewritten={(newPrompt: string, newSteps: any[]) => { setPrompt(newPrompt); setSteps(newSteps); setCampaign((prev: any) => ({ ...prev, ai_system_prompt: newPrompt, sequence_steps: newSteps })); }} />
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function VariablesEditor({ campaign, campaignId, onSave, saving, flash, onPromptsRewritten }: { campaign: any; campaignId: string; onSave: (vars: Record<string, string>) => void; saving: boolean; flash: boolean; onPromptsRewritten: (prompt: string, steps: any[]) => void }) {
+  const currentVars = campaign?.settings?.variables || {};
+  const [vars, setVars] = useState<Record<string, string>>(currentVars);
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteFlash, setRewriteFlash] = useState(false);
+
+  useEffect(() => {
+    setVars(campaign?.settings?.variables || {});
+  }, [campaign]);
+
+  function handleUpdate(key: string, value: string) {
+    setVars(prev => ({ ...prev, [key]: value }));
+  }
+
+  function handleDelete(key: string) {
+    setVars(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function handleAdd() {
+    if (!newKey.trim()) return;
+    setVars(prev => ({ ...prev, [newKey.trim()]: newValue }));
+    setNewKey('');
+    setNewValue('');
+  }
+
+  const entries = Object.entries(vars);
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Prompt Variables</p>
+          <p className="mt-1 text-xs text-gray-400">Use <code className="bg-gray-100 px-1 rounded">{'{{variable_name}}'}</code> in prompts to insert these values</p>
+        </div>
+        {flash && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Saved</span>}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {entries.map(([key, value]) => (
+          <div key={key} className="flex items-start gap-2">
+            <code className="mt-1.5 shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 font-mono">{`{{${key}}}`}</code>
+            <input
+              type="text"
+              value={value}
+              onChange={e => handleUpdate(key, e.target.value)}
+              className="flex-1 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+            />
+            <button onClick={() => handleDelete(key)} className="mt-0.5 text-xs text-gray-400 hover:text-red-500 px-1">x</button>
+          </div>
+        ))}
+
+        {entries.length === 0 && (
+          <p className="text-sm text-gray-400 italic">No variables set</p>
+        )}
+      </div>
+
+      {/* Add new variable */}
+      <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3">
+        <input value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="variable_name"
+          className="w-40 rounded-md border border-gray-200 px-2 py-1 text-xs font-mono text-gray-600 focus:border-gray-400 focus:outline-none" />
+        <input value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="value"
+          className="flex-1 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700 focus:border-gray-400 focus:outline-none" />
+        <button onClick={handleAdd} disabled={!newKey.trim()}
+          className="rounded-md bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-50">Add</button>
+      </div>
+
+      <div className="mt-3 flex items-center gap-3">
+        <button onClick={() => onSave(vars)} disabled={saving}
+          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save Variables'}
+        </button>
+        <button onClick={async () => {
+          setRewriting(true);
+          try {
+            // Save variables first, then rewrite
+            onSave(vars);
+            await new Promise(r => setTimeout(r, 1000));
+            const result = await rewriteCampaignPrompts(campaignId);
+            onPromptsRewritten(result.campaign_prompt, result.steps);
+            setRewriteFlash(true);
+            setTimeout(() => setRewriteFlash(false), 3000);
+          } catch {}
+          setRewriting(false);
+        }} disabled={rewriting}
+          className="rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">
+          {rewriting ? 'Rewriting prompts...' : 'Rewrite Prompts with AI'}
+        </button>
+        {rewriteFlash && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Prompts updated! Check Strategy tab.</span>}
       </div>
     </div>
   );

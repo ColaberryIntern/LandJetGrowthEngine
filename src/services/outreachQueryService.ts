@@ -9,6 +9,43 @@ import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 
+// --- Variable Interpolation ---
+
+/**
+ * Replace {{variable_name}} placeholders with values from a variables map.
+ */
+export function interpolateVariables(template: string, variables: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => variables[key] || match);
+}
+
+/**
+ * Get global variables shared across all campaigns.
+ */
+export async function getGlobalVariables(): Promise<Record<string, string>> {
+  try {
+    const row = await SystemSetting.findByPk('outreach.global_variables');
+    if (row) return row.value as any;
+  } catch {}
+  return {};
+}
+
+/**
+ * Merge global + campaign + lead variables into a single map.
+ */
+export async function mergeVariables(lead: Lead, campaign?: any): Promise<Record<string, string>> {
+  const globalVars = await getGlobalVariables();
+  const campaignVars = campaign?.settings?.variables || {};
+  const leadVars: Record<string, string> = {
+    first_name: lead.first_name || '',
+    last_name: lead.last_name || '',
+    company: lead.company || '',
+    email: lead.email || '',
+    title: lead.title || '',
+    vertical: lead.vertical || '',
+  };
+  return { ...globalVars, ...campaignVars, ...leadVars };
+}
+
 // --- Settings (global defaults, overridden by campaign settings) ---
 
 export interface OutreachSettings {
@@ -181,11 +218,15 @@ function getPromptForLead(lead: Lead): string {
 
 export async function generateDraft(lead: Lead, campaignPrompt?: string | null): Promise<EmailDraft> {
   const name = lead.first_name || lead.email;
-  const prompt = campaignPrompt || getPromptForLead(lead);
+  const rawPrompt = campaignPrompt || getPromptForLead(lead);
   const context = getMessageContext(lead);
 
   const campaignSettings = lead.campaign?.settings as any;
   const globalSettings = await getOutreachSettings();
+
+  // Merge all variables and interpolate the prompt
+  const vars = await mergeVariables(lead, lead.campaign);
+  const prompt = interpolateVariables(rawPrompt, vars);
 
   const senderName = campaignSettings?.sender_name || globalSettings.sender_name;
   const senderRole = campaignSettings?.sender_role || globalSettings.sender_role;
