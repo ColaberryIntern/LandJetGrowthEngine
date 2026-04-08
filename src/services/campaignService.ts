@@ -58,7 +58,7 @@ export async function updateCampaign(id: string, updates: Partial<CampaignCreati
   if (!campaign) throw new NotFoundError('Campaign not found');
 
   if (campaign.approval_status === 'live' || campaign.approval_status === 'completed') {
-    const allowedFields = ['settings', 'ai_system_prompt', 'goals', 'gtm_notes'];
+    const allowedFields = ['settings', 'ai_system_prompt', 'goals', 'gtm_notes', 'sequence_steps', 'channel_config'];
     const attemptedFields = Object.keys(updates);
     const disallowed = attemptedFields.filter((f) => !allowedFields.includes(f));
     if (disallowed.length > 0) {

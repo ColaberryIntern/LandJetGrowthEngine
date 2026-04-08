@@ -62,6 +62,22 @@ router.patch('/:id', authorize('campaigns:write'), async (req: Request, res: Res
   } catch (error) { next(error); }
 });
 
+router.post('/:id/prompt', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ai_system_prompt } = req.body;
+    if (!ai_system_prompt || !ai_system_prompt.trim()) {
+      return res.status(400).json({ error: 'Prompt cannot be empty' });
+    }
+    const campaign = await updateCampaign(req.params.id as string, { ai_system_prompt: ai_system_prompt.trim() });
+    await createAuditLog({
+      userId: req.user!.userId, action: 'campaign.update_prompt',
+      entityType: 'campaign', entityId: campaign.id,
+      newValue: { ai_system_prompt: ai_system_prompt.trim() }, ipAddress: req.ip || null,
+    });
+    res.json({ campaign });
+  } catch (error) { next(error); }
+});
+
 router.post('/:id/approve', authorize('campaigns:approve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status } = req.body;

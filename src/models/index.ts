@@ -67,6 +67,7 @@ export function initModels(sequelize: Sequelize) {
 
   // Outreach associations
   Contact.belongsTo(Campaign, { foreignKey: 'campaign_id', as: 'campaign' });
+  Lead.belongsTo(Campaign, { foreignKey: 'campaign_id', as: 'outreachCampaign' });
 
   // Communication Intelligence associations
   TopicThreadMap.hasMany(CommunicationFeedback, { foreignKey: 'topic_thread_map_id', as: 'feedback' });

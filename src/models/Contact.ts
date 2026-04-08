@@ -14,12 +14,13 @@ export interface ContactAttributes {
   priority_score: number;
   vertical: string | null;
   tier: number | null;
+  campaign_id: string | null;
   created_at?: Date;
   updated_at?: Date;
 }
 
 export interface ContactCreationAttributes
-  extends Omit<ContactAttributes, 'id' | 'created_at' | 'updated_at' | 'sequence_stage' | 'relationship_type' | 'status' | 'priority_score' | 'vertical' | 'tier'> {
+  extends Omit<ContactAttributes, 'id' | 'created_at' | 'updated_at' | 'sequence_stage' | 'relationship_type' | 'status' | 'priority_score' | 'vertical' | 'tier' | 'campaign_id'> {
   id?: string;
   sequence_stage?: number;
   relationship_type?: string;
@@ -27,6 +28,7 @@ export interface ContactCreationAttributes
   priority_score?: number;
   vertical?: string | null;
   tier?: number | null;
+  campaign_id?: string | null;
 }
 
 export class Contact
@@ -46,6 +48,8 @@ export class Contact
   declare priority_score: number;
   declare vertical: string | null;
   declare tier: number | null;
+  declare campaign_id: string | null;
+  declare campaign?: { id: string; name: string; ai_system_prompt: string | null; settings: any; sequence_steps: any[] | null };
   declare created_at: Date;
   declare updated_at: Date;
 }
@@ -111,6 +115,11 @@ export function initContactModel(sequelize: Sequelize): typeof Contact {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      campaign_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: { model: 'campaigns', key: 'id' },
+      },
       created_at: {
         type: DataTypes.DATE,
         allowNull: false,
@@ -134,6 +143,7 @@ export function initContactModel(sequelize: Sequelize): typeof Contact {
         { fields: ['priority_score'] },
         { fields: ['vertical'] },
         { fields: ['tier'] },
+        { fields: ['campaign_id'] },
       ],
     },
   );

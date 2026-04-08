@@ -49,6 +49,15 @@ export interface CampaignSettings {
   auto_dnc_on_request?: boolean;
   sender_email?: string;
   sender_name?: string;
+  sender_role?: string;
+  ai_drafts_enabled?: boolean;
+  follow_up_delay_days?: number;
+}
+
+export interface SequenceStep {
+  step: number;
+  delay_days: number;
+  prompt: string;
 }
 
 export interface CampaignAttributes {
@@ -63,6 +72,7 @@ export interface CampaignAttributes {
   channel_config: ChannelConfig | null;
   ai_system_prompt: string | null;
   settings: CampaignSettings | null;
+  sequence_steps: SequenceStep[] | null;
   budget_total: number | null;
   budget_spent: number | null;
   budget_cap: number | null;
@@ -83,7 +93,8 @@ export interface CampaignAttributes {
 }
 
 export interface CampaignCreationAttributes
-  extends Omit<CampaignAttributes, 'id' | 'created_at' | 'updated_at' | 'budget_spent' | 'qa_status' | 'approval_status' | 'approved_by' | 'approved_at' | 'ramp_state' | 'evolution_config'> {
+  extends Omit<CampaignAttributes, 'id' | 'created_at' | 'updated_at' | 'budget_spent' | 'qa_status' | 'approval_status' | 'approved_by' | 'approved_at' | 'ramp_state' | 'evolution_config' | 'sequence_steps'> {
+  sequence_steps?: SequenceStep[] | null;
   id?: string;
   budget_spent?: number | null;
   qa_status?: 'untested' | 'passed' | 'failed';
@@ -109,6 +120,7 @@ export class Campaign
   declare channel_config: ChannelConfig | null;
   declare ai_system_prompt: string | null;
   declare settings: CampaignSettings | null;
+  declare sequence_steps: SequenceStep[] | null;
   declare budget_total: number | null;
   declare budget_spent: number | null;
   declare budget_cap: number | null;
@@ -142,6 +154,7 @@ export function initCampaignModel(sequelize: Sequelize): typeof Campaign {
       channel_config: { type: DataTypes.JSONB, allowNull: true },
       ai_system_prompt: { type: DataTypes.TEXT, allowNull: true },
       settings: { type: DataTypes.JSONB, allowNull: true },
+      sequence_steps: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },
       budget_total: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
       budget_spent: { type: DataTypes.DECIMAL(12, 2), allowNull: true, defaultValue: 0 },
       budget_cap: { type: DataTypes.DECIMAL(12, 2), allowNull: true },

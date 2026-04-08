@@ -44,14 +44,30 @@ export interface LeadAttributes {
   technology_stack: string[] | null;
   utm_source: string | null;
   interest_area: string | null;
+  vertical: string | null;
+  tier: number | null;
+  sequence_stage: number;
+  last_contacted_at: Date | null;
+  next_action_at: Date | null;
+  priority_score: number;
+  outreach_status: string;
+  campaign_id: string | null;
   status: 'active' | 'inactive' | 'archived';
   created_at?: Date;
   updated_at?: Date;
 }
 
 export interface LeadCreationAttributes
-  extends Omit<LeadAttributes, 'id' | 'created_at' | 'updated_at' | 'lead_score'> {
+  extends Omit<LeadAttributes, 'id' | 'created_at' | 'updated_at' | 'lead_score' | 'vertical' | 'tier' | 'sequence_stage' | 'last_contacted_at' | 'next_action_at' | 'priority_score' | 'outreach_status' | 'campaign_id'> {
   lead_score?: number;
+  vertical?: string | null;
+  tier?: number | null;
+  sequence_stage?: number;
+  last_contacted_at?: Date | null;
+  next_action_at?: Date | null;
+  priority_score?: number;
+  outreach_status?: string;
+  campaign_id?: string | null;
 }
 
 export class Lead
@@ -79,6 +95,15 @@ export class Lead
   declare technology_stack: string[] | null;
   declare utm_source: string | null;
   declare interest_area: string | null;
+  declare vertical: string | null;
+  declare tier: number | null;
+  declare sequence_stage: number;
+  declare last_contacted_at: Date | null;
+  declare next_action_at: Date | null;
+  declare priority_score: number;
+  declare outreach_status: string;
+  declare campaign_id: string | null;
+  declare campaign?: any;
   declare status: 'active' | 'inactive' | 'archived';
   declare created_at: Date;
   declare updated_at: Date;
@@ -175,6 +200,42 @@ export function initLeadModel(sequelize: Sequelize): typeof Lead {
       interest_area: {
         type: DataTypes.STRING(255),
         allowNull: true,
+      },
+      vertical: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
+      tier: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      sequence_stage: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 1,
+      },
+      last_contacted_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      next_action_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      priority_score: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
+      outreach_status: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        defaultValue: 'ACTIVE',
+      },
+      campaign_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: { model: 'campaigns', key: 'id' },
       },
       status: {
         type: DataTypes.ENUM('active', 'inactive', 'archived'),
