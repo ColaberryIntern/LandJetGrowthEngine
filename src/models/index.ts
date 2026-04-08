@@ -29,6 +29,7 @@ import { initUncategorizedRequirementModel, UncategorizedRequirement } from './U
 import { initJobExecutionModel, JobExecution } from './JobExecution';
 import { initSecurityIncidentModel, SecurityIncident } from './SecurityIncident';
 import { initAcquisitionStrategyModel, AcquisitionStrategy } from './AcquisitionStrategy';
+import { initDeploymentModel, Deployment } from './Deployment';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -61,6 +62,7 @@ export function initModels(sequelize: Sequelize) {
   initJobExecutionModel(sequelize);
   initSecurityIncidentModel(sequelize);
   initAcquisitionStrategyModel(sequelize);
+  initDeploymentModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -94,4 +96,5 @@ export {
   JobExecution,
   SecurityIncident,
   AcquisitionStrategy,
+  Deployment,
 };

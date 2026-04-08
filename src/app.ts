@@ -22,6 +22,7 @@ import loggingMonitoringRoutes from './routes/admin/loggingMonitoringRoutes';
 import errorTrackingRoutes from './routes/admin/errorTrackingRoutes';
 import incidentResponseRoutes from './routes/admin/incidentResponseRoutes';
 import acquisitionStrategyRoutes from './routes/admin/acquisitionStrategyRoutes';
+import deploymentRoutes from './routes/admin/deploymentRoutes';
 
 export function createApp() {
   const app = express();
@@ -76,6 +77,7 @@ export function createApp() {
   app.use('/api/admin/errors', errorTrackingRoutes);
   app.use('/api/admin/incidents', incidentResponseRoutes);
   app.use('/api/admin/acquisition-strategies', acquisitionStrategyRoutes);
+  app.use('/api/admin/deployments', deploymentRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
