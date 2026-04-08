@@ -26,6 +26,7 @@ import { initEmailThreadModel, EmailThread } from './EmailThread';
 import { initTopicThreadMapModel, TopicThreadMap } from './TopicThreadMap';
 import { initCommunicationFeedbackModel, CommunicationFeedback } from './CommunicationFeedback';
 import { initUncategorizedRequirementModel, UncategorizedRequirement } from './UncategorizedRequirement';
+import { initJobExecutionModel, JobExecution } from './JobExecution';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -55,6 +56,7 @@ export function initModels(sequelize: Sequelize) {
   initTopicThreadMapModel(sequelize);
   initCommunicationFeedbackModel(sequelize);
   initUncategorizedRequirementModel(sequelize);
+  initJobExecutionModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -85,4 +87,5 @@ export {
   Contact,
   EmailThread, TopicThreadMap, CommunicationFeedback,
   UncategorizedRequirement,
+  JobExecution,
 };

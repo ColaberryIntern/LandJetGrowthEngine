@@ -16,6 +16,7 @@ import ceoIntroRoutes from './routes/admin/ceoIntroRoutes';
 import communicationRoutes from './routes/admin/communicationRoutes';
 import outreachRoutes from './routes/admin/outreachRoutes';
 import uncategorizedRequirementsRoutes from './routes/admin/uncategorizedRequirementsRoutes';
+import jobManagementRoutes from './routes/admin/jobManagementRoutes';
 
 export function createApp() {
   const app = express();
@@ -64,6 +65,7 @@ export function createApp() {
   app.use('/api/admin/communication', communicationRoutes);
   app.use('/api/admin/outreach', outreachRoutes);
   app.use('/api/admin/uncategorized-requirements', uncategorizedRequirementsRoutes);
+  app.use('/api/admin/jobs', jobManagementRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
