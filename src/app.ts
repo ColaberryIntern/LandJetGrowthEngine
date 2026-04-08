@@ -20,6 +20,7 @@ import jobManagementRoutes from './routes/admin/jobManagementRoutes';
 import userManagementRoutes from './routes/admin/userManagementRoutes';
 import loggingMonitoringRoutes from './routes/admin/loggingMonitoringRoutes';
 import errorTrackingRoutes from './routes/admin/errorTrackingRoutes';
+import incidentResponseRoutes from './routes/admin/incidentResponseRoutes';
 
 export function createApp() {
   const app = express();
@@ -72,6 +73,7 @@ export function createApp() {
   app.use('/api/admin/user-management', userManagementRoutes);
   app.use('/api/admin/audit-logs', loggingMonitoringRoutes);
   app.use('/api/admin/errors', errorTrackingRoutes);
+  app.use('/api/admin/incidents', incidentResponseRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
