@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
+  { href: '/outreach', label: 'Outreach' },
   { href: '/campaigns', label: 'Campaigns' },
-  { href: '/drafts', label: 'Drafts' },
   { href: '/activity', label: 'Activity' },
+  { href: '/system', label: 'System' },
 ];
 
 export default function Navbar() {
