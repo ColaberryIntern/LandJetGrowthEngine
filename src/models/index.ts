@@ -30,6 +30,7 @@ import { initJobExecutionModel, JobExecution } from './JobExecution';
 import { initSecurityIncidentModel, SecurityIncident } from './SecurityIncident';
 import { initAcquisitionStrategyModel, AcquisitionStrategy } from './AcquisitionStrategy';
 import { initDeploymentModel, Deployment } from './Deployment';
+import { initPerformanceMetricModel, PerformanceMetric } from './PerformanceMetric';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -63,6 +64,7 @@ export function initModels(sequelize: Sequelize) {
   initSecurityIncidentModel(sequelize);
   initAcquisitionStrategyModel(sequelize);
   initDeploymentModel(sequelize);
+  initPerformanceMetricModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -97,4 +99,5 @@ export {
   SecurityIncident,
   AcquisitionStrategy,
   Deployment,
+  PerformanceMetric,
 };
