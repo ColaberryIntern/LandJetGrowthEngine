@@ -25,6 +25,7 @@ import acquisitionStrategyRoutes from './routes/admin/acquisitionStrategyRoutes'
 import deploymentRoutes from './routes/admin/deploymentRoutes';
 import performanceRoutes from './routes/admin/performanceRoutes';
 import apiIntegrationRoutes from './routes/admin/apiIntegrationRoutes';
+import cohortAnalyticsRoutes from './routes/admin/cohortAnalyticsRoutes';
 
 export function createApp() {
   const app = express();
@@ -82,6 +83,7 @@ export function createApp() {
   app.use('/api/admin/deployments', deploymentRoutes);
   app.use('/api/admin/performance', performanceRoutes);
   app.use('/api/admin/integrations', apiIntegrationRoutes);
+  app.use('/api/admin/analytics', cohortAnalyticsRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
