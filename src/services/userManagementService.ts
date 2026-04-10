@@ -52,7 +52,7 @@ export async function getUserDetail(id: string) {
 }
 
 export async function updateUserRole(id: string, newRole: string, adminId: string) {
-  const validRoles = ['admin', 'manager', 'user'];
+  const validRoles = ['admin', 'manager', 'user', 'viewer'];
   if (!validRoles.includes(newRole)) {
     throw new ValidationError(`Invalid role: ${newRole}. Valid: ${validRoles.join(', ')}`);
   }
@@ -65,7 +65,7 @@ export async function updateUserRole(id: string, newRole: string, adminId: strin
   }
 
   const oldRole = user.role;
-  await user.update({ role: newRole });
+  await user.update({ role: newRole as any });
 
   logger.info('User role updated', { userId: id, oldRole, newRole, by: adminId });
   return user;
@@ -84,7 +84,7 @@ export async function updateUserStatus(id: string, newStatus: string, adminId: s
     throw new ValidationError('Cannot deactivate your own account');
   }
 
-  await user.update({ status: newStatus });
+  await user.update({ status: newStatus as any });
 
   logger.info('User status updated', { userId: id, newStatus, by: adminId });
   return user;

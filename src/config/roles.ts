@@ -25,6 +25,10 @@ export const ROLES: Record<string, RoleDefinition> = {
     name: 'user',
     permissions: ['leads:read', 'campaigns:read', 'analytics:read', 'notifications:read'],
   },
+  viewer: {
+    name: 'viewer',
+    permissions: ['campaigns:read', 'analytics:read'],
+  },
 };
 
 export function hasPermission(role: string, requiredPermission: string): boolean {
