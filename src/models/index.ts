@@ -34,6 +34,7 @@ import { initPerformanceMetricModel, PerformanceMetric } from './PerformanceMetr
 import { initApiIntegrationModel, ApiIntegration } from './ApiIntegration';
 import { initUserFeedbackModel, UserFeedback } from './UserFeedback';
 import { initUserConsentModel, UserConsent } from './UserConsent';
+import { initEtlPipelineModel, EtlPipeline } from './EtlPipeline';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -71,6 +72,7 @@ export function initModels(sequelize: Sequelize) {
   initApiIntegrationModel(sequelize);
   initUserFeedbackModel(sequelize);
   initUserConsentModel(sequelize);
+  initEtlPipelineModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -108,4 +110,5 @@ export {
   PerformanceMetric,
   ApiIntegration,
   UserFeedback, UserConsent,
+  EtlPipeline,
 };
