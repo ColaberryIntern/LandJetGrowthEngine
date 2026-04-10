@@ -31,6 +31,7 @@ import visitorAnalyticsRoutes from './routes/admin/visitorAnalyticsRoutes';
 import feedbackRoutes from './routes/admin/feedbackRoutes';
 import dataProcessingRoutes from './routes/admin/dataProcessingRoutes';
 import capacityRoutes from './routes/admin/capacityRoutes';
+import securityAuditRoutes from './routes/admin/securityAuditRoutes';
 
 export function createApp() {
   const app = express();
@@ -94,6 +95,7 @@ export function createApp() {
   app.use('/api/admin/feedback', feedbackRoutes);
   app.use('/api/admin/etl', dataProcessingRoutes);
   app.use('/api/admin/capacity', capacityRoutes);
+  app.use('/api/admin/security-audit', securityAuditRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
