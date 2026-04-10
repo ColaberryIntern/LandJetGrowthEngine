@@ -27,6 +27,7 @@ import performanceRoutes from './routes/admin/performanceRoutes';
 import apiIntegrationRoutes from './routes/admin/apiIntegrationRoutes';
 import cohortAnalyticsRoutes from './routes/admin/cohortAnalyticsRoutes';
 import roleManagementRoutes from './routes/admin/roleManagementRoutes';
+import visitorAnalyticsRoutes from './routes/admin/visitorAnalyticsRoutes';
 
 export function createApp() {
   const app = express();
@@ -86,6 +87,7 @@ export function createApp() {
   app.use('/api/admin/integrations', apiIntegrationRoutes);
   app.use('/api/admin/analytics', cohortAnalyticsRoutes);
   app.use('/api/admin/roles', roleManagementRoutes);
+  app.use('/api/admin/visitors', visitorAnalyticsRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
