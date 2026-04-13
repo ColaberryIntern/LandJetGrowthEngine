@@ -24,7 +24,7 @@ router.get('/audit', authorize('campaigns:read'), async (_req, res: Response, ne
 // Get specific role detail
 router.get('/:name', authorize('campaigns:read'), async (req, res: Response, next: NextFunction) => {
   try {
-    const role = getRoleDetail(req.params.name);
+    const role = getRoleDetail(req.params.name as string);
     if (!role) return res.status(404).json({ error: 'Role not found' });
     res.json({ role });
   } catch (e) { next(e); }
