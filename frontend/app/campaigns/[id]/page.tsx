@@ -29,8 +29,9 @@ export default function CampaignDetailPage() {
   const [senderName, setSenderName] = useState('Ryan Landry');
   const [senderRole, setSenderRole] = useState('CEO, LandJet');
   const [senderEmail, setSenderEmail] = useState('rmlandry29@gmail.com');
-  const [emailsPerDay, setEmailsPerDay] = useState(20);
+  const [emailsPerDay, setEmailsPerDay] = useState(5);
   const [followUpDelay, setFollowUpDelay] = useState(4);
+  const [campaignPriority, setCampaignPriority] = useState(50);
   const [aiDrafts, setAiDrafts] = useState(true);
 
   // Leads state
@@ -63,9 +64,10 @@ export default function CampaignDetailPage() {
           setSenderName(c.settings?.sender_name || 'Ryan Landry');
           setSenderRole(c.settings?.sender_role || 'CEO, LandJet');
           setSenderEmail(c.settings?.sender_email || 'rmlandry29@gmail.com');
-          setEmailsPerDay(c.channel_config?.email?.daily_limit || 20);
+          setEmailsPerDay(c.channel_config?.email?.daily_limit || 5);
           setFollowUpDelay(c.settings?.follow_up_delay_days || 4);
           setAiDrafts(c.settings?.ai_drafts_enabled ?? true);
+          setCampaignPriority(c.settings?.priority || 50);
         }
       } catch {}
       setLoading(false);
@@ -407,24 +409,48 @@ export default function CampaignDetailPage() {
               </div>
               <div className="mt-3 space-y-4">
                 {(steps.length > 0 ? steps : [
-                  { step: 1, delay_days: 0, prompt: '' },
-                  { step: 2, delay_days: 4, prompt: '' },
-                  { step: 3, delay_days: 7, prompt: '' },
-                ]).map((s: any, i: number) => (
-                  <div key={i} className="rounded-md bg-gray-50 p-4">
-                    <div className="flex items-center gap-4">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-xs font-bold text-white">{s.step}</span>
-                      <label className="flex items-center gap-1 text-sm text-gray-600">
-                        Delay:
-                        <input type="number" min={0} value={s.delay_days} onChange={e => updateStep(i, 'delay_days', parseInt(e.target.value) || 0)}
-                          className="w-14 rounded-md border border-gray-300 px-2 py-1 text-sm text-center focus:border-gray-500 focus:outline-none" />
-                        days
-                      </label>
+                  { step: 1, delay_days: 0, channel: 'email', prompt: '' },
+                  { step: 2, delay_days: 4, channel: 'email', prompt: '' },
+                  { step: 3, delay_days: 7, channel: 'email', prompt: '' },
+                ]).map((s: any, i: number) => {
+                  const ch = s.channel || 'email';
+                  const channelColors: Record<string, { bg: string; border: string; badge: string; badgeText: string; dot: string }> = {
+                    email: { bg: 'bg-gray-50', border: 'border-gray-200', badge: 'bg-gray-100', badgeText: 'text-gray-600', dot: 'bg-gray-900' },
+                    linkedin_connect: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100', badgeText: 'text-blue-700', dot: 'bg-blue-600' },
+                    linkedin_message: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100', badgeText: 'text-blue-700', dot: 'bg-blue-600' },
+                    sms: { bg: 'bg-green-50', border: 'border-green-200', badge: 'bg-green-100', badgeText: 'text-green-700', dot: 'bg-green-600' },
+                    voice: { bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100', badgeText: 'text-purple-700', dot: 'bg-purple-600' },
+                  };
+                  const colors = channelColors[ch] || channelColors.email;
+                  const channelLabels: Record<string, string> = {
+                    email: 'Email', linkedin_connect: 'LinkedIn Connect', linkedin_message: 'LinkedIn Message', sms: 'SMS', voice: 'Voice Call',
+                  };
+
+                  return (
+                    <div key={i} className={`rounded-md ${colors.bg} border ${colors.border} p-4`}>
+                      <div className="flex items-center gap-3">
+                        <span className={`flex h-6 w-6 items-center justify-center rounded-full ${colors.dot} text-xs font-bold text-white`}>{s.step}</span>
+                        <select value={ch} onChange={e => updateStep(i, 'channel', e.target.value)}
+                          className={`rounded-full ${colors.badge} ${colors.badgeText} px-3 py-1 text-xs font-medium border-0 focus:outline-none`}>
+                          <option value="email">Email</option>
+                          <option value="linkedin_connect">LinkedIn Connect</option>
+                          <option value="linkedin_message">LinkedIn Message</option>
+                          <option value="sms">SMS</option>
+                          <option value="voice">Voice Call</option>
+                        </select>
+                        <label className="flex items-center gap-1 text-sm text-gray-600">
+                          Delay:
+                          <input type="number" min={0} value={s.delay_days} onChange={e => updateStep(i, 'delay_days', parseInt(e.target.value) || 0)}
+                            className="w-14 rounded-md border border-gray-300 px-2 py-1 text-sm text-center focus:border-gray-500 focus:outline-none bg-white" />
+                          days
+                        </label>
+                      </div>
+                      <textarea value={s.prompt} onChange={e => updateStep(i, 'prompt', e.target.value)} rows={2}
+                        placeholder={ch.startsWith('linkedin') ? 'Message to send (will be interpolated with variables)' : 'Step-specific prompt (overrides campaign prompt for this stage)'}
+                        className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-gray-500 focus:outline-none bg-white" />
                     </div>
-                    <textarea value={s.prompt} onChange={e => updateStep(i, 'prompt', e.target.value)} rows={2} placeholder="Step-specific prompt (overrides campaign prompt for this stage)"
-                      className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-gray-500 focus:outline-none" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <button onClick={() => saveField('steps', { sequence_steps: steps.length > 0 ? steps : [
                 { step: 1, delay_days: 0, prompt: '' },
@@ -462,22 +488,57 @@ export default function CampaignDetailPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Campaign Settings</p>
                 {flash === 'config' && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Saved</span>}
               </div>
-              <div className="mt-3 flex items-center gap-6 flex-wrap">
-                <label className="flex items-center gap-2 text-sm text-gray-600">Emails/day <input type="number" min={1} max={100} value={emailsPerDay} onChange={e => setEmailsPerDay(parseInt(e.target.value) || 20)} className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm text-center focus:border-gray-500 focus:outline-none" /></label>
-                <label className="flex items-center gap-2 text-sm text-gray-600">Follow-up <input type="number" min={1} max={30} value={followUpDelay} onChange={e => setFollowUpDelay(parseInt(e.target.value) || 4)} className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm text-center focus:border-gray-500 focus:outline-none" /> days</label>
-                <label className="flex items-center gap-2 text-sm text-gray-600">AI Drafts
-                  <button onClick={() => setAiDrafts(!aiDrafts)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiDrafts ? 'bg-emerald-500' : 'bg-gray-300'}`}>
-                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${aiDrafts ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                  </button>
-                  <span className="text-xs text-gray-400">{aiDrafts ? 'ON' : 'OFF'}</span>
-                </label>
+              <div className="mt-4 space-y-4">
+                {/* Daily Limit Slider */}
+                <div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Emails per day</span>
+                    <span className="font-medium text-gray-900">{emailsPerDay}</span>
+                  </div>
+                  <input type="range" min={0} max={50} value={emailsPerDay} onChange={e => setEmailsPerDay(parseInt(e.target.value))}
+                    className="mt-1 w-full h-2 rounded-full appearance-none bg-gray-200 accent-gray-900" />
+                  <div className="flex justify-between text-xs text-gray-400 mt-1"><span>0</span><span>10</span><span>25</span><span>50</span></div>
+                </div>
+
+                {/* Priority Slider */}
+                <div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Campaign Priority</span>
+                    <span className="font-medium text-gray-900">{campaignPriority} <span className="text-xs text-gray-400">{campaignPriority >= 80 ? '(High)' : campaignPriority >= 50 ? '(Medium)' : '(Low)'}</span></span>
+                  </div>
+                  <input type="range" min={1} max={100} value={campaignPriority} onChange={e => setCampaignPriority(parseInt(e.target.value))}
+                    className="mt-1 w-full h-2 rounded-full appearance-none bg-gray-200 accent-blue-600" />
+                  <div className="flex justify-between text-xs text-gray-400 mt-1"><span>Low</span><span>Medium</span><span>High</span></div>
+                </div>
+
+                {/* Follow-up Delay */}
+                <div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Follow-up delay</span>
+                    <span className="font-medium text-gray-900">{followUpDelay} days</span>
+                  </div>
+                  <input type="range" min={1} max={14} value={followUpDelay} onChange={e => setFollowUpDelay(parseInt(e.target.value))}
+                    className="mt-1 w-full h-2 rounded-full appearance-none bg-gray-200 accent-gray-900" />
+                  <div className="flex justify-between text-xs text-gray-400 mt-1"><span>1 day</span><span>7 days</span><span>14 days</span></div>
+                </div>
+
+                {/* AI Drafts Toggle */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">AI Draft Generation</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setAiDrafts(!aiDrafts)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiDrafts ? 'bg-emerald-500' : 'bg-gray-300'}`}>
+                      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${aiDrafts ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </button>
+                    <span className="text-xs text-gray-400">{aiDrafts ? 'ON' : 'OFF'}</span>
+                  </div>
+                </div>
               </div>
               <button onClick={() => saveField('config', {
-                settings: { ...(campaign?.settings || {}), follow_up_delay_days: followUpDelay, ai_drafts_enabled: aiDrafts },
+                settings: { ...(campaign?.settings || {}), follow_up_delay_days: followUpDelay, ai_drafts_enabled: aiDrafts, priority: campaignPriority },
                 channel_config: { ...(campaign?.channel_config || {}), email: { ...(campaign?.channel_config?.email || {}), enabled: true, daily_limit: emailsPerDay } },
               })} disabled={saving === 'config'}
-                className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
-                {saving === 'config' ? 'Saving...' : 'Save'}
+                className="mt-4 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
+                {saving === 'config' ? 'Saving...' : 'Save Settings'}
               </button>
             </div>
 

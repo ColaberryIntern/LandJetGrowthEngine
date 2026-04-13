@@ -205,8 +205,27 @@ async function generateAIDraft(
   }
 }
 
+/**
+ * Get campaign data from lead (handles both 'campaign' and 'outreachCampaign' aliases).
+ */
+function getCampaignFromLead(lead: Lead): any {
+  return lead.campaign || (lead as any).outreachCampaign || null;
+}
+
+/**
+ * Get the current step info for a lead (channel, prompt, delay).
+ */
+export function getStepInfo(lead: Lead): { channel: string; prompt: string; delay_days: number } | null {
+  const campaign = getCampaignFromLead(lead);
+  if (!campaign?.sequence_steps) return null;
+  const steps = campaign.sequence_steps || [];
+  const step = steps.find((s: any) => s.step === lead.sequence_stage);
+  if (!step) return null;
+  return { channel: step.channel || 'email', prompt: step.prompt || '', delay_days: step.delay_days || 0 };
+}
+
 function getPromptForLead(lead: Lead): string {
-  const campaign = lead.campaign as any;
+  const campaign = getCampaignFromLead(lead);
   if (campaign) {
     const steps = campaign.sequence_steps || [];
     const stepMatch = steps.find((s: any) => s.step === lead.sequence_stage);
@@ -221,11 +240,12 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
   const rawPrompt = campaignPrompt || getPromptForLead(lead);
   const context = getMessageContext(lead);
 
-  const campaignSettings = lead.campaign?.settings as any;
+  const campaign = getCampaignFromLead(lead);
+  const campaignSettings = campaign?.settings as any;
   const globalSettings = await getOutreachSettings();
 
   // Merge all variables and interpolate the prompt
-  const vars = await mergeVariables(lead, lead.campaign);
+  const vars = await mergeVariables(lead, campaign);
   const prompt = interpolateVariables(rawPrompt, vars);
 
   const senderName = campaignSettings?.sender_name || globalSettings.sender_name;
@@ -244,33 +264,69 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
 
 // --- Lead Queries ---
 
+/**
+ * Build the daily outreach queue by pulling leads from each campaign
+ * based on its daily_limit and priority settings.
+ *
+ * Each campaign contributes up to its daily_limit of leads.
+ * Leads are scored with campaign priority added to their base score.
+ * The final queue is sorted by combined score (highest first).
+ */
 export async function getLeadsForToday(): Promise<Lead[]> {
-  const settings = await getOutreachSettings();
-
-  const leads = await Lead.findAll({
-    where: {
-      outreach_status: 'ACTIVE',
-      status: 'active',
-      [Op.or]: [
-        { next_action_at: null },
-        { next_action_at: { [Op.lte]: new Date() } },
-      ],
-    },
-    include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
-    limit: 200,
-    order: [['created_at', 'ASC']],
+  const campaigns = await Campaign.findAll({
+    where: { approval_status: 'live' },
+    attributes: ['id', 'name', 'channel_config', 'settings', 'ai_system_prompt', 'sequence_steps'],
   });
 
-  for (const lead of leads) {
-    lead.priority_score = computePriorityScore(lead);
+  const readyWhere = {
+    outreach_status: 'ACTIVE',
+    status: 'active',
+    [Op.or]: [
+      { next_action_at: null },
+      { next_action_at: { [Op.lte]: new Date() } },
+    ],
+  };
+
+  const allLeads: Lead[] = [];
+
+  for (const campaign of campaigns) {
+    const dailyLimit = (campaign.channel_config as any)?.email?.daily_limit || 5;
+    const campaignPriority = (campaign.settings as any)?.priority || 50;
+
+    const leads = await Lead.findAll({
+      where: { ...readyWhere, campaign_id: campaign.id },
+      include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
+      limit: dailyLimit,
+      order: [['created_at', 'ASC']],
+    });
+
+    for (const lead of leads) {
+      lead.priority_score = computePriorityScore(lead) + campaignPriority;
+    }
+
+    allLeads.push(...leads);
   }
 
-  leads.sort((a, b) => {
+  // Pull unassigned leads (no campaign) with a small limit
+  const unassigned = await Lead.findAll({
+    where: { ...readyWhere, campaign_id: null },
+    limit: 3,
+    order: [['created_at', 'ASC']],
+  });
+  for (const lead of unassigned) {
+    lead.priority_score = computePriorityScore(lead);
+  }
+  allLeads.push(...unassigned);
+
+  // Sort by combined score (campaign priority + lead priority)
+  allLeads.sort((a, b) => {
     if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;
     return a.created_at.getTime() - b.created_at.getTime();
   });
 
-  return leads.slice(0, settings.emails_per_day);
+  // Apply global cap
+  const globalSettings = await getOutreachSettings();
+  return allLeads.slice(0, globalSettings.emails_per_day);
 }
 
 // Keep old name as alias for backward compatibility

@@ -12,6 +12,7 @@ interface CampaignRow {
   approval_status: string;
   ai_system_prompt: string | null;
   settings: any;
+  channel_config: any;
   analytics?: {
     total_contacts: number;
     active: number;
@@ -129,6 +130,12 @@ export default function CampaignsPage() {
                     {c.settings?.sender_name && (
                       <span className="text-xs text-gray-400">{c.settings.sender_name}</span>
                     )}
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                      {(c as any).channel_config?.email?.daily_limit || 5}/day
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      P{c.settings?.priority || 50}
+                    </span>
                   </div>
                 </div>
                 <span className="text-lg font-semibold text-gray-900">{total.toLocaleString()}</span>

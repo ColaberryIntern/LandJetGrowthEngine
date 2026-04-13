@@ -1,11 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings } from '../../services/outreachQueryService';
+import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables } from '../../services/outreachQueryService';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
+import { sendOutreachEmail, getSenderForCampaign, testConnection } from '../../services/outreachEmailService';
 
 const router = Router();
 router.use(authenticate);
@@ -137,6 +138,24 @@ Important: Keep prompts concise. Campaign prompt under 200 words. Step 1 under 1
   } catch (error) {
     next(error);
   }
+});
+
+// --- Email Connection Test ---
+
+router.post('/test-email', authorize('campaigns:write'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const results = await Promise.all([
+      testConnection(process.env.OUTREACH_EMAIL_INVESTOR),
+      testConnection(process.env.OUTREACH_EMAIL_CUSTOMER),
+      testConnection(process.env.OUTREACH_EMAIL_GENERAL),
+    ]);
+
+    res.json({
+      investor: { email: process.env.OUTREACH_EMAIL_INVESTOR, ...results[0] },
+      customer: { email: process.env.OUTREACH_EMAIL_CUSTOMER, ...results[1] },
+      general: { email: process.env.OUTREACH_EMAIL_GENERAL, ...results[2] },
+    });
+  } catch (error) { next(error); }
 });
 
 // --- Email Validation ---
@@ -312,21 +331,69 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
   try {
     const leads = await getLeadsForToday();
 
-    const result = await Promise.all(leads.map(async c => ({
-      contact_id: c.id,
-      name: `${c.first_name} ${c.last_name}`.trim(),
-      email: c.email,
-      relationship_type: c.lead_source || 'past_client',
-      sequence_stage: c.sequence_stage,
-      suggested_action: getSuggestedAction(c.sequence_stage),
-      priority_score: c.priority_score,
-      vertical: c.vertical,
-      tier: c.tier,
-      campaign_id: c.campaign_id,
-      message_context: getMessageContext(c),
-      draft: await generateDraft(c, c.campaign?.ai_system_prompt),
-      status: c.outreach_status,
-    })));
+    const result = await Promise.all(leads.map(async c => {
+      const stepInfo = getStepInfo(c);
+      const channel = stepInfo?.channel || 'email';
+      const campaign = c.campaign || (c as any).outreachCampaign;
+      const vars = await mergeVariables(c, campaign);
+
+      // For LinkedIn steps, generate a clean message via AI (no variables or instructions visible)
+      let linkedinMessage: string | null = null;
+      let linkedinUrl: string | null = c.linkedin_url || null;
+      if (channel.startsWith('linkedin') && stepInfo?.prompt) {
+        const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
+        // Use AI to generate the actual clean message
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (apiKey) {
+          try {
+            const maxChars = channel === 'linkedin_connect' ? 280 : 500;
+            const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: process.env.AI_MODEL || 'gpt-4o',
+                messages: [
+                  { role: 'system', content: `Generate ONLY the final message text. No instructions, no labels, no quotation marks. The message must be ready to copy and paste directly. Max ${maxChars} characters.` },
+                  { role: 'user', content: interpolatedPrompt },
+                ],
+                temperature: 0.7,
+                max_tokens: 256,
+              }),
+            });
+            if (aiResp.ok) {
+              const aiData = (await aiResp.json()) as any;
+              const msg = (aiData.choices?.[0]?.message?.content || '').trim();
+              if (msg) linkedinMessage = msg;
+            }
+          } catch {}
+        }
+        // Fallback: use interpolated prompt stripped of instruction text
+        if (!linkedinMessage) {
+          linkedinMessage = interpolatedPrompt;
+        }
+      }
+
+      return {
+        contact_id: c.id,
+        name: `${c.first_name} ${c.last_name}`.trim(),
+        email: c.email,
+        relationship_type: c.lead_source || 'past_client',
+        sequence_stage: c.sequence_stage,
+        suggested_action: channel === 'linkedin_connect' ? 'Send Connection Request' :
+          channel === 'linkedin_message' ? 'Send LinkedIn Message' :
+          getSuggestedAction(c.sequence_stage),
+        priority_score: c.priority_score,
+        vertical: c.vertical,
+        tier: c.tier,
+        campaign_id: c.campaign_id,
+        message_context: getMessageContext(c),
+        channel,
+        linkedin_url: linkedinUrl,
+        linkedin_message: linkedinMessage,
+        draft: channel === 'email' ? await generateDraft(c, campaign?.ai_system_prompt) : { subject: '', body: linkedinMessage || '', prompt: '', source: 'template' as const },
+        status: c.outreach_status,
+      };
+    }));
 
     res.json(result);
   } catch (error) { next(error); }
@@ -351,6 +418,46 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
 
 router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Get lead with campaign before advancing
+    const leadBefore = await Lead.findByPk(req.params.id as string, {
+      include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
+    });
+
+    if (!leadBefore) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    const campaign = (leadBefore as any).outreachCampaign;
+    const stepInfo = getStepInfo(leadBefore);
+    const channel = stepInfo?.channel || 'email';
+
+    // Send email if this is an email step
+    let emailResult: any = null;
+    if (channel === 'email') {
+      const { subject, body } = req.body || {};
+      let emailSubject = subject;
+      let emailBody = body;
+
+      // If no subject/body provided, generate the draft
+      if (!emailSubject || !emailBody) {
+        const draft = await generateDraft(leadBefore, campaign?.ai_system_prompt);
+        emailSubject = draft.subject;
+        emailBody = draft.body;
+      }
+
+      const senderEmail = getSenderForCampaign(campaign?.name || '', leadBefore.vertical);
+      const senderName = campaign?.settings?.sender_name || 'Ryan Landry';
+
+      emailResult = await sendOutreachEmail({
+        to: leadBefore.email,
+        subject: emailSubject,
+        body: emailBody,
+        from: senderEmail,
+        senderName,
+      });
+    }
+
+    // Advance the lead
     const lead = await advanceLead(req.params.id as string);
     if (!lead) {
       return res.status(404).json({ error: 'Contact not found' });
@@ -361,6 +468,9 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       sequence_stage: lead.sequence_stage,
       status: lead.outreach_status,
       next_action_at: lead.next_action_at,
+      email_sent: emailResult?.success || false,
+      email_from: emailResult?.from || null,
+      channel,
     });
   } catch (error) {
     if ((error as Error).message === 'Cannot advance a completed contact') {
