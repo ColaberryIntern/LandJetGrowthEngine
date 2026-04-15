@@ -45,3 +45,15 @@ export class RateLimitError extends AppError {
     super(message, 429, 'RATE_LIMIT_EXCEEDED');
   }
 }
+
+export class ForbiddenError extends AppError {
+  constructor(message = 'Access forbidden') {
+    super(message, 403, 'FORBIDDEN');
+  }
+}
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Service temporarily unavailable') {
+    super(message, 503, 'SERVICE_UNAVAILABLE');
+  }
+}

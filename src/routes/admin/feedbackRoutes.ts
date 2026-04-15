@@ -3,6 +3,7 @@ import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import {
   submitFeedback, listFeedback, respondToFeedback, getFeedbackStats,
+  logUnexpectedEngagement,
   setConsent, getUserConsents, getConsentStats,
 } from '../../services/feedbackService';
 import { createAuditLog } from '../../services/auditLogService';
@@ -31,6 +32,19 @@ router.patch('/:id/respond', authorize('campaigns:write'), async (req: Request, 
     const fb = await respondToFeedback(req.params.id as string, req.body.response, req.body.status || 'reviewed');
     await createAuditLog({ userId: req.user!.userId, action: 'feedback.respond', entityType: 'user_feedback', entityId: fb.id, newValue: { status: req.body.status }, ipAddress: req.ip || null });
     res.json({ feedback: fb });
+  } catch (e) { next(e); }
+});
+
+// Unexpected Engagement
+router.post('/unexpected-engagement', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fb = await logUnexpectedEngagement({
+      user_id: req.user!.userId,
+      description: req.body.description,
+      page_context: req.body.page_context,
+      metadata: req.body.metadata,
+    });
+    res.status(201).json({ feedback: fb });
   } catch (e) { next(e); }
 });
 

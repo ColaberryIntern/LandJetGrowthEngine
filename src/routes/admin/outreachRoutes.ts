@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables } from '../../services/outreachQueryService';
+import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
@@ -195,12 +196,20 @@ router.get('/campaigns/:campaignId/contacts', authorize('campaigns:read'), async
       where = { campaign_id: id };
     }
 
-    const contacts = await Lead.findAll({
+    const limit = Math.min(Number(req.query.limit) || 25, 100);
+    const offset = Number(req.query.offset) || 0;
+
+    const result = await Lead.findAndCountAll({
       where,
       order: [['created_at', 'ASC']],
-      limit: 500,
+      limit,
+      offset,
+      attributes: ['id', 'first_name', 'last_name', 'email', 'company', 'phone',
+        'vertical', 'tier', 'sequence_stage', 'outreach_status', 'last_contacted_at',
+        'next_action_at', 'priority_score', 'campaign_id', 'status', 'linkedin_url',
+        'title', 'industry', 'pipeline_stage', 'lead_score', 'temperature', 'created_at'],
     });
-    res.json({ contacts, total: contacts.length });
+    res.json({ contacts: result.rows, total: result.count, limit, offset });
   } catch (error) { next(error); }
 });
 
@@ -219,31 +228,83 @@ router.get('/campaigns/:campaignId/analytics', authorize('campaigns:read'), asyn
       where = { campaign_id: id };
     }
 
-    const contacts = await Lead.findAll({ where });
+    // Use SQL aggregation instead of loading all rows into memory
+    const [summary, stageRows, verticalRows] = await Promise.all([
+      Lead.findAll({
+        where,
+        attributes: [
+          [Lead.sequelize!.fn('COUNT', '*'), 'total_contacts'],
+          [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE outreach_status = 'ACTIVE')"), 'active'],
+          [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE outreach_status = 'COMPLETED')"), 'completed'],
+          [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE last_contacted_at IS NOT NULL)"), 'contacted'],
+          [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE last_contacted_at IS NULL)"), 'never_contacted'],
+        ],
+        raw: true,
+      }),
+      Lead.findAll({
+        where,
+        attributes: ['sequence_stage', [Lead.sequelize!.fn('COUNT', '*'), 'count']],
+        group: ['sequence_stage'],
+        raw: true,
+      }),
+      Lead.findAll({
+        where: { ...where, vertical: { [Op.ne]: null } },
+        attributes: ['vertical', [Lead.sequelize!.fn('COUNT', '*'), 'count']],
+        group: ['vertical'],
+        raw: true,
+      }),
+    ]);
 
+    const s = (summary as any[])[0] || {};
     const byStage: Record<number, number> = {};
+    for (const r of stageRows as any[]) byStage[r.sequence_stage] = parseInt(r.count, 10);
     const byVertical: Record<string, number> = {};
-    let active = 0, completed = 0, contacted = 0, neverContacted = 0;
-
-    for (const c of contacts) {
-      if (c.outreach_status === 'ACTIVE') active++;
-      if (c.outreach_status === 'COMPLETED') completed++;
-      if (c.last_contacted_at) contacted++;
-      else neverContacted++;
-
-      byStage[c.sequence_stage] = (byStage[c.sequence_stage] || 0) + 1;
-      if (c.vertical) byVertical[c.vertical] = (byVertical[c.vertical] || 0) + 1;
-    }
+    for (const r of verticalRows as any[]) byVertical[r.vertical] = parseInt(r.count, 10);
 
     res.json({
-      total_contacts: contacts.length,
-      active,
-      completed,
-      contacted,
-      never_contacted: neverContacted,
+      total_contacts: parseInt(s.total_contacts, 10) || 0,
+      active: parseInt(s.active, 10) || 0,
+      completed: parseInt(s.completed, 10) || 0,
+      contacted: parseInt(s.contacted, 10) || 0,
+      never_contacted: parseInt(s.never_contacted, 10) || 0,
       by_stage: byStage,
       by_vertical: byVertical,
     });
+  } catch (error) { next(error); }
+});
+
+// --- Batch Campaign Analytics ---
+
+router.get('/campaigns/batch-analytics', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ids = (req.query.ids as string || '').split(',').filter(Boolean);
+    if (ids.length === 0) return res.json({ analytics: {} });
+
+    const rows = await Lead.findAll({
+      where: { campaign_id: { [Op.in]: ids } },
+      attributes: [
+        'campaign_id',
+        [Lead.sequelize!.fn('COUNT', '*'), 'total_contacts'],
+        [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE outreach_status = 'ACTIVE')"), 'active'],
+        [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE outreach_status = 'COMPLETED')"), 'completed'],
+        [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE last_contacted_at IS NOT NULL)"), 'contacted'],
+        [Lead.sequelize!.literal("COUNT(*) FILTER (WHERE last_contacted_at IS NULL)"), 'never_contacted'],
+      ],
+      group: ['campaign_id'],
+      raw: true,
+    }) as any[];
+
+    const analytics: Record<string, any> = {};
+    for (const r of rows) {
+      analytics[r.campaign_id] = {
+        total_contacts: parseInt(r.total_contacts, 10) || 0,
+        active: parseInt(r.active, 10) || 0,
+        completed: parseInt(r.completed, 10) || 0,
+        contacted: parseInt(r.contacted, 10) || 0,
+        never_contacted: parseInt(r.never_contacted, 10) || 0,
+      };
+    }
+    res.json({ analytics });
   } catch (error) { next(error); }
 });
 
@@ -272,56 +333,64 @@ router.post('/campaigns/:campaignId/upload', authorize('campaigns:write'), async
       return res.status(400).json({ error: 'CSV must have an "email" column' });
     }
 
-    let created = 0, skipped = 0;
-
+    // Parse all rows first
+    const rows: { email: string; firstName: string; lastName: string; company: string | null }[] = [];
     for (let i = 1; i < lines.length; i++) {
       const fields = lines[i].split(',').map((f: string) => f.trim());
       const email = (fields[emailIdx] || '').toLowerCase();
-      if (!email || !email.includes('@')) { skipped++; continue; }
-
+      if (!email || !email.includes('@')) continue;
       const name = nameIdx >= 0 ? fields[nameIdx] || email : email;
       const company = companyIdx >= 0 ? fields[companyIdx] || null : null;
-
       const nameParts = name.split(/\s+/);
-      const firstName = nameParts[0] || email;
-      const lastName = nameParts.slice(1).join(' ') || '';
+      rows.push({ email, firstName: nameParts[0] || email, lastName: nameParts.slice(1).join(' ') || '', company });
+    }
 
-      const existing = await Lead.findOne({ where: { email } });
+    // Batch lookup existing emails (1 query instead of N)
+    const allEmails = rows.map(r => r.email);
+    const existingLeads = await Lead.findAll({
+      where: { email: { [Op.in]: allEmails } },
+      attributes: ['id', 'email', 'campaign_id'],
+    });
+    const existingMap = new Map(existingLeads.map(l => [l.email, l]));
+
+    let created = 0, skipped = 0;
+    const toCreate: any[] = [];
+    const toUpdate: Lead[] = [];
+
+    for (const row of rows) {
+      const existing = existingMap.get(row.email);
       if (!existing) {
-        await Lead.create({
-          first_name: firstName,
-          last_name: lastName,
-          email,
-          phone: null,
-          company,
-          title: null,
-          industry: null,
-          company_size: null,
-          annual_revenue: null,
-          linkedin_url: null,
-          lead_source: 'upload',
-          lead_source_type: 'warm',
-          temperature: 'warm',
-          pipeline_stage: 'new_lead',
-          lifecycle_stage: null,
-          notes: null,
-          technology_stack: null,
-          utm_source: null,
-          interest_area: null,
+        toCreate.push({
+          first_name: row.firstName, last_name: row.lastName, email: row.email,
+          phone: null, company: row.company, title: null, industry: null,
+          company_size: null, annual_revenue: null, linkedin_url: null,
+          lead_source: 'upload', lead_source_type: 'warm', temperature: 'warm',
+          pipeline_stage: 'new_lead', lifecycle_stage: null, notes: null,
+          technology_stack: null, utm_source: null, interest_area: null,
           campaign_id: campaignId === 'unclassified' ? null : campaignId,
           status: 'active',
         });
         created++;
       } else {
-        if (campaignId !== 'unclassified') {
+        if (campaignId !== 'unclassified' && existing.campaign_id !== campaignId) {
           existing.campaign_id = campaignId;
-          await existing.save();
+          toUpdate.push(existing);
         }
         skipped++;
       }
     }
 
-    res.json({ created, skipped, total: lines.length - 1 });
+    // Batch create new leads
+    if (toCreate.length > 0) {
+      await Lead.bulkCreate(toCreate, { ignoreDuplicates: true });
+    }
+    // Update existing leads that need campaign assignment
+    for (const lead of toUpdate) {
+      await lead.save();
+    }
+
+    const invalidCount = (lines.length - 1) - rows.length;
+    res.json({ created, skipped: skipped + invalidCount, total: lines.length - 1 });
   } catch (error) { next(error); }
 });
 

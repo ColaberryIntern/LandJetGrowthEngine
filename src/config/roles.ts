@@ -25,6 +25,58 @@ export const ROLES: Record<string, RoleDefinition> = {
     name: 'user',
     permissions: ['leads:read', 'campaigns:read', 'analytics:read', 'notifications:read'],
   },
+  frontend: {
+    name: 'frontend',
+    permissions: [
+      'campaigns:read',
+      'analytics:read',
+      'notifications:read',
+      'notifications:write',
+    ],
+  },
+  backend: {
+    name: 'backend',
+    permissions: [
+      'leads:read',
+      'leads:write',
+      'campaigns:read',
+      'campaigns:write',
+      'analytics:read',
+      'deployments:read',
+      'notifications:read',
+    ],
+  },
+  ai_ml: {
+    name: 'ai_ml',
+    permissions: [
+      'campaigns:read',
+      'campaigns:write',
+      'analytics:read',
+      'leads:read',
+      'notifications:read',
+    ],
+  },
+  sysadmin: {
+    name: 'sysadmin',
+    permissions: [
+      'campaigns:read',
+      'analytics:read',
+      'deployments:read',
+      'deployments:write',
+      'leads:read',
+      'notifications:read',
+    ],
+  },
+  devops: {
+    name: 'devops',
+    permissions: [
+      'campaigns:read',
+      'analytics:read',
+      'deployments:read',
+      'deployments:write',
+      'notifications:read',
+    ],
+  },
   viewer: {
     name: 'viewer',
     permissions: ['campaigns:read', 'analytics:read'],

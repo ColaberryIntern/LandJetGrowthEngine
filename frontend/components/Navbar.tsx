@@ -7,8 +7,14 @@ const NAV_ITEMS = [
   { href: '/outreach', label: 'Outreach' },
   { href: '/campaigns', label: 'Campaigns' },
   { href: '/activity', label: 'Activity' },
+  { href: '/integrations', label: 'Integrations' },
+  { href: '/qa', label: 'QA' },
+  { href: '/performance', label: 'Perf' },
+  { href: '/privacy', label: 'Privacy' },
+  { href: '/infrastructure', label: 'Infra' },
   { href: '/system', label: 'System' },
   { href: '/jobs', label: 'Jobs' },
+  { href: '/docs', label: 'Docs' },
 ];
 
 export default function Navbar() {

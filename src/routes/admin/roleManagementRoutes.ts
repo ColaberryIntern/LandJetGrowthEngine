@@ -1,33 +1,47 @@
-import { Router, Response, NextFunction } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { listRoles, getRoleDetail, getRoleAssignmentStats, auditPermissions } from '../../services/roleManagementService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 router.use(authenticate);
 
-// List all roles with permissions
-router.get('/', authorize('campaigns:read'), async (_req, res: Response, next: NextFunction) => {
-  try { res.json({ roles: listRoles() }); } catch (e) { next(e); }
+router.get('/', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ roles: listRoles() });
+  } catch (e) {
+    logger.error('GET /roles failed', { error: (e as Error).message });
+    next(e);
+  }
 });
 
-// Get role assignment stats (user count per role)
-router.get('/stats', authorize('campaigns:read'), async (_req, res: Response, next: NextFunction) => {
-  try { res.json(await getRoleAssignmentStats()); } catch (e) { next(e); }
+router.get('/stats', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getRoleAssignmentStats());
+  } catch (e) {
+    logger.error('GET /roles/stats failed', { error: (e as Error).message });
+    next(e);
+  }
 });
 
-// Run permission audit
-router.get('/audit', authorize('campaigns:read'), async (_req, res: Response, next: NextFunction) => {
-  try { res.json(await auditPermissions()); } catch (e) { next(e); }
+router.get('/audit', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await auditPermissions());
+  } catch (e) {
+    logger.error('GET /roles/audit failed', { error: (e as Error).message });
+    next(e);
+  }
 });
 
-// Get specific role detail
-router.get('/:name', authorize('campaigns:read'), async (req, res: Response, next: NextFunction) => {
+router.get('/:name', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const role = getRoleDetail(req.params.name as string);
-    if (!role) return res.status(404).json({ error: 'Role not found' });
     res.json({ role });
-  } catch (e) { next(e); }
+  } catch (e) {
+    logger.error('GET /roles/:name failed', { name: req.params.name, error: (e as Error).message });
+    next(e);
+  }
 });
 
 export default router;

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { getCampaigns, getCampaignAnalytics, createStrategy } from '@/lib/api';
+import { getCampaigns, getBatchCampaignAnalytics, createStrategy } from '@/lib/api';
 
 interface CampaignRow {
   id: string;
@@ -31,27 +31,31 @@ export default function CampaignsPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    async function load() {
       try {
         const campRes = await getCampaigns() as { campaigns: CampaignRow[]; total: number };
         const camps = campRes.campaigns;
 
-        const analyticsResults = await Promise.allSettled(
-          camps.map(c => getCampaignAnalytics(c.id))
-        );
-        camps.forEach((c, i) => {
-          if (analyticsResults[i].status === 'fulfilled') {
-            c.analytics = (analyticsResults[i] as PromiseFulfilledResult<any>).value;
-          }
-        });
+        // Single batch request instead of N individual analytics calls
+        const ids = camps.map(c => c.id).filter(Boolean);
+        if (ids.length > 0) {
+          try {
+            const batchRes = await getBatchCampaignAnalytics(ids);
+            for (const c of camps) {
+              if (batchRes.analytics[c.id]) {
+                c.analytics = batchRes.analytics[c.id];
+              }
+            }
+          } catch {}
+        }
 
         // Sort by contact count descending
         camps.sort((a, b) => (b.analytics?.total_contacts || 0) - (a.analytics?.total_contacts || 0));
         setCampaigns(camps);
       } catch {}
       setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
+    }
+    load();
   }, []);
 
   async function handleCreate() {
@@ -64,9 +68,11 @@ export default function CampaignsPage() {
     setCreating(false);
   }
 
-  const totalLeads = campaigns.reduce((sum, c) => sum + (c.analytics?.total_contacts || 0), 0);
-  const totalActive = campaigns.reduce((sum, c) => sum + (c.analytics?.active || 0), 0);
-  const totalCompleted = campaigns.reduce((sum, c) => sum + (c.analytics?.completed || 0), 0);
+  const { totalLeads, totalActive, totalCompleted } = useMemo(() => ({
+    totalLeads: campaigns.reduce((sum, c) => sum + (c.analytics?.total_contacts || 0), 0),
+    totalActive: campaigns.reduce((sum, c) => sum + (c.analytics?.active || 0), 0),
+    totalCompleted: campaigns.reduce((sum, c) => sum + (c.analytics?.completed || 0), 0),
+  }), [campaigns]);
 
   if (loading) {
     return (

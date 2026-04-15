@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import { InteractionOutcome } from '../models/InteractionOutcome';
 import { ScheduledEmail } from '../models/ScheduledEmail';
+import { logger } from '../config/logger';
 
 export interface CampaignMetrics {
   sent: number;
@@ -18,22 +19,26 @@ export interface CampaignMetrics {
 
 /**
  * Calculate 7-day rolling engagement metrics for a campaign.
+ * Uses SQL GROUP BY instead of loading all rows into JS.
  */
 export async function getCampaignMetrics(campaignId: string): Promise<CampaignMetrics> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const outcomes = await InteractionOutcome.findAll({
+  const results = await InteractionOutcome.findAll({
     where: {
       campaign_id: campaignId,
       created_at: { [Op.gte]: sevenDaysAgo },
     },
-    attributes: ['outcome'],
-  });
+    attributes: [
+      'outcome',
+      [InteractionOutcome.sequelize!.fn('COUNT', '*'), 'count'],
+    ],
+    group: ['outcome'],
+    raw: true,
+  }) as any[];
 
   const counts: Record<string, number> = {};
-  for (const o of outcomes) {
-    counts[o.outcome] = (counts[o.outcome] || 0) + 1;
-  }
+  for (const r of results) counts[r.outcome] = parseInt(r.count, 10);
 
   const sent = counts['sent'] || 0;
   const opened = counts['opened'] || 0;
@@ -56,33 +61,31 @@ export async function getCampaignMetrics(campaignId: string): Promise<CampaignMe
 
 /**
  * Detect hot leads: 2+ email opens OR any click.
+ * Single query using UNION instead of 2 separate queries.
+ * Uses parameterized queries to prevent SQL injection.
  */
 export async function getHotLeads(campaignId?: string): Promise<number[]> {
-  const where: Record<string, unknown> = {};
-  if (campaignId) where.campaign_id = campaignId;
+  try {
+    const campaignFilter = campaignId ? 'AND campaign_id = :campaignId' : '';
+    const replacements = campaignId ? { campaignId } : {};
 
-  // Leads with 2+ opens
-  const multiOpens = await InteractionOutcome.findAll({
-    where: { ...where, outcome: 'opened' },
-    attributes: ['lead_id'],
-    group: ['lead_id'],
-    having: InteractionOutcome.sequelize!.literal('COUNT(*) >= 2'),
-    raw: true,
-  });
+    const [results] = await InteractionOutcome.sequelize!.query(`
+      SELECT DISTINCT lead_id FROM (
+        SELECT lead_id FROM interaction_outcomes
+        WHERE outcome = 'opened' ${campaignFilter}
+        GROUP BY lead_id HAVING COUNT(*) >= 2
+        UNION
+        SELECT lead_id FROM interaction_outcomes
+        WHERE outcome = 'clicked' ${campaignFilter}
+        GROUP BY lead_id
+      ) hot
+    `, { replacements });
 
-  // Leads with any click
-  const clicks = await InteractionOutcome.findAll({
-    where: { ...where, outcome: 'clicked' },
-    attributes: ['lead_id'],
-    group: ['lead_id'],
-    raw: true,
-  });
-
-  const hotSet = new Set<number>();
-  for (const r of multiOpens as any[]) hotSet.add(r.lead_id);
-  for (const r of clicks as any[]) hotSet.add(r.lead_id);
-
-  return Array.from(hotSet);
+    return (results as any[]).map(r => r.lead_id);
+  } catch (error) {
+    logger.error('Failed to get hot leads', { campaignId, error: (error as Error).message });
+    throw error;
+  }
 }
 
 /**

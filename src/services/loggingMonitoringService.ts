@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 import { AuditLog } from '../models/AuditLog';
+import { NotFoundError } from '../middleware/errors';
 import { logger } from '../config/logger';
 
 export interface AuditFilters {
@@ -11,6 +12,10 @@ export interface AuditFilters {
   limit?: number;
   offset?: number;
 }
+
+// Stats cache (60 second TTL)
+let _statsCache: { data: any; expiresAt: number } | null = null;
+const STATS_TTL = 60_000;
 
 export async function listAuditLogs(filters: AuditFilters) {
   const where: Record<string, unknown> = {};
@@ -25,47 +30,67 @@ export async function listAuditLogs(filters: AuditFilters) {
     if (filters.to) (where.created_at as any)[Op.lte] = new Date(filters.to);
   }
 
-  return AuditLog.findAndCountAll({
-    where,
-    order: [['created_at', 'DESC']],
-    limit: filters.limit || 50,
-    offset: filters.offset || 0,
-  });
+  const limit = Math.min(Math.max(filters.limit || 50, 1), 100);
+  const offset = Math.max(filters.offset || 0, 0);
+
+  try {
+    return await AuditLog.findAndCountAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit,
+      offset,
+      attributes: ['id', 'user_id', 'action', 'entity_type', 'entity_id', 'ip_address', 'created_at'],
+    });
+  } catch (error) {
+    logger.error('Failed to list audit logs', { filters, error: (error as Error).message });
+    throw error;
+  }
 }
 
 export async function getAuditLogById(id: string) {
+  if (!id) throw new NotFoundError('Audit log ID is required');
   const log = await AuditLog.findByPk(id);
-  if (!log) throw new Error('Audit log not found');
+  if (!log) throw new NotFoundError('Audit log not found');
   return log;
 }
 
 export async function getAuditStats() {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Return cached stats if fresh
+  if (_statsCache && Date.now() < _statsCache.expiresAt) return _statsCache.data;
 
-  const [total, today, entityTypes, recentActions] = await Promise.all([
-    AuditLog.count(),
-    AuditLog.count({ where: { created_at: { [Op.gte]: todayStart } } }),
-    AuditLog.findAll({
-      attributes: ['entity_type', [AuditLog.sequelize!.fn('COUNT', '*'), 'count']],
-      group: ['entity_type'],
-      raw: true,
-    }),
-    AuditLog.findAll({
-      attributes: ['action', [AuditLog.sequelize!.fn('COUNT', '*'), 'count']],
-      where: { created_at: { [Op.gte]: todayStart } },
-      group: ['action'],
-      order: [[AuditLog.sequelize!.fn('COUNT', '*'), 'DESC']],
-      limit: 10,
-      raw: true,
-    }),
-  ]);
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-  const byEntity: Record<string, number> = {};
-  for (const r of entityTypes as any[]) byEntity[r.entity_type] = parseInt(r.count, 10);
+    const [total, today, entityTypes, recentActions] = await Promise.all([
+      AuditLog.count(),
+      AuditLog.count({ where: { created_at: { [Op.gte]: todayStart } } }),
+      AuditLog.findAll({
+        attributes: ['entity_type', [AuditLog.sequelize!.fn('COUNT', '*'), 'count']],
+        group: ['entity_type'],
+        raw: true,
+      }),
+      AuditLog.findAll({
+        attributes: ['action', [AuditLog.sequelize!.fn('COUNT', '*'), 'count']],
+        where: { created_at: { [Op.gte]: todayStart } },
+        group: ['action'],
+        order: [[AuditLog.sequelize!.fn('COUNT', '*'), 'DESC']],
+        limit: 10,
+        raw: true,
+      }),
+    ]);
 
-  const topActions: Record<string, number> = {};
-  for (const r of recentActions as any[]) topActions[r.action] = parseInt(r.count, 10);
+    const byEntity: Record<string, number> = {};
+    for (const r of entityTypes as any[]) byEntity[r.entity_type] = parseInt(r.count, 10);
 
-  return { total, today, byEntity, topActions };
+    const topActions: Record<string, number> = {};
+    for (const r of recentActions as any[]) topActions[r.action] = parseInt(r.count, 10);
+
+    const result = { total, today, byEntity, topActions };
+    _statsCache = { data: result, expiresAt: Date.now() + STATS_TTL };
+    return result;
+  } catch (error) {
+    logger.error('Failed to get audit stats', { error: (error as Error).message });
+    throw error;
+  }
 }

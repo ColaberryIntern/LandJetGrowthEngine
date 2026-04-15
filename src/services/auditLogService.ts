@@ -1,4 +1,5 @@
 import { AuditLog } from '../models/AuditLog';
+import { logger } from '../config/logger';
 
 export interface AuditLogInput {
   userId?: string | null;
@@ -12,6 +13,15 @@ export interface AuditLogInput {
 }
 
 export async function createAuditLog(input: AuditLogInput): Promise<void> {
+  if (!input.action || !input.action.trim()) {
+    logger.error('Invalid audit log action: action is required');
+    return;
+  }
+  if (!input.entityType || !input.entityType.trim()) {
+    logger.error('Invalid audit log entityType: entityType is required');
+    return;
+  }
+
   try {
     await AuditLog.create({
       user_id: input.userId || null,
@@ -25,7 +35,7 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
     });
   } catch (error) {
     // Audit logging should never crash the main flow
-    console.error('Failed to create audit log:', error);
+    logger.error('Failed to create audit log', { action: input.action, entityType: input.entityType, error: (error as Error).message });
   }
 }
 
@@ -43,10 +53,13 @@ export async function getAuditLogs(filters: {
   if (filters.entityId) where.entity_id = filters.entityId;
   if (filters.action) where.action = filters.action;
 
+  const limit = Math.min(Math.max(filters.limit || 50, 1), 100);
+  const offset = Math.max(filters.offset || 0, 0);
+
   return AuditLog.findAndCountAll({
     where,
     order: [['created_at', 'DESC']],
-    limit: filters.limit || 50,
-    offset: filters.offset || 0,
+    limit,
+    offset,
   });
 }

@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import { testConnection } from './config/database';
 import { requestIdMiddleware } from './middleware/requestId';
 import { apiLimiter } from './middleware/rateLimiter';
+import { requestTimingMiddleware } from './middleware/requestTiming';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -32,6 +33,9 @@ import feedbackRoutes from './routes/admin/feedbackRoutes';
 import dataProcessingRoutes from './routes/admin/dataProcessingRoutes';
 import capacityRoutes from './routes/admin/capacityRoutes';
 import securityAuditRoutes from './routes/admin/securityAuditRoutes';
+import qaRoutes from './routes/admin/qaRoutes';
+import intelligenceDecisionRoutes from './routes/admin/intelligenceDecisionRoutes';
+import agentRoutes from './routes/admin/agentRoutes';
 
 export function createApp() {
   const app = express();
@@ -52,8 +56,17 @@ export function createApp() {
     app.use(morgan('combined'));
   }
 
+  // Performance monitoring
+  app.use(requestTimingMiddleware);
+
   // Rate limiting on API routes
   app.use('/api/', apiLimiter);
+
+  // API documentation endpoint (no auth required)
+  app.get('/api/docs', (_req: Request, res: Response) => {
+    const { getApiDocumentation } = require('./services/apiDocumentationService');
+    res.json(getApiDocumentation());
+  });
 
   // Health check endpoint (no auth required)
   app.get('/api/health', async (_req: Request, res: Response) => {
@@ -66,6 +79,7 @@ export function createApp() {
       db: dbConnected ? 'connected' : 'disconnected',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
     });
   });
 
@@ -96,6 +110,9 @@ export function createApp() {
   app.use('/api/admin/etl', dataProcessingRoutes);
   app.use('/api/admin/capacity', capacityRoutes);
   app.use('/api/admin/security-audit', securityAuditRoutes);
+  app.use('/api/admin/qa', qaRoutes);
+  app.use('/api/admin/decisions', intelligenceDecisionRoutes);
+  app.use('/api/admin/agents', agentRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {

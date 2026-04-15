@@ -3,6 +3,7 @@ import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { listErrors, getErrorById, resolveError, getErrorStats } from '../../services/errorTrackingService';
 import { createAuditLog } from '../../services/auditLogService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 router.use(authenticate);
@@ -11,7 +12,10 @@ router.get('/stats', authorize('campaigns:read'), async (_req: Request, res: Res
   try {
     const stats = await getErrorStats();
     res.json(stats);
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /errors/stats failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
@@ -25,14 +29,20 @@ router.get('/', authorize('campaigns:read'), async (req: Request, res: Response,
       offset: req.query.offset ? Number(req.query.offset) : 0,
     });
     res.json({ errors: result.rows, total: result.count });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /errors failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/:id', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const err = await getErrorById(req.params.id as string);
     res.json({ error: err });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /errors/:id failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.patch('/:id/resolve', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
@@ -47,7 +57,10 @@ router.patch('/:id/resolve', authorize('campaigns:write'), async (req: Request, 
       ipAddress: req.ip || null,
     });
     res.json({ error: err });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('PATCH /errors/:id/resolve failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 export default router;

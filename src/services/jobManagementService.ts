@@ -106,6 +106,32 @@ export async function getJobById(id: string): Promise<JobExecution> {
 }
 
 /**
+ * Retry a failed job by creating a new execution based on it.
+ */
+export async function retryJob(jobId: string): Promise<JobExecution> {
+  const failedJob = await JobExecution.findByPk(jobId);
+  if (!failedJob) throw new NotFoundError('Job execution not found');
+  if (failedJob.status !== 'failed') {
+    throw new ValidationError('Only failed jobs can be retried');
+  }
+
+  const retryExecution = await JobExecution.create({
+    job_name: failedJob.job_name,
+    job_type: failedJob.job_type,
+    status: 'running',
+    started_at: new Date(),
+    metadata: {
+      ...(failedJob.metadata as any || {}),
+      retry_of: failedJob.id,
+      original_error: failedJob.error_message,
+    },
+  });
+
+  logger.info('Job retried', { originalId: failedJob.id, retryId: retryExecution.id, name: failedJob.job_name });
+  return retryExecution;
+}
+
+/**
  * Get aggregate stats for jobs.
  */
 export async function getJobStats() {

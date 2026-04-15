@@ -6,6 +6,7 @@ import {
   listNotifications,
   markAsRead,
 } from '../services/notificationService';
+import { logger } from '../config/logger';
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.post('/', authorize('notifications:write'), async (req: Request, res: Res
     const notification = await createNotification(req.body);
     res.status(201).json({ notification });
   } catch (error) {
+    logger.error('POST /notifications failed', { error: (error as Error).message });
     next(error);
   }
 });
@@ -35,6 +37,7 @@ router.get('/', authorize('notifications:read'), async (req: Request, res: Respo
       total: result.count,
     });
   } catch (error) {
+    logger.error('GET /notifications failed', { error: (error as Error).message });
     next(error);
   }
 });
@@ -44,6 +47,7 @@ router.patch('/:id/read', authorize('notifications:read'), async (req: Request, 
     const notification = await markAsRead(req.params.id as string, req.user!.userId);
     res.json({ notification });
   } catch (error) {
+    logger.error('PATCH /notifications/:id/read failed', { id: req.params.id, error: (error as Error).message });
     next(error);
   }
 });

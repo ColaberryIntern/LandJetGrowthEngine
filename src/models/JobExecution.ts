@@ -1,6 +1,6 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
 
-export const JOB_TYPES = ['scheduler', 'agent', 'draft_engine', 'repair', 'health_scan'] as const;
+export const JOB_TYPES = ['scheduler', 'agent', 'draft_engine', 'repair', 'health_scan', 'data_enrichment', 'email_dispatch'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const;

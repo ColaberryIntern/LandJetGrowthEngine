@@ -59,7 +59,7 @@ export function getStats(campaignId?: string) {
 }
 
 export function getHealth() {
-  return request<{ status: string; db: string }>('/health');
+  return request<{ status: string; db: string; uptime: number; environment: string }>('/health');
 }
 
 // Audit Logs
@@ -167,6 +167,12 @@ export function getCampaignAnalytics(campaignId: string) {
   }>(`/admin/outreach/campaigns/${campaignId}/analytics`);
 }
 
+export function getBatchCampaignAnalytics(campaignIds: string[]) {
+  return request<{ analytics: Record<string, { total_contacts: number; active: number; completed: number; contacted: number; never_contacted: number }> }>(
+    `/admin/outreach/campaigns/batch-analytics?ids=${campaignIds.join(',')}`
+  );
+}
+
 export function uploadCampaignCSV(campaignId: string, csv: string) {
   return request<{ created: number; skipped: number; total: number }>(
     `/admin/outreach/campaigns/${campaignId}/upload`,
@@ -249,4 +255,463 @@ export function createStrategy(name: string, prompt: string) {
     method: 'POST',
     body: JSON.stringify({ name, prompt }),
   });
+}
+
+// API Integrations
+export interface ApiIntegration {
+  id: string;
+  name: string;
+  provider: string;
+  status: 'active' | 'degraded' | 'offline' | 'pending';
+  base_url: string | null;
+  api_version: string | null;
+  auth_type: string | null;
+  rate_limit: number | null;
+  last_health_check: string | null;
+  last_error: string | null;
+  total_calls: number;
+  error_count: number;
+  avg_latency_ms: number | null;
+  config: object | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrationStats {
+  total: number;
+  active: number;
+  degraded: number;
+  offline: number;
+  health_rate: number;
+}
+
+export function getIntegrationStats() {
+  return request<IntegrationStats>('/admin/integrations/stats');
+}
+
+export function getIntegrations(filters?: { provider?: string; status?: string }) {
+  const params = new URLSearchParams();
+  if (filters?.provider) params.set('provider', filters.provider);
+  if (filters?.status) params.set('status', filters.status);
+  const qs = params.toString();
+  return request<{ integrations: ApiIntegration[]; total: number }>(`/admin/integrations${qs ? '?' + qs : ''}`);
+}
+
+export function createIntegration(data: { name: string; provider: string; base_url?: string; api_version?: string; auth_type?: string; rate_limit?: number; config?: object }) {
+  return request<{ integration: ApiIntegration }>('/admin/integrations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateIntegration(id: string, updates: Partial<{ status: string; config: object }>) {
+  return request<{ integration: ApiIntegration }>(`/admin/integrations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
+// QA & Testing
+export interface QADashboard {
+  qa_status_counts: { passed: number; failed: number; untested: number };
+  health_counts: { healthy: number; degraded: number; critical: number; unknown: number };
+  error_summary: { total: number; unresolved: number; today: number; bySeverity: Record<string, number> };
+  agent_activity: { email_retries: number; voice_fallbacks: number; bounce_cleanups: number; self_healing_retries: number };
+}
+
+export interface CampaignQADetail {
+  id: string;
+  name: string;
+  status: string;
+  qa_status: string;
+  health_score: number | null;
+  health_status: string | null;
+  last_scan_at: string | null;
+  unresolved_errors: number;
+  active_leads: number;
+}
+
+export interface QAResult {
+  campaignId: string;
+  score: number;
+  status: string;
+  issues: string[];
+}
+
+export function getQADashboard() {
+  return request<QADashboard>('/admin/qa/dashboard');
+}
+
+export function getQACampaigns() {
+  return request<{ campaigns: CampaignQADetail[] }>('/admin/qa/campaigns');
+}
+
+export function runQACycle() {
+  return request<{ results: QAResult[] }>('/admin/qa/run-cycle', { method: 'POST' });
+}
+
+export function getQAAgentActivity() {
+  return request<QADashboard['agent_activity']>('/admin/qa/agents');
+}
+
+export function getTestSuiteInfo() {
+  return request<{ framework: string; runner: string; categories: Record<string, number>; total: number; test_files: string[] }>('/admin/qa/test-suite');
+}
+
+// Job Management
+export interface JobExecution {
+  id: string;
+  job_name: string;
+  job_type: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  result: object | null;
+  metadata: object | null;
+}
+
+export interface JobStats {
+  total: number;
+  running: number;
+  completed_today: number;
+  failed_today: number;
+  avg_duration_ms: number;
+  recent_failures: JobExecution[];
+}
+
+export function getJobStats() {
+  return request<JobStats>('/admin/jobs/stats');
+}
+
+export function getJobs(filters?: { status?: string; limit?: number; offset?: number }) {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  if (filters?.offset) params.set('offset', String(filters.offset));
+  const qs = params.toString();
+  return request<{ jobs: JobExecution[]; total: number }>(`/admin/jobs${qs ? '?' + qs : ''}`);
+}
+
+export function retryJob(jobId: string) {
+  return request<{ job: JobExecution }>(`/admin/jobs/${jobId}/retry`, { method: 'POST' });
+}
+
+// Locale Settings
+export interface LocalePreferences {
+  timezone: string;
+  date_format: string;
+  currency: string;
+  locale: string;
+}
+
+export function getLocaleSettings() {
+  return request<LocalePreferences>('/admin/jobs/locale/settings');
+}
+
+export function updateLocaleSettings(updates: Partial<LocalePreferences>) {
+  return request<LocalePreferences>('/admin/jobs/locale/settings', {
+    method: 'POST',
+    body: JSON.stringify(updates),
+  });
+}
+
+// Performance & Scalability
+export interface RequestTimingSummary {
+  total_requests: number;
+  avg_duration_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  slow_requests: number;
+  slowest_endpoints: { path: string; method: string; avg_ms: number; count: number }[];
+  requests_per_minute: number;
+}
+
+export interface PerformanceStats {
+  total: number;
+  warning: number;
+  critical: number;
+  recent_averages: { category: string; metric_name: string; avg_value: number; max_value: number; unit: string; count: number }[];
+}
+
+export interface PerformanceMetricRecord {
+  id: string;
+  category: string;
+  metric_name: string;
+  value: number;
+  unit: string;
+  threshold_warning: number | null;
+  threshold_critical: number | null;
+  status: string;
+  context: object | null;
+  recorded_at: string;
+}
+
+export interface CapacityReport {
+  current: { total_leads: number; active_campaigns: number; active_users: number; pending_actions: number; failed_jobs: number; daily_throughput: number };
+  growth: { period: string; leads: number; emails: number; interactions: number; jobs: number }[];
+  bottlenecks: string[];
+  recommendations: string[];
+  weekly_growth_multiplier: number;
+}
+
+export function getPerformanceStats() {
+  return request<PerformanceStats>('/admin/performance/stats');
+}
+
+export function getRequestTimingSummary() {
+  return request<RequestTimingSummary>('/admin/performance/requests');
+}
+
+export function getPerformanceMetrics(filters?: { category?: string; status?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (filters?.category) params.set('category', filters.category);
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  return request<{ metrics: PerformanceMetricRecord[]; total: number }>(`/admin/performance${qs ? '?' + qs : ''}`);
+}
+
+export function getCapacityReport() {
+  return request<CapacityReport>('/admin/capacity');
+}
+
+// Resource Configuration
+export interface ResourceConfig {
+  max_per_cycle: number;
+  max_per_campaign: number;
+  send_window_start: number;
+  send_window_end: number;
+  max_daily_calls: number;
+  api_rate_limit: number;
+  retry_delay_minutes: number;
+}
+
+export function getResourceConfig() {
+  return request<ResourceConfig>('/admin/capacity/resources');
+}
+
+export function updateResourceConfig(updates: Partial<ResourceConfig>) {
+  return request<ResourceConfig>('/admin/capacity/resources', {
+    method: 'POST',
+    body: JSON.stringify(updates),
+  });
+}
+
+// Intelligence Decisions
+export interface IntelligenceDecision {
+  decision_id: string;
+  trace_id: string;
+  problem_detected: string;
+  analysis_summary: string;
+  recommended_action: string;
+  action_details: object | null;
+  risk_score: number;
+  confidence_score: number;
+  risk_tier: string;
+  execution_status: string;
+  executed_at: string | null;
+  executed_by: string | null;
+  reasoning: string | null;
+  created_at: string;
+}
+
+export interface DecisionStats {
+  total: number;
+  proposed: number;
+  approved: number;
+  executed: number;
+  rejected: number;
+  failed: number;
+  by_risk_tier: Record<string, number>;
+  avg_confidence: number;
+}
+
+export function getDecisionStats() {
+  return request<DecisionStats>('/admin/decisions/stats');
+}
+
+export function getDecisions(filters?: { execution_status?: string; risk_tier?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (filters?.execution_status) params.set('execution_status', filters.execution_status);
+  if (filters?.risk_tier) params.set('risk_tier', filters.risk_tier);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  return request<{ decisions: IntelligenceDecision[]; total: number }>(`/admin/decisions${qs ? '?' + qs : ''}`);
+}
+
+export function updateDecisionStatus(id: string, status: string, reasoning?: string) {
+  return request<{ decision: IntelligenceDecision }>(`/admin/decisions/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, reasoning }),
+  });
+}
+
+// Agent Management
+export interface AiAgentRecord {
+  id: string;
+  name: string;
+  type: string;
+  department: string | null;
+  status: string;
+  schedule: string | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  metrics: object | null;
+}
+
+export function getAgents(filters?: { type?: string; enabled?: string }) {
+  const params = new URLSearchParams();
+  if (filters?.type) params.set('type', filters.type);
+  if (filters?.enabled) params.set('enabled', filters.enabled);
+  const qs = params.toString();
+  return request<{ agents: AiAgentRecord[]; total: number }>(`/admin/agents${qs ? '?' + qs : ''}`);
+}
+
+export function enableAgent(name: string) {
+  return request<{ agent: AiAgentRecord }>(`/admin/agents/${name}/enable`, { method: 'PATCH' });
+}
+
+export function disableAgent(name: string) {
+  return request<{ agent: AiAgentRecord }>(`/admin/agents/${name}/disable`, { method: 'PATCH' });
+}
+
+// User Profile
+export interface UserProfile {
+  user: { id: string; email: string; first_name: string; last_name: string; role: string; status: string; last_login_at: string | null };
+  completeness: { score: number; filled: string[]; missing: string[]; is_complete: boolean };
+  locale: LocalePreferences;
+}
+
+export function getUserProfile() {
+  return request<UserProfile>('/users/me/profile');
+}
+
+// Unexpected Engagement
+export function logUnexpectedEngagement(data: { description: string; page_context?: string; metadata?: object }) {
+  return request<{ feedback: any }>('/admin/feedback/unexpected-engagement', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// Data Management & Privacy
+export interface SecurityAuditResult {
+  compliance_score: number;
+  health: string;
+  checks: { name: string; status: string; details: string }[];
+  recommendations: string[];
+  metrics: Record<string, number>;
+}
+
+export interface ConsentStats {
+  [consentType: string]: { granted: number; revoked: number };
+}
+
+export interface EtlPipelineRecord {
+  id: string;
+  name: string;
+  source: string;
+  status: string;
+  records_extracted: number | null;
+  records_transformed: number | null;
+  records_loaded: number | null;
+  error_message: string | null;
+  duration_ms: number | null;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface EtlStats {
+  total: number;
+  completed: number;
+  failed: number;
+  running: number;
+  total_records_loaded: number;
+  avg_duration_ms: number;
+  success_rate: number;
+}
+
+export function getSecurityAudit() {
+  return request<SecurityAuditResult>('/admin/security-audit');
+}
+
+export function getConsentStats() {
+  return request<ConsentStats>('/admin/feedback/consents/stats');
+}
+
+export function getEtlPipelines(filters?: { source?: string; status?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (filters?.source) params.set('source', filters.source);
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  return request<{ pipelines: EtlPipelineRecord[]; total: number }>(`/admin/etl${qs ? '?' + qs : ''}`);
+}
+
+export function getEtlStats() {
+  return request<EtlStats>('/admin/etl/stats');
+}
+
+// Deployments
+export interface DeploymentRecord {
+  id: string;
+  version: string;
+  environment: string;
+  status: string;
+  description: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface DeploymentStats {
+  total: number;
+  deployed: number;
+  failed: number;
+  rolled_back: number;
+  success_rate: number;
+}
+
+export function getDeployments() {
+  return request<{ deployments: DeploymentRecord[]; total: number }>('/admin/deployments');
+}
+
+export function getDeploymentStats() {
+  return request<DeploymentStats>('/admin/deployments/stats');
+}
+
+// API Documentation
+export interface ApiEndpoint {
+  method: string;
+  path: string;
+  description: string;
+  auth: boolean;
+  permission: string | null;
+}
+
+export interface ApiDocs {
+  title: string;
+  version: string;
+  base_url: string;
+  endpoints: ApiEndpoint[];
+  roles: { name: string; permissions: string[] }[];
+  generated_at: string;
+}
+
+export function getApiDocs() {
+  return request<ApiDocs>('/docs');
+}
+
+// Data Export
+export function exportLeads(format: 'json' | 'csv' = 'json', filters?: { status?: string; pipeline_stage?: string; temperature?: string }) {
+  const params = new URLSearchParams({ format });
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.pipeline_stage) params.set('pipeline_stage', filters.pipeline_stage);
+  if (filters?.temperature) params.set('temperature', filters.temperature);
+  return request<{ leads: any[]; total: number; exported_at: string }>(`/admin/leads/export?${params.toString()}`);
 }

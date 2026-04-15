@@ -51,6 +51,28 @@ export async function getFeedbackStats() {
   return { total, pending: submitted, resolved, avg_rating: Math.round(((avgRating as any)?.avg || 0) * 10) / 10 };
 }
 
+// --- Unexpected Engagement Logging ---
+
+export async function logUnexpectedEngagement(input: {
+  user_id?: string;
+  description: string;
+  page_context?: string;
+  metadata?: object;
+}) {
+  if (!input.description?.trim()) throw new ValidationError('description is required');
+
+  return UserFeedback.create({
+    user_id: input.user_id || null,
+    type: 'general' as any,
+    status: 'submitted',
+    subject: 'Unexpected user engagement',
+    body: input.description.trim(),
+    rating: null,
+    page_context: input.page_context || null,
+    metadata: { engagement_type: 'unexpected_behavior', ...(input.metadata || {}) },
+  });
+}
+
 // --- Consent Management (GDPR/CCPA) ---
 
 export async function setConsent(userId: string, consentType: string, granted: boolean, ipAddress?: string) {

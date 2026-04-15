@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { listAuditLogs, getAuditLogById, getAuditStats } from '../../services/loggingMonitoringService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 router.use(authenticate);
@@ -10,7 +11,10 @@ router.get('/stats', authorize('campaigns:read'), async (_req: Request, res: Res
   try {
     const stats = await getAuditStats();
     res.json(stats);
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /audit-logs/stats failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
@@ -25,14 +29,20 @@ router.get('/', authorize('campaigns:read'), async (req: Request, res: Response,
       offset: req.query.offset ? Number(req.query.offset) : 0,
     });
     res.json({ logs: result.rows, total: result.count });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /audit-logs failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/:id', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const log = await getAuditLogById(req.params.id as string);
     res.json({ log });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /audit-logs/:id failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 export default router;

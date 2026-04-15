@@ -44,6 +44,40 @@ export async function createSubscription(
   }
 }
 
+/**
+ * Cancel a Stripe subscription.
+ * Ensures no further payments are processed after cancellation.
+ */
+export async function cancelSubscription(subscriptionId: string): Promise<SubscriptionResult> {
+  if (!subscriptionId) {
+    return { success: false, error: 'subscriptionId is required' };
+  }
+
+  const apiKey = process.env.STRIPE_SECRET_KEY;
+  if (!apiKey) {
+    return { success: false, error: 'STRIPE_SECRET_KEY not configured' };
+  }
+
+  try {
+    const response = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as any;
+      logger.error('Stripe subscription cancellation failed', { subscriptionId, error: errorData.error?.message });
+      return { success: false, subscriptionId, error: errorData.error?.message || 'Cancellation failed' };
+    }
+
+    logger.info('Stripe subscription cancelled', { subscriptionId });
+    return { success: true, subscriptionId };
+  } catch (error) {
+    logger.error('Stripe cancellation error', { subscriptionId, error: (error as Error).message });
+    return { success: false, subscriptionId, error: (error as Error).message };
+  }
+}
+
 export function getPlanDetails(plan: string) {
   return SUBSCRIPTION_PLANS[plan as keyof typeof SUBSCRIPTION_PLANS] || null;
 }

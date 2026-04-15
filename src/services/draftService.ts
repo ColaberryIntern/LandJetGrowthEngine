@@ -88,20 +88,21 @@ export async function listDrafts(filters: DraftFilters) {
     order: [['created_at', 'DESC']],
     limit: filters.limit || 25,
     offset: filters.offset || 0,
+    include: [{
+      model: Lead,
+      as: 'lead',
+      attributes: ['id', 'first_name', 'last_name', 'email', 'company', 'title'],
+      required: false,
+    }],
   });
 
-  // Enrich with lead data
-  const enriched = await Promise.all(
-    drafts.rows.map(async (draft) => {
-      const lead = await Lead.findByPk(draft.lead_id);
-      return {
-        ...draft.toJSON(),
-        lead: lead
-          ? { id: lead.id, first_name: lead.first_name, last_name: lead.last_name, email: lead.email, company: lead.company, title: lead.title }
-          : null,
-      };
-    }),
-  );
+  const enriched = drafts.rows.map(draft => {
+    const json = draft.toJSON() as any;
+    return {
+      ...json,
+      lead: json.lead || null,
+    };
+  });
 
   return { drafts: enriched, total: drafts.count };
 }

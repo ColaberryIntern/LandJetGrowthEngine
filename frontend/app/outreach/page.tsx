@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   getOutreachToday, advanceOutreachContact, skipOutreachContact,
   assignContactCampaign, getCampaigns,
@@ -79,13 +79,19 @@ export default function OutreachPage() {
     finally { setActing(null); }
   }
 
-  const filteredContacts = filter === 'all'
-    ? contacts
-    : filter === 'unassigned'
-      ? contacts.filter(c => !c.vertical)
-      : contacts.filter(c => c.vertical === filter);
+  const filteredContacts = useMemo(() =>
+    filter === 'all'
+      ? contacts
+      : filter === 'unassigned'
+        ? contacts.filter(c => !c.vertical)
+        : contacts.filter(c => c.vertical === filter),
+    [contacts, filter]
+  );
 
-  const verticals = [...new Set(contacts.map(c => c.vertical).filter(Boolean))] as string[];
+  const verticals = useMemo(() =>
+    [...new Set(contacts.map(c => c.vertical).filter(Boolean))] as string[],
+    [contacts]
+  );
 
   if (loading) {
     return (

@@ -16,11 +16,17 @@ export interface LeadFilters {
   offset?: number;
 }
 
+const VALID_LEAD_SOURCES = ['upload', 'manual', 'import', 'api', 'referral', 'website', 'campaign', 'enrichment'];
+
 export async function createLead(
   input: Omit<LeadCreationAttributes, 'lead_score' | 'temperature'>,
 ) {
   if (!input.email || !input.first_name || !input.last_name) {
     throw new ValidationError('email, first_name, and last_name are required');
+  }
+
+  if (input.lead_source && !VALID_LEAD_SOURCES.includes(input.lead_source)) {
+    throw new ValidationError(`Invalid lead source: ${input.lead_source}. Valid: ${VALID_LEAD_SOURCES.join(', ')}`);
   }
 
   const scoreBreakdown = calculateLeadScore(input);

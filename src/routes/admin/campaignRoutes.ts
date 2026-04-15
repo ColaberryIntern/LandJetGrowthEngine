@@ -11,6 +11,7 @@ import {
 import { getTemplates } from '../../services/campaignBuilderService';
 import { enrollLead, enrollBulk, getCampaignLeads } from '../../services/enrollmentService';
 import { createAuditLog } from '../../services/auditLogService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 router.use(authenticate);
@@ -27,7 +28,10 @@ router.post('/', authorize('campaigns:write'), async (req: Request, res: Respons
       ipAddress: req.ip || null,
     });
     res.status(201).json({ campaign });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('POST /campaigns failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
@@ -40,14 +44,20 @@ router.get('/', authorize('campaigns:read'), async (req: Request, res: Response,
       offset: req.query.offset ? Number(req.query.offset) : 0,
     });
     res.json({ campaigns: result.rows, total: result.count });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /campaigns failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/:id', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const campaign = await getCampaignById(req.params.id as string);
     res.json({ campaign });
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('GET /campaigns/:id failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.patch('/:id', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
@@ -115,18 +125,28 @@ router.post('/:id/enroll', authorize('campaigns:write'), async (req: Request, re
       ipAddress: req.ip || null,
     });
     res.status(201).json(result);
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('POST /campaigns/:id/enroll failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.post('/:id/enroll-bulk', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { lead_ids, event_date, is_test } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: 'lead_ids must be a non-empty array' });
+    }
     const result = await enrollBulk(req.params.id as string, lead_ids, {
       eventDate: event_date ? new Date(event_date) : undefined,
       isTest: is_test,
     });
+    logger.info('Bulk enrollment completed', { campaignId: req.params.id, enrolled: result.enrolled, skipped: result.skipped });
     res.json(result);
-  } catch (error) { next(error); }
+  } catch (error) {
+    logger.error('POST /campaigns/:id/enroll-bulk failed', { id: req.params.id, error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.get('/:id/leads', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {

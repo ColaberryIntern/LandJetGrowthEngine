@@ -8,15 +8,19 @@ export interface UserAttributes {
   last_name: string;
   role: 'admin' | 'manager' | 'user';
   status: 'active' | 'inactive' | 'suspended';
+  email_verified: boolean;
+  verification_token: string | null;
   last_login_at: Date | null;
   created_at?: Date;
   updated_at?: Date;
 }
 
 export interface UserCreationAttributes
-  extends Omit<UserAttributes, 'id' | 'created_at' | 'updated_at' | 'last_login_at'> {
+  extends Omit<UserAttributes, 'id' | 'created_at' | 'updated_at' | 'last_login_at' | 'email_verified' | 'verification_token'> {
   id?: string;
   last_login_at?: Date | null;
+  email_verified?: boolean;
+  verification_token?: string | null;
 }
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
@@ -27,6 +31,8 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare last_name: string;
   declare role: 'admin' | 'manager' | 'user';
   declare status: 'active' | 'inactive' | 'suspended';
+  declare email_verified: boolean;
+  declare verification_token: string | null;
   declare last_login_at: Date | null;
   declare created_at: Date;
   declare updated_at: Date;
@@ -67,6 +73,15 @@ export function initUserModel(sequelize: Sequelize): typeof User {
         type: DataTypes.ENUM('active', 'inactive', 'suspended'),
         allowNull: false,
         defaultValue: 'active',
+      },
+      email_verified: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      verification_token: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
       },
       last_login_at: {
         type: DataTypes.DATE,

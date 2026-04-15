@@ -9,6 +9,16 @@ import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 
+// --- TTL Cache ---
+
+interface CacheEntry<T> { data: T; expiresAt: number }
+const CACHE_TTL = 60_000; // 60 seconds
+
+let _settingsCache: CacheEntry<OutreachSettings> | null = null;
+let _globalVarsCache: CacheEntry<Record<string, string>> | null = null;
+
+function invalidateSettingsCache() { _settingsCache = null; }
+
 // --- Variable Interpolation ---
 
 /**
@@ -19,12 +29,15 @@ export function interpolateVariables(template: string, variables: Record<string,
 }
 
 /**
- * Get global variables shared across all campaigns.
+ * Get global variables shared across all campaigns (cached 60s).
  */
 export async function getGlobalVariables(): Promise<Record<string, string>> {
+  if (_globalVarsCache && Date.now() < _globalVarsCache.expiresAt) return _globalVarsCache.data;
   try {
     const row = await SystemSetting.findByPk('outreach.global_variables');
-    if (row) return row.value as any;
+    const data = row ? (row.value as any) : {};
+    _globalVarsCache = { data, expiresAt: Date.now() + CACHE_TTL };
+    return data;
   } catch {}
   return {};
 }
@@ -67,11 +80,16 @@ const DEFAULTS: OutreachSettings = {
 };
 
 export async function getOutreachSettings(): Promise<OutreachSettings> {
+  if (_settingsCache && Date.now() < _settingsCache.expiresAt) return _settingsCache.data;
   try {
     const row = await SystemSetting.findByPk('outreach.settings');
-    if (!row) return { ...DEFAULTS };
+    if (!row) {
+      const data = { ...DEFAULTS };
+      _settingsCache = { data, expiresAt: Date.now() + CACHE_TTL };
+      return data;
+    }
     const val = row.value as any;
-    return {
+    const data: OutreachSettings = {
       emails_per_day: val.emails_per_day ?? DEFAULTS.emails_per_day,
       follow_up_delay_days: val.follow_up_delay_days ?? DEFAULTS.follow_up_delay_days,
       ai_drafts_enabled: val.ai_drafts_enabled ?? DEFAULTS.ai_drafts_enabled,
@@ -79,15 +97,20 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
       sender_role: val.sender_role ?? DEFAULTS.sender_role,
       sender_email: val.sender_email ?? DEFAULTS.sender_email,
     };
+    _settingsCache = { data, expiresAt: Date.now() + CACHE_TTL };
+    return data;
   } catch {
     return { ...DEFAULTS };
   }
 }
 
 export async function updateOutreachSettings(updates: Partial<OutreachSettings>): Promise<OutreachSettings> {
+  invalidateSettingsCache();
   const current = await getOutreachSettings();
   const merged: OutreachSettings = { ...current, ...updates };
   await SystemSetting.upsert({ key: 'outreach.settings', value: merged as any, description: 'Outreach system controls' });
+  invalidateSettingsCache();
+  _settingsCache = { data: merged, expiresAt: Date.now() + CACHE_TTL };
   return merged;
 }
 

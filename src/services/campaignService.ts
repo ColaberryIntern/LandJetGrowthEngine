@@ -1,5 +1,6 @@
 import { Campaign, CampaignCreationAttributes, ApprovalStatus } from '../models/Campaign';
 import { ValidationError, NotFoundError } from '../middleware/errors';
+import { logger } from '../config/logger';
 
 const VALID_APPROVAL_TRANSITIONS: Record<ApprovalStatus, ApprovalStatus[]> = {
   draft: ['pending_approval'],
@@ -35,16 +36,23 @@ export async function createCampaign(
 
   const settings = { ...DEFAULT_SETTINGS, ...(input.settings || {}) };
 
-  return Campaign.create({
-    ...input,
-    settings,
-    status: 'draft',
-    campaign_mode: (input.campaign_mode as any) || 'standard',
-    created_by: userId,
-    approval_status: 'draft',
-    budget_spent: 0,
-    qa_status: 'untested',
-  });
+  try {
+    const campaign = await Campaign.create({
+      ...input,
+      settings,
+      status: 'draft',
+      campaign_mode: (input.campaign_mode as any) || 'standard',
+      created_by: userId,
+      approval_status: 'draft',
+      budget_spent: 0,
+      qa_status: 'untested',
+    });
+    logger.info('Campaign created', { id: campaign.id, name: campaign.name, type: campaign.type });
+    return campaign;
+  } catch (error) {
+    logger.error('Failed to create campaign', { name: input.name, error: (error as Error).message });
+    throw error;
+  }
 }
 
 export async function getCampaignById(id: string) {
@@ -105,6 +113,7 @@ export async function transitionApproval(
   }
 
   await campaign.update(updateData);
+  logger.info('Campaign approval transitioned', { id, from: campaign.approval_status, to: newStatus });
   return campaign;
 }
 
@@ -128,10 +137,16 @@ export async function listCampaigns(filters: {
   if (filters.type) where.type = filters.type;
   if (filters.approval_status) where.approval_status = filters.approval_status;
 
+  const limit = Math.min(Math.max(filters.limit || 25, 1), 100);
+  const offset = Math.max(filters.offset || 0, 0);
+
   return Campaign.findAndCountAll({
     where,
     order: [['created_at', 'DESC']],
-    limit: filters.limit || 25,
-    offset: filters.offset || 0,
+    limit,
+    offset,
+    attributes: ['id', 'name', 'type', 'status', 'approval_status', 'campaign_mode',
+      'ai_system_prompt', 'settings', 'channel_config', 'sequence_steps', 'qa_status',
+      'budget_total', 'budget_spent', 'created_at', 'updated_at'],
   });
 }

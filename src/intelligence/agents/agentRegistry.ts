@@ -1,4 +1,6 @@
 import { AiAgent, AiAgentCreationAttributes } from '../../models/AiAgent';
+import { ValidationError, NotFoundError } from '../../middleware/errors';
+import { logger } from '../../config/logger';
 
 export interface AgentDefinition {
   name: string;
@@ -13,6 +15,8 @@ export interface AgentDefinition {
  * Register an agent using findOrCreate pattern (idempotent seeding).
  */
 export async function registerAgent(definition: AgentDefinition): Promise<AiAgent> {
+  if (!definition.name?.trim()) throw new ValidationError('Agent name is required');
+  if (!definition.type?.trim()) throw new ValidationError('Agent type is required');
   const [agent, created] = await AiAgent.findOrCreate({
     where: { name: definition.name },
     defaults: {
@@ -44,16 +48,20 @@ export async function getAgent(name: string): Promise<AiAgent | null> {
 }
 
 export async function enableAgent(name: string): Promise<AiAgent> {
+  if (!name?.trim()) throw new ValidationError('Agent name is required');
   const agent = await AiAgent.findOne({ where: { name } });
-  if (!agent) throw new Error(`Agent not found: ${name}`);
+  if (!agent) throw new NotFoundError(`Agent not found: ${name}`);
   await agent.update({ enabled: true, status: 'active' });
+  logger.info('Agent enabled', { name, agentId: agent.id });
   return agent;
 }
 
 export async function disableAgent(name: string): Promise<AiAgent> {
+  if (!name?.trim()) throw new ValidationError('Agent name is required');
   const agent = await AiAgent.findOne({ where: { name } });
-  if (!agent) throw new Error(`Agent not found: ${name}`);
+  if (!agent) throw new NotFoundError(`Agent not found: ${name}`);
   await agent.update({ enabled: false, status: 'disabled' });
+  logger.info('Agent disabled', { name, agentId: agent.id });
   return agent;
 }
 

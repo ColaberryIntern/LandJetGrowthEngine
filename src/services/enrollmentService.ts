@@ -4,6 +4,7 @@ import { CampaignLead } from '../models/CampaignLead';
 import { ScheduledEmail } from '../models/ScheduledEmail';
 import { Lead } from '../models/Lead';
 import { ValidationError, NotFoundError, ConflictError } from '../middleware/errors';
+import { logger } from '../config/logger';
 
 /**
  * Generate a random jitter between 0 and maxMs milliseconds.
@@ -156,6 +157,7 @@ export async function enrollLead(
     await campaignLead.update({ next_action_at: firstPending.scheduled_for });
   }
 
+  logger.info('Lead enrolled in campaign', { campaignId, leadId, scheduled: scheduledCount, cancelled: cancelledCount });
   return { campaignLead, scheduledActions: scheduledCount, cancelledActions: cancelledCount };
 }
 

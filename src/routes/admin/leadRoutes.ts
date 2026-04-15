@@ -3,6 +3,7 @@ import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { createLead, getLeadById, updateLead, listLeads } from '../../services/leadService';
 import { createAuditLog } from '../../services/auditLogService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 
@@ -51,6 +52,59 @@ router.get('/', authorize('leads:read'), async (req: Request, res: Response, nex
       offset: filters.offset,
     });
   } catch (error) {
+    next(error);
+  }
+});
+
+// --- Data Export (must be before /:id to avoid param matching) ---
+
+router.get('/export', authorize('leads:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const format = (req.query.format as string) || 'json';
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({ error: 'Format must be "json" or "csv"' });
+    }
+
+    const result = await listLeads({
+      status: req.query.status as string,
+      pipeline_stage: req.query.pipeline_stage as string,
+      temperature: req.query.temperature as string,
+      industry: req.query.industry as string,
+      limit: 5000,
+      offset: 0,
+    });
+
+    await createAuditLog({
+      userId: req.user!.userId,
+      action: 'lead.export',
+      entityType: 'lead',
+      entityId: null,
+      newValue: { format, count: result.count },
+      ipAddress: req.ip || null,
+    });
+
+    logger.info('Data export requested', { userId: req.user!.userId, format, count: result.count });
+
+    if (format === 'csv') {
+      const headers = ['id', 'first_name', 'last_name', 'email', 'company', 'title', 'phone', 'industry', 'vertical', 'temperature', 'lead_score', 'pipeline_stage', 'status', 'created_at'];
+      const csvLines = [headers.join(',')];
+      for (const lead of result.rows) {
+        const row = headers.map(h => {
+          const val = (lead as any)[h];
+          if (val === null || val === undefined) return '';
+          const str = String(val);
+          return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+        });
+        csvLines.push(row.join(','));
+      }
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="leads-export-${new Date().toISOString().slice(0, 10)}.csv"`);
+      res.send(csvLines.join('\n'));
+    } else {
+      res.json({ leads: result.rows, total: result.count, exported_at: new Date().toISOString() });
+    }
+  } catch (error) {
+    logger.error('Data export failed', { error: (error as Error).message });
     next(error);
   }
 });

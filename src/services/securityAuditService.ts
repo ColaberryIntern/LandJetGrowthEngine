@@ -12,6 +12,7 @@ import { logger } from '../config/logger';
  */
 
 export async function runSecurityAudit() {
+  try {
   const now = Date.now();
   const day = 86400 * 1000;
   const sevenDaysAgo = new Date(now - 7 * day);
@@ -107,4 +108,8 @@ export async function runSecurityAudit() {
     recommendations,
     audit_timestamp: new Date().toISOString(),
   };
+  } catch (error) {
+    logger.error('Security audit failed', { error: (error as Error).message });
+    throw error;
+  }
 }
