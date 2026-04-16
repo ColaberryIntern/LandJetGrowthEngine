@@ -8,6 +8,7 @@ import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
 import { sendOutreachEmail, getSenderForCampaign, testConnection } from '../../services/outreachEmailService';
+import { recordAgentRun } from '../../intelligence/agents/agentRegistry';
 import { logger } from '../../config/logger';
 
 const router = Router();
@@ -123,6 +124,7 @@ router.post('/deal-match', authorize('campaigns:write'), async (req: Request, re
       { deal_name, deal_type: deal_type || 'other', amount: amount || 'TBD', description, sector, geography },
       limit || 10,
     );
+    recordAgentRun('deal_matcher', { matches: matches.length }).catch(() => {});
     res.json({ matches, total: matches.length });
   } catch (error) {
     logger.error('POST /deal-match failed', { error: (error as Error).message });
@@ -198,6 +200,7 @@ router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, re
         };
       }).filter(Boolean);
 
+      recordAgentRun('inbound_classifier', { classified: inquiries.length }).catch(() => {});
       res.json({ inquiries, total: inquiries.length });
     } catch {
       res.json({ inquiries: [], total: 0 });
@@ -814,9 +817,10 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
 
     try {
       const parsed = JSON.parse(cleaned);
+      recordAgentRun('draft_rewriter', { tone }).catch(() => {});
       res.json({ subject: parsed.subject || current_subject, body: parsed.body || current_body, source: 'ai' });
     } catch {
-      // If JSON parse fails, use the raw text as body
+      recordAgentRun('draft_rewriter', { tone }).catch(() => {});
       res.json({ subject: current_subject, body: cleaned, source: 'ai' });
     }
   } catch (error) {

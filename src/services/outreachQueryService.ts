@@ -8,6 +8,7 @@ import { Op } from 'sequelize';
 import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 // --- TTL Cache ---
 
@@ -284,6 +285,8 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
   if (aiEnabled) {
     const aiResult = await generateAIDraft(name, lead.company, context, prompt, senderName, senderRole);
     if (aiResult) {
+      recordAgentRun('draft_writer').catch(() => {});
+      recordAgentRun('email_polisher').catch(() => {});
       return { subject: aiResult.subject, body: aiResult.body, prompt, source: 'ai' };
     }
   }
@@ -355,6 +358,8 @@ export async function getLeadsForToday(): Promise<Lead[]> {
 
   // Apply global cap
   const globalSettings = await getOutreachSettings();
+  recordAgentRun('priority_engine', { leads_scored: allLeads.length }).catch(() => {});
+  recordAgentRun('scheduler_engine', { leads_queued: Math.min(allLeads.length, globalSettings.emails_per_day) }).catch(() => {});
   return allLeads.slice(0, globalSettings.emails_per_day);
 }
 
@@ -392,6 +397,8 @@ export async function advanceLead(leadId: string): Promise<Lead | null> {
   }
 
   await lead.save();
+  recordAgentRun('sequence_engine', { lead_id: lead.id, stage: lead.sequence_stage }).catch(() => {});
+  recordAgentRun('communication_safety').catch(() => {});
   return lead;
 }
 
