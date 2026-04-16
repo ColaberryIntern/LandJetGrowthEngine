@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, type LocalePreferences, type ResourceConfig } from '@/lib/api';
+import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, getAgents, type LocalePreferences, type ResourceConfig, type AiAgentRecord } from '@/lib/api';
 import { useTranslation, SUPPORTED_LANGUAGES, LANGUAGE_LABELS, type Language } from '@/lib/i18n';
+import AgentOrgChart from '@/components/AgentOrgChart';
 
 interface HealthData {
   status: string;
@@ -11,15 +12,6 @@ interface HealthData {
   uptime: number;
   environment: string;
 }
-
-const AGENTS = [
-  { name: 'email_polisher', type: 'content_quality', department: 'outreach', schedule: 'On-demand' },
-  { name: 'response_classifier', type: 'nlp', department: 'outreach', schedule: 'On-demand' },
-  { name: 'campaign_qa', type: 'validation', department: 'campaigns', schedule: 'Every 15 min' },
-  { name: 'campaign_repair', type: 'repair', department: 'campaigns', schedule: 'Every 20 min' },
-  { name: 'self_healing', type: 'recovery', department: 'campaigns', schedule: 'Every 30 min' },
-  { name: 'engagement_features', type: 'engagement_analysis', department: 'growth', schedule: 'Every 4 hours' },
-];
 
 const ENV_COLORS: Record<string, string> = {
   production: 'bg-emerald-100 text-emerald-700',
@@ -50,6 +42,14 @@ export default function SystemPage() {
   const [editingResources, setEditingResources] = useState(false);
   const [resourceForm, setResourceForm] = useState({ max_per_cycle: 40, max_per_campaign: 10, send_window_start: 8, send_window_end: 17, max_daily_calls: 50, api_rate_limit: 100, retry_delay_minutes: 30 });
   const [resourceSaving, setResourceSaving] = useState(false);
+  const [agents, setAgents] = useState<AiAgentRecord[]>([]);
+
+  async function fetchAgents() {
+    try {
+      const res = await getAgents();
+      setAgents(res.agents || []);
+    } catch {}
+  }
 
   async function fetchHealth() {
     try {
@@ -81,7 +81,7 @@ export default function SystemPage() {
     } catch {}
   }
 
-  useEffect(() => { fetchHealth(); fetchLocale(); fetchResources(); }, []);
+  useEffect(() => { fetchHealth(); fetchLocale(); fetchResources(); fetchAgents(); }, []);
 
   async function handleLocaleSave() {
     setLocaleSaving(true);
@@ -396,38 +396,17 @@ export default function SystemPage() {
         </div>
       </section>
 
-      {/* Agent Status */}
+      {/* AI Agent Team */}
       <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">AI Agents</h2>
-        <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                <th className="px-5 py-3">Agent</th>
-                <th className="px-5 py-3">Type</th>
-                <th className="px-5 py-3">Department</th>
-                <th className="px-5 py-3">Schedule</th>
-                <th className="px-5 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {AGENTS.map((agent) => (
-                <tr key={agent.name} className="border-b border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-5 py-3 font-medium text-gray-900">{agent.name}</td>
-                  <td className="px-5 py-3 text-gray-500">{agent.type}</td>
-                  <td className="px-5 py-3 text-gray-500">{agent.department}</td>
-                  <td className="px-5 py-3 text-gray-500">{agent.schedule}</td>
-                  <td className="px-5 py-3">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                      isHealthy ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {isHealthy ? 'active' : 'unknown'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">AI Agent Team</h2>
+        <div className="mt-3">
+          {agents.length > 0 ? (
+            <AgentOrgChart agents={agents} />
+          ) : (
+            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
+              Loading agents...
+            </div>
+          )}
         </div>
       </section>
 
