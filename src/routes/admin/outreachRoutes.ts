@@ -78,29 +78,39 @@ router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write
     const campaign = await Campaign.findByPk(campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-    const variables = (campaign.settings as any)?.variables || {};
-    const varList = Object.entries(variables).map(([k, v]) => `{{${k}}} = "${v}"`).join('\n');
+    const campaignVars = (campaign.settings as any)?.variables || {};
+    const campaignVarList = Object.entries(campaignVars).map(([k, v]) => `{{${k}}} = "${v}"`).join('\n');
+    const leadVarList = '{{first_name}}, {{last_name}}, {{company}}, {{email}}, {{title}}, {{vertical}} (always available from lead data)';
+    const allVarList = campaignVarList ? `CAMPAIGN VARIABLES:\n${campaignVarList}\n\nLEAD VARIABLES (always available):\n${leadVarList}` : `LEAD VARIABLES (always available):\n${leadVarList}`;
+
     const currentPrompt = campaign.ai_system_prompt || '';
     const currentSteps = campaign.sequence_steps || [];
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured' });
 
-    const systemInstruction = `You are rewriting outreach email prompts for a campaign. You will be given the current campaign prompt, the current sequence step prompts, and a list of available variables with their values.
+    const systemInstruction = `You are rewriting outreach email prompts for a campaign. You will be given the available variables and the current prompts.
 
-Your job:
-1. Rewrite the campaign prompt to incorporate ALL available variables naturally using {{variable_name}} syntax
-2. Rewrite each sequence step prompt to use the variables appropriately
-3. Step 1 should be an initial outreach (warm, direct)
-4. Step 2 should be a follow-up with added value (reference proof points)
-5. Step 3 should be a graceful final touch (brief, leave door open)
-6. Keep the existing tone and structure but make sure every relevant variable is used
-7. Do NOT invent new variables. Only use the ones provided.
-8. Return JSON with "campaign_prompt" (string) and "steps" (array of {step, delay_days, prompt})
+CRITICAL RULES:
+1. ONLY use variables from the provided list. NEVER invent new variables.
+2. If a {{variable}} is not in the provided list, REMOVE it entirely and replace with natural language.
 
-Important: Keep prompts concise. Campaign prompt under 200 words. Step 1 under 100 words. Step 2 under 80 words. Step 3 under 70 words.`;
+SYSTEM PROMPT (campaign_prompt):
+- Master instruction for AI email generation
+- Must incorporate ALL campaign variables naturally using {{variable_name}} syntax
+- Must reference lead variables ({{first_name}}, {{company}}, etc.)
+- Under 200 words. Be specific about tone, length, and sign-off.
 
-    const userContent = `AVAILABLE VARIABLES:\n${varList}\n\nCURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
+SEQUENCE STEP PROMPTS:
+- Step 1 (initial outreach): Warm, direct. Use key variables like {{pain_point}}, {{positioning}}, {{proof_revenue}} if available. Under 100 words.
+- Step 2 (follow-up): Add value, reference different proof points like {{proof_customer}}, {{target_profile}} if available. Under 80 words.
+- Step 3 (final touch): Brief, graceful close. Only use {{first_name}}. Leave door open. Under 70 words.
+- Each step should only include variables RELEVANT to that step -- not all of them.
+
+Return JSON: {"campaign_prompt": "...", "steps": [{step, delay_days, prompt, channel}]}
+Preserve existing delay_days and channel values from the current steps.`;
+
+    const userContent = `${allVarList}\n\nCURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
