@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables } from '../../services/outreachQueryService';
+import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount } from '../../services/outreachQueryService';
 import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
@@ -469,6 +469,26 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
   } catch (error) { next(error); }
 });
 
+// --- Test Mode ---
+
+router.get('/test-sends/count', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const count = await getTestSendCount();
+    res.json({ count });
+  } catch (error) { next(error); }
+});
+
+router.post('/test-sends/reset', authorize('campaigns:write'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await resetTestSends();
+    logger.info('Test sends reset', { reset: result.reset });
+    res.json(result);
+  } catch (error) {
+    logger.error('Failed to reset test sends', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 // --- Contact Actions ---
 
 router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
@@ -526,6 +546,8 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
 
       if (globalSettings.test_mode) {
         logger.info('Test mode: redirecting email', { originalTo: leadBefore.email, testTo: globalSettings.test_email, lead: `${leadBefore.first_name} ${leadBefore.last_name}` });
+        // Track state before advance so it can be undone
+        await trackTestSend(leadBefore);
       }
 
       emailResult = await sendOutreachEmail({

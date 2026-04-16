@@ -407,3 +407,69 @@ export async function skipLead(leadId: string): Promise<Lead | null> {
 }
 
 export const skipContact = skipLead;
+
+// --- Test Mode Tracking ---
+
+interface TestSendRecord {
+  lead_id: number;
+  previous_sequence_stage: number;
+  previous_last_contacted_at: string | null;
+  previous_pipeline_stage: string;
+  previous_outreach_status: string;
+  previous_next_action_at: string | null;
+  advanced_at: string;
+}
+
+const TEST_SENDS_KEY = 'outreach.test_sends';
+
+async function getTestSends(): Promise<TestSendRecord[]> {
+  try {
+    const row = await SystemSetting.findByPk(TEST_SENDS_KEY);
+    if (!row) return [];
+    return (row.value as any) || [];
+  } catch { return []; }
+}
+
+export async function trackTestSend(lead: Lead): Promise<void> {
+  const sends = await getTestSends();
+  sends.push({
+    lead_id: lead.id,
+    previous_sequence_stage: lead.sequence_stage,
+    previous_last_contacted_at: lead.last_contacted_at?.toISOString() || null,
+    previous_pipeline_stage: lead.pipeline_stage,
+    previous_outreach_status: lead.outreach_status,
+    previous_next_action_at: lead.next_action_at?.toISOString() || null,
+    advanced_at: new Date().toISOString(),
+  });
+  await SystemSetting.upsert({ key: TEST_SENDS_KEY, value: sends as any, description: 'Leads advanced during test mode' });
+}
+
+export async function resetTestSends(): Promise<{ reset: number }> {
+  const sends = await getTestSends();
+  if (sends.length === 0) return { reset: 0 };
+
+  let resetCount = 0;
+  for (const record of sends) {
+    const lead = await Lead.findByPk(record.lead_id);
+    if (!lead) continue;
+
+    await lead.update({
+      sequence_stage: record.previous_sequence_stage,
+      last_contacted_at: record.previous_last_contacted_at ? new Date(record.previous_last_contacted_at) : null,
+      pipeline_stage: record.previous_pipeline_stage,
+      outreach_status: record.previous_outreach_status,
+      next_action_at: record.previous_next_action_at ? new Date(record.previous_next_action_at) : null,
+    });
+    resetCount++;
+  }
+
+  // Clear the test sends log
+  await SystemSetting.upsert({ key: TEST_SENDS_KEY, value: [] as any, description: 'Leads advanced during test mode' });
+
+  return { reset: resetCount };
+}
+
+export async function getTestSendCount(): Promise<number> {
+  const sends = await getTestSends();
+  return sends.length;
+}

@@ -5,6 +5,7 @@ import {
   getOutreachToday, advanceOutreachContact, skipOutreachContact,
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
+  getTestSendCount, resetTestSends,
   OutreachContact, OutreachSettings,
 } from '@/lib/api';
 
@@ -19,6 +20,8 @@ export default function OutreachPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [showSettings, setShowSettings] = useState(false);
+  const [testSendCount, setTestSendCount] = useState(0);
+  const [resetting, setResetting] = useState(false);
 
   async function fetchData() {
     try {
@@ -32,6 +35,8 @@ export default function OutreachPage() {
       if (campaignRes.status === 'fulfilled') setCampaigns(campaignRes.value.campaigns);
       if (settingsRes.status === 'fulfilled') setSettings(settingsRes.value);
       setError(null);
+      // Fetch test send count
+      try { const tc = await getTestSendCount(); setTestSendCount(tc.count); } catch {};
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -201,10 +206,35 @@ export default function OutreachPage() {
                   </div>
                 </div>
                 {settings.test_mode && (
-                  <div className="mt-2">
-                    <label className="text-xs text-amber-700">Test Email (all outreach goes here)</label>
-                    <input type="email" value={settings.test_email} onChange={e => handleSettingsChange('test_email', e.target.value)}
-                      className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-sm focus:border-amber-500 focus:outline-none" />
+                  <div className="mt-2 space-y-2">
+                    <div>
+                      <label className="text-xs text-amber-700">Test Email (all outreach goes here)</label>
+                      <input type="email" value={settings.test_email} onChange={e => handleSettingsChange('test_email', e.target.value)}
+                        className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-sm focus:border-amber-500 focus:outline-none" />
+                    </div>
+                    {testSendCount > 0 && (
+                      <div className="flex items-center justify-between rounded-md bg-amber-100 px-3 py-2">
+                        <span className="text-xs text-amber-800">
+                          <strong>{testSendCount}</strong> lead{testSendCount !== 1 ? 's' : ''} advanced during testing
+                        </span>
+                        <button
+                          onClick={async () => {
+                            setResetting(true);
+                            try {
+                              const result = await resetTestSends();
+                              setTestSendCount(0);
+                              await fetchData();
+                              alert(`Reset ${result.reset} leads back to their original state.`);
+                            } catch {}
+                            setResetting(false);
+                          }}
+                          disabled={resetting}
+                          className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {resetting ? 'Resetting...' : 'Undo Test Sends'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

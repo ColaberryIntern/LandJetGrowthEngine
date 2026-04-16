@@ -227,6 +227,14 @@ export function updateOutreachSettings(settings: Partial<OutreachSettings>) {
   });
 }
 
+export function getTestSendCount() {
+  return request<{ count: number }>('/admin/outreach/test-sends/count');
+}
+
+export function resetTestSends() {
+  return request<{ reset: number }>('/admin/outreach/test-sends/reset', { method: 'POST' });
+}
+
 export function getOutreachToday() {
   return request<OutreachContact[]>('/admin/outreach/today');
 }
