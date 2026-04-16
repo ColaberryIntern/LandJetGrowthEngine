@@ -6,6 +6,7 @@ import {
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
   getTestSendCount, resetTestSends,
+  swapLead, rewriteDraft,
   OutreachContact, OutreachSettings,
 } from '@/lib/api';
 
@@ -22,6 +23,8 @@ export default function OutreachPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [testSendCount, setTestSendCount] = useState(0);
   const [resetting, setResetting] = useState(false);
+  const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
+  const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
 
   async function fetchData() {
     try {
@@ -58,8 +61,17 @@ export default function OutreachPage() {
   async function handleAdvance(contactId: string) {
     setActing(contactId);
     try {
-      await advanceOutreachContact(contactId);
+      const edit = draftEdits[contactId];
+      // Pass edited subject/body if user modified the draft
+      const body = edit ? { subject: edit.subject, body: edit.body } : undefined;
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      await fetch(`/api/admin/outreach/${contactId}/advance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(body || {}),
+      });
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+      setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
     } catch (e) { setError((e as Error).message); }
     finally { setActing(null); }
   }
@@ -74,14 +86,58 @@ export default function OutreachPage() {
   }
 
   async function handleCampaignChange(contactId: string, campaignId: string) {
+    if (!campaignId) return;
     setActing(contactId);
     try {
-      await assignContactCampaign(contactId, campaignId || null);
+      const newContact = await swapLead(String(contactId), campaignId);
+      // Replace the current contact with the new one from the selected campaign
       setContacts(prev => prev.map(c =>
-        c.contact_id === contactId ? { ...c, campaign_id: campaignId || null } : c
+        c.contact_id === contactId ? newContact : c
       ));
-    } catch (e) { setError((e as Error).message); }
+      // Clear any draft edits for the old contact
+      setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('No more leads')) {
+        setError(`No more leads available in this campaign`);
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError(msg);
+      }
+    }
     finally { setActing(null); }
+  }
+
+  function getDraft(contact: OutreachContact) {
+    const edit = draftEdits[contact.contact_id];
+    return {
+      subject: edit?.subject ?? contact.draft.subject,
+      body: edit?.body ?? contact.draft.body,
+    };
+  }
+
+  function updateDraft(contactId: string, field: 'subject' | 'body', value: string) {
+    setDraftEdits(prev => {
+      const current = prev[contactId] || { subject: '', body: '' };
+      // Initialize from contact if first edit
+      const contact = contacts.find(c => c.contact_id === contactId);
+      if (!prev[contactId] && contact) {
+        current.subject = contact.draft.subject;
+        current.body = contact.draft.body;
+      }
+      return { ...prev, [contactId]: { ...current, [field]: value } };
+    });
+  }
+
+  async function handleRewrite(contactId: string, tone: 'shorter' | 'personal' | 'direct') {
+    const key = `${contactId}-${tone}`;
+    setRewriting(key);
+    try {
+      const draft = getDraft(contacts.find(c => c.contact_id === contactId)!);
+      const result = await rewriteDraft(String(contactId), tone, draft.subject, draft.body);
+      setDraftEdits(prev => ({ ...prev, [contactId]: { subject: result.subject, body: result.body } }));
+    } catch (e) { setError((e as Error).message); }
+    finally { setRewriting(null); }
   }
 
   const filteredContacts = useMemo(() =>
@@ -383,14 +439,45 @@ export default function OutreachPage() {
                 </div>
               </div>
             ) : (
-              /* Email Step */
+              /* Email Step - Editable */
               <div className="mt-3 rounded-md bg-gray-50 p-4">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Draft Email</p>
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-400">{contact.draft.source}</span>
+                  <div className="flex items-center gap-2">
+                    {(['shorter', 'personal', 'direct'] as const).map(tone => {
+                      const labels = { shorter: 'Shorter', personal: 'More Personal', direct: 'More Direct' };
+                      const isRewriting = rewriting === `${contact.contact_id}-${tone}`;
+                      return (
+                        <button key={tone} onClick={() => handleRewrite(contact.contact_id, tone)}
+                          disabled={!!rewriting}
+                          className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50">
+                          {isRewriting ? '...' : labels[tone]}
+                        </button>
+                      );
+                    })}
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-400">
+                      {draftEdits[contact.contact_id] ? 'edited' : contact.draft.source}
+                    </span>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm font-medium text-gray-700">Subject: {contact.draft.subject}</p>
-                <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-600 font-sans">{contact.draft.body}</pre>
+                <div className="mt-2">
+                  <label className="text-xs text-gray-400">Subject</label>
+                  <input
+                    type="text"
+                    value={getDraft(contact).subject}
+                    onChange={e => updateDraft(contact.contact_id, 'subject', e.target.value)}
+                    className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 focus:border-gray-400 focus:outline-none"
+                  />
+                </div>
+                <div className="mt-2">
+                  <label className="text-xs text-gray-400">Body</label>
+                  <textarea
+                    value={getDraft(contact).body}
+                    onChange={e => updateDraft(contact.contact_id, 'body', e.target.value)}
+                    rows={6}
+                    className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 font-sans focus:border-gray-400 focus:outline-none resize-y"
+                  />
+                </div>
               </div>
             )}
 

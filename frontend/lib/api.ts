@@ -235,6 +235,20 @@ export function resetTestSends() {
   return request<{ reset: number }>('/admin/outreach/test-sends/reset', { method: 'POST' });
 }
 
+export function swapLead(currentLeadId: string, campaignId: string) {
+  return request<OutreachContact>('/admin/outreach/swap-lead', {
+    method: 'POST',
+    body: JSON.stringify({ current_lead_id: currentLeadId, campaign_id: campaignId }),
+  });
+}
+
+export function rewriteDraft(leadId: string, tone: 'shorter' | 'personal' | 'direct', currentSubject: string, currentBody: string) {
+  return request<{ subject: string; body: string; source: string }>('/admin/outreach/rewrite-draft', {
+    method: 'POST',
+    body: JSON.stringify({ lead_id: leadId, tone, current_subject: currentSubject, current_body: currentBody }),
+  });
+}
+
 export function getOutreachToday() {
   return request<OutreachContact[]>('/admin/outreach/today');
 }

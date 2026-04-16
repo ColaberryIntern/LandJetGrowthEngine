@@ -469,6 +469,120 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
   } catch (error) { next(error); }
 });
 
+// --- Swap Lead (campaign selector changes the contact) ---
+
+router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { current_lead_id, campaign_id } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+
+    // Find the next available lead from this campaign not already shown
+    const excludeIds = current_lead_id ? [current_lead_id] : [];
+    const newLead = await Lead.findOne({
+      where: {
+        campaign_id,
+        outreach_status: 'ACTIVE',
+        status: 'active',
+        id: { [Op.notIn]: excludeIds },
+        [Op.or]: [
+          { next_action_at: null },
+          { next_action_at: { [Op.lte]: new Date() } },
+        ],
+      },
+      include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
+      order: [['created_at', 'ASC']],
+    });
+
+    if (!newLead) {
+      return res.status(404).json({ error: 'No more leads available in this campaign' });
+    }
+
+    const campaign = (newLead as any).outreachCampaign;
+    const stepInfo = getStepInfo(newLead);
+    const channel = stepInfo?.channel || 'email';
+    const draft = channel === 'email' ? await generateDraft(newLead, campaign?.ai_system_prompt) : { subject: '', body: '', prompt: '', source: 'template' as const };
+
+    res.json({
+      contact_id: newLead.id,
+      name: `${newLead.first_name} ${newLead.last_name}`.trim(),
+      email: newLead.email,
+      relationship_type: newLead.lead_source || 'past_client',
+      sequence_stage: newLead.sequence_stage,
+      suggested_action: channel === 'email' ? (newLead.sequence_stage === 1 ? 'Initial Outreach' : 'Follow-up') : 'LinkedIn',
+      priority_score: newLead.priority_score,
+      vertical: newLead.vertical,
+      tier: newLead.tier,
+      campaign_id: newLead.campaign_id,
+      message_context: getMessageContext(newLead),
+      channel,
+      linkedin_url: newLead.linkedin_url,
+      draft,
+      status: newLead.outreach_status,
+    });
+  } catch (error) {
+    logger.error('POST /swap-lead failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+// --- Rewrite Draft ---
+
+router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { lead_id, tone, current_subject, current_body } = req.body;
+    if (!lead_id) return res.status(400).json({ error: 'lead_id is required' });
+    if (!tone || !['shorter', 'personal', 'direct'].includes(tone)) {
+      return res.status(400).json({ error: 'tone must be shorter, personal, or direct' });
+    }
+
+    const lead = await Lead.findByPk(lead_id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const toneInstructions: Record<string, string> = {
+      shorter: 'Rewrite this email to be significantly shorter and more concise. Cut it to 3-4 sentences max. Keep the core ask but remove all filler.',
+      personal: 'Rewrite this email with a warmer, more personal tone. Reference a genuine connection or shared interest. Make it feel like a personal note, not a business email.',
+      direct: 'Rewrite this email to be more direct and action-oriented. Lead with the value proposition. End with a specific, clear call-to-action with a suggested time.',
+    };
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OpenAI API key not configured' });
+
+    const settings = await getOutreachSettings();
+    const senderFirst = settings.sender_name.split(' ')[0];
+
+    const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'gpt-4o',
+        messages: [
+          { role: 'system', content: `You are rewriting an outreach email as ${settings.sender_name}, ${settings.sender_role}. ${toneInstructions[tone]} Return JSON with "subject" and "body" fields only. Sign off as ${senderFirst}. Plain text, no HTML.` },
+          { role: 'user', content: `Current subject: ${current_subject || 'Quick note'}\n\nCurrent body:\n${current_body || ''}\n\nRecipient: ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}` },
+        ],
+        temperature: 0.7,
+        max_tokens: 512,
+      }),
+    });
+
+    if (!aiResp.ok) return res.status(500).json({ error: 'AI rewrite failed' });
+
+    const data = (await aiResp.json()) as any;
+    const raw = (data.choices?.[0]?.message?.content || '').trim();
+    const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      res.json({ subject: parsed.subject || current_subject, body: parsed.body || current_body, source: 'ai' });
+    } catch {
+      // If JSON parse fails, use the raw text as body
+      res.json({ subject: current_subject, body: cleaned, source: 'ai' });
+    }
+  } catch (error) {
+    logger.error('POST /rewrite-draft failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 // --- Test Mode ---
 
 router.get('/test-sends/count', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
