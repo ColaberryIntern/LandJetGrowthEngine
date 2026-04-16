@@ -22,6 +22,82 @@ function getSuggestedAction(stage: number): string {
   }
 }
 
+// --- KPI Report ---
+
+router.get('/kpi-report', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { generateWeeklyKPIReport } = await import('../../services/kpiReportService');
+    res.json(await generateWeeklyKPIReport());
+  } catch (error) { next(error); }
+});
+
+router.post('/kpi-report/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { sendWeeklyKPIEmail } = await import('../../services/kpiReportService');
+    const email = req.body.email || 'rmlandry29@gmail.com';
+    const result = await sendWeeklyKPIEmail(email);
+    res.json(result);
+  } catch (error) {
+    logger.error('POST /kpi-report/send failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+// --- Deal-to-Investor Matching ---
+
+router.post('/deal-match', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { matchDealToInvestors } = await import('../../services/dealMatchingService');
+    const { deal_name, deal_type, amount, description, sector, geography, limit } = req.body;
+    if (!deal_name || !description) return res.status(400).json({ error: 'deal_name and description are required' });
+    const matches = await matchDealToInvestors(
+      { deal_name, deal_type: deal_type || 'other', amount: amount || 'TBD', description, sector, geography },
+      limit || 10,
+    );
+    res.json({ matches, total: matches.length });
+  } catch (error) {
+    logger.error('POST /deal-match failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+// --- Inbound Lead Response + Quoting ---
+
+router.post('/inbound/quote', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { generateQuoteResponse } = await import('../../services/inboundLeadService');
+    const result = await generateQuoteResponse(req.body);
+    res.json(result);
+  } catch (error) {
+    logger.error('POST /inbound/quote failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.post('/inbound/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { to, subject, body } = req.body;
+    if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body are required' });
+
+    const settings = await getOutreachSettings();
+    const recipientEmail = settings.test_mode && settings.test_email ? settings.test_email : to;
+    const emailSubject = settings.test_mode ? `[TEST -> ${to}] ${subject}` : subject;
+
+    const result = await sendOutreachEmail({
+      to: recipientEmail,
+      subject: emailSubject,
+      body,
+      from: 'rlandry@landjet.com',
+      senderName: 'Ryan Landry',
+    });
+
+    res.json({ ...result, test_mode: settings.test_mode });
+  } catch (error) {
+    logger.error('POST /inbound/send failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 // --- Settings ---
 
 router.get('/settings', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {

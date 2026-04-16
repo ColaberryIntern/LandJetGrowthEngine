@@ -249,6 +249,54 @@ export function rewriteDraft(leadId: string, tone: 'shorter' | 'personal' | 'dir
   });
 }
 
+// Inbound Lead Response + Quoting
+export function generateQuoteResponse(data: { name: string; email: string; company?: string; message?: string; service_type?: string; pickup_city?: string; dropoff_city?: string; passengers?: number; date?: string }) {
+  return request<{ subject: string; body: string; lead_id: number | null }>('/admin/outreach/inbound/quote', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function sendInboundResponse(to: string, subject: string, body: string) {
+  return request<{ success: boolean; from: string; test_mode?: boolean }>('/admin/outreach/inbound/send', {
+    method: 'POST',
+    body: JSON.stringify({ to, subject, body }),
+  });
+}
+
+// KPI Report
+export function getKPIReport() {
+  return request<any>('/admin/outreach/kpi-report');
+}
+
+export function sendKPIReport(email?: string) {
+  return request<{ success: boolean }>('/admin/outreach/kpi-report/send', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Deal-to-Investor Matching
+export interface InvestorMatch {
+  lead_id: number;
+  name: string;
+  email: string;
+  company: string | null;
+  title: string | null;
+  vertical: string | null;
+  score: number;
+  reason: string;
+  draft_subject: string;
+  draft_body: string;
+}
+
+export function matchDealToInvestors(deal: { deal_name: string; deal_type?: string; amount?: string; description: string; sector?: string; geography?: string }) {
+  return request<{ matches: InvestorMatch[]; total: number }>('/admin/outreach/deal-match', {
+    method: 'POST',
+    body: JSON.stringify(deal),
+  });
+}
+
 export function getOutreachToday() {
   return request<OutreachContact[]>('/admin/outreach/today');
 }
