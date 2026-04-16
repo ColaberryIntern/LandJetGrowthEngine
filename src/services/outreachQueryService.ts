@@ -456,7 +456,7 @@ export async function resetTestSends(): Promise<{ reset: number }> {
     await lead.update({
       sequence_stage: record.previous_sequence_stage,
       last_contacted_at: record.previous_last_contacted_at ? new Date(record.previous_last_contacted_at) : null,
-      pipeline_stage: record.previous_pipeline_stage,
+      pipeline_stage: record.previous_pipeline_stage as any,
       outreach_status: record.previous_outreach_status,
       next_action_at: record.previous_next_action_at ? new Date(record.previous_next_action_at) : null,
     });
