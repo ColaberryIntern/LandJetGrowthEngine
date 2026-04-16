@@ -250,6 +250,22 @@ export function rewriteDraft(leadId: string, tone: 'shorter' | 'personal' | 'dir
 }
 
 // Inbound Lead Response + Quoting
+export interface InboundInquiry {
+  gmail_id: string;
+  from: string;
+  from_email: string;
+  from_name: string;
+  subject: string;
+  body: string;
+  received_at: string;
+  type: string;
+  summary: string;
+}
+
+export function scanInboundInquiries(hours?: number) {
+  return request<{ inquiries: InboundInquiry[]; total: number }>(`/admin/outreach/inbound/scan${hours ? '?hours=' + hours : ''}`);
+}
+
 export function generateQuoteResponse(data: { name: string; email: string; company?: string; message?: string; service_type?: string; pickup_city?: string; dropoff_city?: string; passengers?: number; date?: string }) {
   return request<{ subject: string; body: string; lead_id: number | null }>('/admin/outreach/inbound/quote', {
     method: 'POST',

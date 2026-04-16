@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 const PRIMARY_ITEMS = [
   { href: '/outreach', label: 'Outreach' },
   { href: '/campaigns', label: 'Campaigns' },
-  { href: '/drafts', label: 'Drafts' },
+  { href: '/inbound', label: 'Inbound' },
 ];
 
 const ADMIN_ITEMS = [

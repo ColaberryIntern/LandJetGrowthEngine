@@ -132,6 +132,72 @@ router.post('/deal-match', authorize('campaigns:write'), async (req: Request, re
 
 // --- Inbound Lead Response + Quoting ---
 
+router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { fetchNewEmails } = await import('../../services/gmailService');
+    const hours = Number(req.query.hours) || 72;
+    const allEmails = await fetchNewEmails(hours);
+
+    // Use AI to classify which emails are quote/inquiry requests
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey || allEmails.length === 0) {
+      return res.json({ inquiries: [], total: 0 });
+    }
+
+    const emailSummaries = allEmails.slice(0, 30).map((e, i) =>
+      `[${i}] From: ${e.sender}\nSubject: ${e.subject}\nBody: ${e.body.slice(0, 300)}`
+    ).join('\n---\n');
+
+    const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'gpt-4o',
+        messages: [
+          { role: 'system', content: `You are scanning emails for LandJet, a premium ground transportation company. Identify emails that are:\n- Quote requests (someone asking about pricing or booking)\n- Service inquiries (asking about availability, routes, fleet)\n- Partnership/business inquiries\n- Lead referrals\n\nDo NOT include: newsletters, marketing emails, internal emails, receipts, automated notifications, spam.\n\nReturn JSON array of indices that are genuine inquiries: { "inquiry_indices": [0, 3, 7], "classifications": [{ "index": 0, "type": "quote_request", "summary": "one sentence" }] }` },
+          { role: 'user', content: emailSummaries },
+        ],
+        temperature: 0.3,
+        max_tokens: 1024,
+      }),
+    });
+
+    if (!aiResp.ok) return res.json({ inquiries: allEmails.slice(0, 5), total: allEmails.length });
+
+    const data = (await aiResp.json()) as any;
+    const raw = (data.choices?.[0]?.message?.content || '').trim();
+    const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      const classifications = parsed.classifications || [];
+      const inquiries = classifications.map((c: any) => {
+        const email = allEmails[c.index];
+        if (!email) return null;
+        const senderMatch = email.sender.match(/<(.+?)>/);
+        return {
+          gmail_id: email.gmail_message_id,
+          from: email.sender,
+          from_email: senderMatch ? senderMatch[1] : email.sender,
+          from_name: email.sender.replace(/<.*>/, '').trim().replace(/"/g, ''),
+          subject: email.subject,
+          body: email.body.slice(0, 500),
+          received_at: email.received_at,
+          type: c.type,
+          summary: c.summary,
+        };
+      }).filter(Boolean);
+
+      res.json({ inquiries, total: inquiries.length });
+    } catch {
+      res.json({ inquiries: [], total: 0 });
+    }
+  } catch (error) {
+    logger.error('GET /inbound/scan failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 router.post('/inbound/quote', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { generateQuoteResponse } = await import('../../services/inboundLeadService');
