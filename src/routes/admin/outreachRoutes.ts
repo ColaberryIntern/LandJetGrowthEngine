@@ -22,6 +22,75 @@ function getSuggestedAction(stage: number): string {
   }
 }
 
+// --- Morning Briefing ---
+
+router.get('/briefing', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { generateMorningBriefing } = await import('../../services/morningBriefingService');
+    res.json(await generateMorningBriefing());
+  } catch (error) {
+    logger.error('GET /briefing failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.post('/briefing/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { sendMorningBriefing } = await import('../../services/morningBriefingService');
+    const email = req.body.email || 'rmlandry29@gmail.com';
+    res.json(await sendMorningBriefing(email));
+  } catch (error) {
+    logger.error('POST /briefing/send failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+// --- Email Reply Drafts ---
+
+router.get('/inbox', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getRecentInboxEmails } = await import('../../services/emailReplyService');
+    const emails = await getRecentInboxEmails();
+    res.json({ emails, total: emails.length });
+  } catch (error) {
+    logger.error('GET /inbox failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.post('/inbox/draft-replies', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getRecentInboxEmails, generateDraftReplies } = await import('../../services/emailReplyService');
+    const emails = await getRecentInboxEmails('rlandry@landjet.com', req.body.limit || 10);
+    const drafts = await generateDraftReplies(emails);
+    res.json({ drafts, total: drafts.length });
+  } catch (error) {
+    logger.error('POST /inbox/draft-replies failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.post('/inbox/send-reply', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { sendReply } = await import('../../services/emailReplyService');
+    const { message_id, body } = req.body;
+    if (!message_id || !body) return res.status(400).json({ error: 'message_id and body required' });
+
+    const settings = await getOutreachSettings();
+    if (settings.test_mode) {
+      // In test mode, don't actually reply -- just confirm
+      logger.info('Test mode: reply not sent', { messageId: message_id });
+      return res.json({ success: true, test_mode: true, message: 'Reply drafted but not sent (test mode)' });
+    }
+
+    const result = await sendReply('rlandry@landjet.com', message_id, body);
+    res.json(result);
+  } catch (error) {
+    logger.error('POST /inbox/send-reply failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 // --- KPI Report ---
 
 router.get('/kpi-report', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {

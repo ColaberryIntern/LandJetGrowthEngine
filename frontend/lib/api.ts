@@ -297,6 +297,47 @@ export function matchDealToInvestors(deal: { deal_name: string; deal_type?: stri
   });
 }
 
+// Morning Briefing
+export function getMorningBriefing() {
+  return request<{ subject: string; body: string; events_count: number }>('/admin/outreach/briefing');
+}
+
+export function sendMorningBriefing(email?: string) {
+  return request<{ success: boolean; events_count: number }>('/admin/outreach/briefing/send', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Email Reply Drafts
+export interface DraftReply {
+  original_id: string;
+  original_subject: string;
+  original_from: string;
+  draft_subject: string;
+  draft_body: string;
+  category: string;
+  confidence: number;
+}
+
+export function getInboxEmails() {
+  return request<{ emails: any[]; total: number }>('/admin/outreach/inbox');
+}
+
+export function generateDraftReplies(limit?: number) {
+  return request<{ drafts: DraftReply[]; total: number }>('/admin/outreach/inbox/draft-replies', {
+    method: 'POST',
+    body: JSON.stringify({ limit: limit || 10 }),
+  });
+}
+
+export function sendEmailReply(messageId: string, body: string) {
+  return request<{ success: boolean; test_mode?: boolean }>('/admin/outreach/inbox/send-reply', {
+    method: 'POST',
+    body: JSON.stringify({ message_id: messageId, body }),
+  });
+}
+
 export function getOutreachToday() {
   return request<OutreachContact[]>('/admin/outreach/today');
 }
