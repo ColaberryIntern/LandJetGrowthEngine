@@ -8,6 +8,7 @@ import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
 import { sendOutreachEmail, getSenderForCampaign, testConnection } from '../../services/outreachEmailService';
+import { logger } from '../../config/logger';
 
 const router = Router();
 router.use(authenticate);
@@ -517,9 +518,19 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       const senderEmail = getSenderForCampaign(campaign?.name || '', leadBefore.vertical);
       const senderName = campaign?.settings?.sender_name || 'Ryan Landry';
 
+      // Test mode: redirect to test email, keep lead's name/subject/body intact
+      const globalSettings = await getOutreachSettings();
+      const recipientEmail = globalSettings.test_mode && globalSettings.test_email
+        ? globalSettings.test_email
+        : leadBefore.email;
+
+      if (globalSettings.test_mode) {
+        logger.info('Test mode: redirecting email', { originalTo: leadBefore.email, testTo: globalSettings.test_email, lead: `${leadBefore.first_name} ${leadBefore.last_name}` });
+      }
+
       emailResult = await sendOutreachEmail({
-        to: leadBefore.email,
-        subject: emailSubject,
+        to: recipientEmail,
+        subject: globalSettings.test_mode ? `[TEST -> ${leadBefore.email}] ${emailSubject}` : emailSubject,
         body: emailBody,
         from: senderEmail,
         senderName,
@@ -532,6 +543,7 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       return res.status(404).json({ error: 'Contact not found' });
     }
 
+    const settings = await getOutreachSettings();
     res.json({
       contact_id: lead.id,
       sequence_stage: lead.sequence_stage,
@@ -540,6 +552,7 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       email_sent: emailResult?.success || false,
       email_from: emailResult?.from || null,
       channel,
+      test_mode: settings.test_mode || false,
     });
   } catch (error) {
     if ((error as Error).message === 'Cannot advance a completed contact') {

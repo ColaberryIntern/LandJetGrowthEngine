@@ -13,7 +13,7 @@ interface CampaignOption { id: string; name: string; }
 export default function OutreachPage() {
   const [contacts, setContacts] = useState<OutreachContact[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
-  const [settings, setSettings] = useState<OutreachSettings>({ emails_per_day: 25, follow_up_delay_days: 4, ai_drafts_enabled: true, sender_name: 'Ryan Landry', sender_role: 'CEO, LandJet', sender_email: 'rmlandry29@gmail.com' });
+  const [settings, setSettings] = useState<OutreachSettings>({ emails_per_day: 25, follow_up_delay_days: 4, ai_drafts_enabled: true, sender_name: 'Ryan Landry', sender_role: 'CEO, LandJet', sender_email: 'rlandry@landjet.com', test_mode: true, test_email: 'rmlandry29@gmail.com' });
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +104,15 @@ export default function OutreachPage() {
 
   return (
     <div>
+      {/* Test Mode Banner */}
+      {settings.test_mode && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5">
+          <span className="text-amber-600 text-lg">&#9888;</span>
+          <span className="text-sm font-medium text-amber-800">Test Mode Active</span>
+          <span className="text-sm text-amber-700">-- all emails will be sent to <strong>{settings.test_email}</strong> instead of real leads</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Outreach</h1>
@@ -173,6 +182,31 @@ export default function OutreachPage() {
                 <label className="text-xs text-gray-400">Sender Email</label>
                 <input type="text" value={settings.sender_email} onChange={e => handleSettingsChange('sender_email', e.target.value)}
                   className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
+              </div>
+            </div>
+            {/* Test Mode */}
+            <div className={`border-t pt-3 ${settings.test_mode ? 'border-amber-200' : 'border-gray-100'}`}>
+              <div className={`rounded-lg p-3 ${settings.test_mode ? 'bg-amber-50 border border-amber-200' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-medium text-gray-900">Test Mode</span>
+                    <p className="text-xs text-gray-500 mt-0.5">All emails redirect to the test address below instead of the real lead</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleSettingsChange('test_mode', !settings.test_mode)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${settings.test_mode ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${settings.test_mode ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </button>
+                    <span className={`text-xs font-medium ${settings.test_mode ? 'text-amber-600' : 'text-gray-400'}`}>{settings.test_mode ? 'ON' : 'OFF'}</span>
+                  </div>
+                </div>
+                {settings.test_mode && (
+                  <div className="mt-2">
+                    <label className="text-xs text-amber-700">Test Email (all outreach goes here)</label>
+                    <input type="email" value={settings.test_email} onChange={e => handleSettingsChange('test_email', e.target.value)}
+                      className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-sm focus:border-amber-500 focus:outline-none" />
+                  </div>
+                )}
               </div>
             </div>
           </div>

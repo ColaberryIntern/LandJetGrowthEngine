@@ -212,6 +212,8 @@ export interface OutreachSettings {
   sender_name: string;
   sender_role: string;
   sender_email: string;
+  test_mode: boolean;
+  test_email: string;
 }
 
 export function getOutreachSettings() {

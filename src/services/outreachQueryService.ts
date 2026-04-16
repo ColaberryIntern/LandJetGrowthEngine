@@ -68,6 +68,8 @@ export interface OutreachSettings {
   sender_name: string;
   sender_role: string;
   sender_email: string;
+  test_mode: boolean;
+  test_email: string;
 }
 
 const DEFAULTS: OutreachSettings = {
@@ -76,7 +78,9 @@ const DEFAULTS: OutreachSettings = {
   ai_drafts_enabled: true,
   sender_name: 'Ryan Landry',
   sender_role: 'CEO, LandJet',
-  sender_email: 'rmlandry29@gmail.com',
+  sender_email: 'rlandry@landjet.com',
+  test_mode: true,
+  test_email: 'rmlandry29@gmail.com',
 };
 
 export async function getOutreachSettings(): Promise<OutreachSettings> {
@@ -96,6 +100,8 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
       sender_name: val.sender_name ?? DEFAULTS.sender_name,
       sender_role: val.sender_role ?? DEFAULTS.sender_role,
       sender_email: val.sender_email ?? DEFAULTS.sender_email,
+      test_mode: val.test_mode ?? DEFAULTS.test_mode,
+      test_email: val.test_email ?? DEFAULTS.test_email,
     };
     _settingsCache = { data, expiresAt: Date.now() + CACHE_TTL };
     return data;
