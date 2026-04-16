@@ -1,6 +1,6 @@
 /**
  * Outreach email sending service.
- * Sends emails via Microsoft 365 SMTP from LandJet domain addresses.
+ * Sends emails via Microsoft Graph API using OAuth2 client credentials.
  *
  * Three sender accounts:
  *   rlandry@landjet.com     - Investor outreach (CEO-level)
@@ -8,7 +8,6 @@
  *   ryan.landry@landjet.com - General/cold outreach
  */
 
-import * as nodemailer from 'nodemailer';
 import { logger } from '../config/logger';
 
 interface SendEmailInput {
@@ -32,6 +31,14 @@ const SENDER_MAP: Record<string, string> = {
   general: process.env.OUTREACH_EMAIL_GENERAL || 'ryan.landry@landjet.com',
 };
 
+// OAuth2 credentials
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
+const OAUTH_TENANT_ID = process.env.OAUTH_TENANT_ID || '';
+
+// Token cache
+let _tokenCache: { token: string; expiresAt: number } | null = null;
+
 /**
  * Determine which sender address to use based on campaign/vertical.
  */
@@ -44,54 +51,88 @@ export function getSenderForCampaign(campaignName: string, vertical?: string | n
 }
 
 /**
- * Create a nodemailer transporter for a specific sender address.
+ * Get OAuth2 access token for Microsoft Graph API.
  */
-function createTransporter(fromEmail: string) {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.office365.com',
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: false,
-    auth: {
-      user: fromEmail,
-      pass: process.env.OUTREACH_EMAIL_PASSWORD || '',
-    },
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false,
-    },
+async function getGraphToken(): Promise<string> {
+  // Return cached token if still valid
+  if (_tokenCache && Date.now() < _tokenCache.expiresAt) {
+    return _tokenCache.token;
+  }
+
+  const tokenUrl = `https://login.microsoftonline.com/${OAUTH_TENANT_ID}/oauth2/v2.0/token`;
+
+  const body = new URLSearchParams({
+    client_id: OAUTH_CLIENT_ID,
+    client_secret: OAUTH_CLIENT_SECRET,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials',
   });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OAuth2 token request failed: ${response.status} ${err}`);
+  }
+
+  const data = (await response.json()) as any;
+  if (!data.access_token) {
+    throw new Error('No access_token in OAuth2 response');
+  }
+
+  // Cache for 50 minutes (tokens expire in 60 min)
+  _tokenCache = { token: data.access_token, expiresAt: Date.now() + 50 * 60 * 1000 };
+  return data.access_token;
 }
 
 /**
- * Send an outreach email via Microsoft 365 SMTP.
+ * Send an outreach email via Microsoft Graph API.
  */
 export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const fromEmail = input.from || SENDER_MAP.general;
   const senderName = input.senderName || 'Ryan Landry';
 
-  if (!process.env.OUTREACH_EMAIL_PASSWORD) {
-    logger.warn('OUTREACH_EMAIL_PASSWORD not set, email not sent');
-    return { success: false, error: 'Email password not configured', from: fromEmail };
+  if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {
+    logger.warn('OAuth2 credentials not configured, email not sent');
+    return { success: false, error: 'OAuth2 credentials not configured', from: fromEmail };
   }
 
   try {
-    const transporter = createTransporter(fromEmail);
+    const token = await getGraphToken();
 
-    const result = await transporter.sendMail({
-      from: `"${senderName}" <${fromEmail}>`,
-      to: input.to,
-      subject: input.subject,
-      text: input.body,
+    const graphResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${fromEmail}/sendMail`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: {
+          subject: input.subject,
+          body: { contentType: 'Text', content: input.body },
+          toRecipients: [{ emailAddress: { address: input.to } }],
+          from: { emailAddress: { name: senderName, address: fromEmail } },
+        },
+      }),
     });
 
-    logger.info('Outreach email sent', {
-      to: input.to,
-      from: fromEmail,
-      subject: input.subject,
-      messageId: result.messageId,
-    });
+    if (graphResponse.status === 202 || graphResponse.status === 200) {
+      logger.info('Outreach email sent via Graph API', {
+        to: input.to,
+        from: fromEmail,
+        subject: input.subject,
+      });
+      return { success: true, messageId: `graph-${Date.now()}`, from: fromEmail };
+    }
 
-    return { success: true, messageId: result.messageId, from: fromEmail };
+    const errorData = await graphResponse.json().catch(() => ({}));
+    const errorMsg = (errorData as any)?.error?.message || `Graph API error: ${graphResponse.status}`;
+    logger.error('Graph API email failed', { to: input.to, from: fromEmail, status: graphResponse.status, error: errorMsg });
+    return { success: false, error: errorMsg, from: fromEmail };
   } catch (error) {
     const msg = (error as Error).message;
     logger.error('Outreach email failed', { to: input.to, from: fromEmail, error: msg });
@@ -100,13 +141,11 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
 }
 
 /**
- * Test the SMTP connection for a specific sender address.
+ * Test the email connection by requesting a Graph API token.
  */
 export async function testConnection(fromEmail?: string): Promise<{ success: boolean; error?: string }> {
-  const email = fromEmail || SENDER_MAP.investor;
   try {
-    const transporter = createTransporter(email);
-    await transporter.verify();
+    await getGraphToken();
     return { success: true };
   } catch (error) {
     return { success: false, error: (error as Error).message };

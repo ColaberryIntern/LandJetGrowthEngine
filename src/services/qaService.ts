@@ -152,14 +152,14 @@ export async function getAgentActivity(): Promise<AgentActivity> {
         channel: 'email' as any,
         attempts_made: { [Op.gte]: 1 },
       },
-    } as any) as Promise<number>,
+    } as any) as unknown as Promise<number>,
     // Self-healing: all retried actions (any channel)
     ScheduledEmail.count({
       where: {
         status: 'pending' as any,
         attempts_made: { [Op.gte]: 1 },
       },
-    } as any) as Promise<number>,
+    } as any) as unknown as Promise<number>,
     // Bounced communications in last 24h
     CommunicationLog.count({
       where: {
@@ -175,7 +175,7 @@ export async function getAgentActivity(): Promise<AgentActivity> {
         fallback_channel: null,
         created_at: { [Op.gte]: twentyFourHoursAgo },
       },
-    } as any) as Promise<number>,
+    } as any) as unknown as Promise<number>,
   ]);
 
   return {

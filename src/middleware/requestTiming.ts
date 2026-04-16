@@ -103,7 +103,7 @@ export function getPerformanceSummary(): PerformanceSummary {
     p95_ms: p(0.95),
     p99_ms: p(0.99),
     slow_requests: durations.filter(d => d > SLOW_THRESHOLD_MS).length,
-    slowest_endpoints,
+    slowest_endpoints: slowestEndpoints,
     requests_per_minute: rpm,
   };
 }
