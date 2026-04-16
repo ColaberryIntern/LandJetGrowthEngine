@@ -109,8 +109,8 @@ export default function InboundPage() {
           <div className="space-y-3">
             {inquiries.length === 0 && !loading && (
               <div className="rounded-lg border-2 border-dashed border-gray-200 p-8 text-center">
-                <p className="text-sm text-gray-500">No quote requests found in the last 72 hours</p>
-                <p className="mt-1 text-xs text-gray-400">Emails are scanned from Ryan's monitored inbox</p>
+                <p className="text-sm text-gray-500">No inquiries found</p>
+                <p className="mt-1 text-xs text-gray-400">Scanning rlandry@landjet.com inbox for quote requests and business inquiries</p>
               </div>
             )}
             {inquiries.map(inquiry => (

@@ -134,10 +134,20 @@ router.post('/deal-match', authorize('campaigns:write'), async (req: Request, re
 
 router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { fetchAllInboxEmails } = await import('../../services/gmailService');
-    const hours = Number(req.query.hours) || 720; // default 30 days to find enough inquiries
+    // Use Microsoft Graph API to read rlandry@landjet.com inbox (not Gmail)
+    const { getRecentInboxEmails } = await import('../../services/emailReplyService');
     const limit = Number(req.query.limit) || 50;
-    const allEmails = await fetchAllInboxEmails(hours, limit);
+
+    let allEmails;
+    try {
+      allEmails = await getRecentInboxEmails('rlandry@landjet.com', limit);
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('Mail access denied')) {
+        return res.status(403).json({ error: 'Mail.Read permission not granted. Ask Percy to add Mail.Read application permission in Azure AD for the LandJet Outreach app and grant admin consent.' });
+      }
+      throw e;
+    }
 
     // Use AI to classify which emails are quote/inquiry requests
     const apiKey = process.env.OPENAI_API_KEY;
@@ -146,7 +156,7 @@ router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, re
     }
 
     const emailSummaries = allEmails.slice(0, 30).map((e, i) =>
-      `[${i}] From: ${e.sender}\nSubject: ${e.subject}\nBody: ${e.body.slice(0, 300)}`
+      `[${i}] From: ${e.from} <${e.from_email}>\nSubject: ${e.subject}\nPreview: ${e.preview}`
     ).join('\n---\n');
 
     const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -175,14 +185,13 @@ router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, re
       const inquiries = classifications.map((c: any) => {
         const email = allEmails[c.index];
         if (!email) return null;
-        const senderMatch = email.sender.match(/<(.+?)>/);
         return {
-          gmail_id: email.gmail_message_id,
-          from: email.sender,
-          from_email: senderMatch ? senderMatch[1] : email.sender,
-          from_name: email.sender.replace(/<.*>/, '').trim().replace(/"/g, ''),
+          gmail_id: email.id,
+          from: email.from,
+          from_email: email.from_email,
+          from_name: email.from,
           subject: email.subject,
-          body: email.body.slice(0, 500),
+          body: email.preview,
           received_at: email.received_at,
           type: c.type,
           summary: c.summary,
