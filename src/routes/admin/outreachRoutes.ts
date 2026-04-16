@@ -134,9 +134,10 @@ router.post('/deal-match', authorize('campaigns:write'), async (req: Request, re
 
 router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { fetchNewEmails } = await import('../../services/gmailService');
-    const hours = Number(req.query.hours) || 72;
-    const allEmails = await fetchNewEmails(hours);
+    const { fetchAllInboxEmails } = await import('../../services/gmailService');
+    const hours = Number(req.query.hours) || 720; // default 30 days to find enough inquiries
+    const limit = Number(req.query.limit) || 50;
+    const allEmails = await fetchAllInboxEmails(hours, limit);
 
     // Use AI to classify which emails are quote/inquiry requests
     const apiKey = process.env.OPENAI_API_KEY;
@@ -154,7 +155,7 @@ router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, re
       body: JSON.stringify({
         model: process.env.AI_MODEL || 'gpt-4o',
         messages: [
-          { role: 'system', content: `You are scanning emails for LandJet, a premium ground transportation company. Identify emails that are:\n- Quote requests (someone asking about pricing or booking)\n- Service inquiries (asking about availability, routes, fleet)\n- Partnership/business inquiries\n- Lead referrals\n\nDo NOT include: newsletters, marketing emails, internal emails, receipts, automated notifications, spam.\n\nReturn JSON array of indices that are genuine inquiries: { "inquiry_indices": [0, 3, 7], "classifications": [{ "index": 0, "type": "quote_request", "summary": "one sentence" }] }` },
+          { role: 'system', content: `You are scanning emails for Ryan Landry, CEO of LandJet (premium ground transportation) and Managing Partner at MB Capital Ventures (capital advisory). Identify emails that are:\n- quote_request: someone asking about pricing, booking, or transportation services\n- service_inquiry: asking about availability, routes, fleet, or service areas\n- partnership_inquiry: business development, partnership, vendor, or collaboration proposals\n- lead_referral: introductions, referrals, or recommendations from contacts\n- investor_inquiry: anyone interested in investing, franchise opportunities, or capital discussions\n- deal_opportunity: real estate deals, company acquisitions, or investment opportunities\n\nBe GENEROUS in classification -- if an email could be a business opportunity, include it.\nDo NOT include: newsletters, marketing blasts, automated notifications, spam, receipts, or purely personal/social emails.\n\nReturn JSON: { "classifications": [{ "index": 0, "type": "quote_request", "summary": "one sentence summary" }] }` },
           { role: 'user', content: emailSummaries },
         ],
         temperature: 0.3,

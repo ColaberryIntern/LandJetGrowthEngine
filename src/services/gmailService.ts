@@ -183,3 +183,43 @@ export async function fetchNewEmails(lookbackHours: number = 24): Promise<Parsed
   logger.info(`Fetched ${emails.length} emails from Gmail`);
   return emails;
 }
+
+/**
+ * Fetch all inbox emails (not filtered by sender) within a lookback window.
+ * Used for inbound inquiry scanning.
+ */
+export async function fetchAllInboxEmails(lookbackHours: number = 72, maxResults: number = 50): Promise<ParsedEmail[]> {
+  const gmail = getGmailClient();
+
+  const afterTimestamp = Math.floor((Date.now() - lookbackHours * 60 * 60 * 1000) / 1000);
+  const query = `in:inbox after:${afterTimestamp} -category:promotions -category:social -category:updates`;
+
+  logger.info('Fetching all inbox emails', { query, lookbackHours, maxResults });
+
+  const emails: ParsedEmail[] = [];
+
+  const listResponse = await gmail.users.messages.list({
+    userId: 'me',
+    q: query,
+    maxResults,
+  });
+
+  const messages = listResponse.data.messages || [];
+
+  for (const msg of messages) {
+    if (!msg.id) continue;
+    try {
+      const fullMessage = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full',
+      });
+      emails.push(parseEmailMessage(fullMessage.data));
+    } catch (e) {
+      logger.error('Failed to fetch Gmail message', { messageId: msg.id, error: (e as Error).message });
+    }
+  }
+
+  logger.info(`Fetched ${emails.length} inbox emails from Gmail`);
+  return emails;
+}

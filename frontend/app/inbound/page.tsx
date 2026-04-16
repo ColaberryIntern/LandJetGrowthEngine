@@ -11,6 +11,8 @@ const TYPE_COLORS: Record<string, string> = {
   service_inquiry: 'bg-blue-100 text-blue-700',
   partnership_inquiry: 'bg-purple-100 text-purple-700',
   lead_referral: 'bg-amber-100 text-amber-700',
+  investor_inquiry: 'bg-indigo-100 text-indigo-700',
+  deal_opportunity: 'bg-rose-100 text-rose-700',
 };
 
 function timeAgo(dateStr: string): string {
