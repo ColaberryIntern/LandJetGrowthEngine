@@ -79,9 +79,10 @@ router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     const campaignVars = (campaign.settings as any)?.variables || {};
+    const campaignVarNames = Object.keys(campaignVars).map(k => `{{${k}}}`);
     const campaignVarList = Object.entries(campaignVars).map(([k, v]) => `{{${k}}} = "${v}"`).join('\n');
-    const leadVarList = '{{first_name}}, {{last_name}}, {{company}}, {{email}}, {{title}}, {{vertical}} (always available from lead data)';
-    const allVarList = campaignVarList ? `CAMPAIGN VARIABLES:\n${campaignVarList}\n\nLEAD VARIABLES (always available):\n${leadVarList}` : `LEAD VARIABLES (always available):\n${leadVarList}`;
+    const leadVarNames = ['{{first_name}}', '{{last_name}}', '{{company}}', '{{email}}', '{{title}}', '{{vertical}}'];
+    const allAllowedVars = [...campaignVarNames, ...leadVarNames];
 
     const currentPrompt = campaign.ai_system_prompt || '';
     const currentSteps = campaign.sequence_steps || [];
@@ -89,28 +90,38 @@ router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured' });
 
-    const systemInstruction = `You are rewriting outreach email prompts for a campaign. You will be given the available variables and the current prompts.
+    const systemInstruction = `You are rewriting outreach email prompts. Write the prompts as instructions to an AI that will generate the actual email.
 
-CRITICAL RULES:
-1. ONLY use variables from the provided list. NEVER invent new variables.
-2. If a {{variable}} is not in the provided list, REMOVE it entirely and replace with natural language.
+THE ONLY VARIABLES YOU MAY USE (complete list):
+${allAllowedVars.join(', ')}
 
-SYSTEM PROMPT (campaign_prompt):
-- Master instruction for AI email generation
-- Must incorporate ALL campaign variables naturally using {{variable_name}} syntax
-- Must reference lead variables ({{first_name}}, {{company}}, etc.)
-- Under 200 words. Be specific about tone, length, and sign-off.
+THESE VARIABLES DO NOT EXIST -- DO NOT USE THEM:
+{{sender_name}}, {{sender_title}}, {{sender_first_name}}, {{sender_company}}, {{company_name}}, {{company_description}}, {{no_competitor}}, {{vehicle_type}}, {{route_range}}, {{states_served}}, {{locations_count}}, {{avg_trip_value}}, {{unit_economics}}, {{raise_amount}}, {{raise_purpose}}, {{value_prop}}, {{market_size}}
 
-SEQUENCE STEP PROMPTS:
-- Step 1 (initial outreach): Warm, direct. Use key variables like {{pain_point}}, {{positioning}}, {{proof_revenue}} if available. Under 100 words.
-- Step 2 (follow-up): Add value, reference different proof points like {{proof_customer}}, {{target_profile}} if available. Under 80 words.
-- Step 3 (final touch): Brief, graceful close. Only use {{first_name}}. Leave door open. Under 70 words.
-- Each step should only include variables RELEVANT to that step -- not all of them.
+Instead of sender variables, write: "Sign off as Ryan." or "Write as CEO of LandJet."
+Instead of company variables, use the campaign variable values directly in the prompt text.
+
+CAMPAIGN VARIABLE VALUES FOR REFERENCE:
+${campaignVarList || 'None defined'}
+
+LEAD VARIABLES (filled at send time): {{first_name}}, {{last_name}}, {{company}}, {{title}}, {{vertical}}
+
+WHAT TO WRITE:
+
+campaign_prompt (system prompt, under 200 words):
+- Instructions for generating a personalized email to {{first_name}} at {{company}}
+- Weave in the campaign variables: ${campaignVarNames.join(', ') || 'none'}
+- Specify: tone (founder-direct, not salesy), length (under 120 words), sign off as Ryan
+
+steps (3 sequence steps):
+- Step 1: Initial outreach. Use {{first_name}}, {{company}}, and key campaign vars. Under 100 words.
+- Step 2: Follow-up with different proof points. Under 80 words.
+- Step 3: Brief final touch. Only {{first_name}}. Under 70 words.
 
 Return JSON: {"campaign_prompt": "...", "steps": [{step, delay_days, prompt, channel}]}
-Preserve existing delay_days and channel values from the current steps.`;
+Keep existing delay_days and channel from current steps. Output exactly 3 steps.`;
 
-    const userContent = `${allVarList}\n\nCURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
+    const userContent = `CURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
