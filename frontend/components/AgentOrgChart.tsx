@@ -204,7 +204,6 @@ export default function AgentOrgChart({ agents }: AgentOrgChartProps) {
                 width: 48, height: 48,
                 backgroundColor: c.bg,
                 borderColor: c.border,
-                ringColor: c.border,
                 zIndex: dragging === agent.name ? 20 : 5,
               }}
               onMouseDown={e => { e.stopPropagation(); handleMouseDown(agent.name, e); }}
