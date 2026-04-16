@@ -707,6 +707,20 @@ export function disableAgent(name: string) {
   return request<{ agent: AiAgentRecord }>(`/admin/agents/${name}/disable`, { method: 'PATCH' });
 }
 
+export interface AgentRunRecord {
+  id: string;
+  agent_name: string;
+  status: 'success' | 'failed' | 'skipped';
+  duration_ms: number | null;
+  details: object | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export function getAgentRunHistory(name: string, limit?: number) {
+  return request<{ runs: AgentRunRecord[]; total: number }>(`/admin/agents/${name}/history${limit ? '?limit=' + limit : ''}`);
+}
+
 // User Profile
 export interface UserProfile {
   user: { id: string; email: string; first_name: string; last_name: string; role: string; status: string; last_login_at: string | null };

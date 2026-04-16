@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { registerAgent, getAgent, enableAgent, disableAgent, listAgents } from '../../intelligence/agents/agentRegistry';
+import { registerAgent, getAgent, enableAgent, disableAgent, listAgents, getAgentRunHistory } from '../../intelligence/agents/agentRegistry';
 import { createAuditLog } from '../../services/auditLogService';
 import { NotFoundError } from '../../middleware/errors';
 import { logger } from '../../config/logger';
@@ -30,6 +30,17 @@ router.get('/:name', authorize('campaigns:read'), async (req: Request, res: Resp
     res.json({ agent });
   } catch (e) {
     logger.error('GET /agents/:name failed', { name: req.params.name, error: (e as Error).message });
+    next(e);
+  }
+});
+
+router.get('/:name/history', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limit = Number(req.query.limit) || 50;
+    const runs = await getAgentRunHistory(req.params.name as string, limit);
+    res.json({ runs, total: runs.length });
+  } catch (e) {
+    logger.error('GET /agents/:name/history failed', { name: req.params.name, error: (e as Error).message });
     next(e);
   }
 });

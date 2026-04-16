@@ -35,6 +35,7 @@ import { initApiIntegrationModel, ApiIntegration } from './ApiIntegration';
 import { initUserFeedbackModel, UserFeedback } from './UserFeedback';
 import { initUserConsentModel, UserConsent } from './UserConsent';
 import { initEtlPipelineModel, EtlPipeline } from './EtlPipeline';
+import { initAgentRunModel, AgentRun } from './AgentRun';
 
 export function initModels(sequelize: Sequelize) {
   initUserModel(sequelize);
@@ -73,6 +74,7 @@ export function initModels(sequelize: Sequelize) {
   initUserFeedbackModel(sequelize);
   initUserConsentModel(sequelize);
   initEtlPipelineModel(sequelize);
+  initAgentRunModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -111,4 +113,5 @@ export {
   ApiIntegration,
   UserFeedback, UserConsent,
   EtlPipeline,
+  AgentRun,
 };

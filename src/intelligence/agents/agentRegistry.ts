@@ -73,9 +73,35 @@ export async function listAgents(filters: { type?: string; department?: string; 
   return AiAgent.findAll({ where, order: [['name', 'ASC']] });
 }
 
-export async function recordAgentRun(name: string, metrics?: object): Promise<void> {
+export async function recordAgentRun(name: string, metrics?: object, status: 'success' | 'failed' | 'skipped' = 'success', errorMessage?: string): Promise<void> {
+  try {
+    const { AgentRun } = require('../../models/AgentRun');
+    // Log to history table
+    await AgentRun.create({
+      agent_name: name,
+      status,
+      details: metrics || null,
+      error_message: errorMessage || null,
+    });
+  } catch {}
+
+  // Update last_run_at on the agent
   const agent = await AiAgent.findOne({ where: { name } });
   if (agent) {
     await agent.update({ last_run_at: new Date(), metrics: metrics || agent.metrics });
+  }
+}
+
+export async function getAgentRunHistory(name: string, limit: number = 20): Promise<any[]> {
+  try {
+    const { AgentRun } = require('../../models/AgentRun');
+    return await AgentRun.findAll({
+      where: { agent_name: name },
+      order: [['created_at', 'DESC']],
+      limit,
+      raw: true,
+    });
+  } catch {
+    return [];
   }
 }
