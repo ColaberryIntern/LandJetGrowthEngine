@@ -94,7 +94,7 @@ export async function generateWeeklyKPIReport(): Promise<KPIReport> {
     reply_rate: sent > 0 ? Math.round((replied / sent) * 100) : 0,
     leads_contacted: contacted,
     leads_never_contacted: neverContacted,
-    hot_leads: hotCount as number,
+    hot_leads: hotCount as unknown as number,
     pipeline,
     by_campaign: byCampaign,
     generated_at: new Date().toISOString(),
