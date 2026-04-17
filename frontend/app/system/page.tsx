@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, getAgents, type LocalePreferences, type ResourceConfig, type AiAgentRecord } from '@/lib/api';
+import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, type LocalePreferences, type ResourceConfig } from '@/lib/api';
 import { useTranslation, SUPPORTED_LANGUAGES, LANGUAGE_LABELS, type Language } from '@/lib/i18n';
-import AgentOrgChart from '@/components/AgentOrgChart';
 
 interface HealthData {
   status: string;
@@ -42,14 +41,6 @@ export default function SystemPage() {
   const [editingResources, setEditingResources] = useState(false);
   const [resourceForm, setResourceForm] = useState({ max_per_cycle: 40, max_per_campaign: 10, send_window_start: 8, send_window_end: 17, max_daily_calls: 50, api_rate_limit: 100, retry_delay_minutes: 30 });
   const [resourceSaving, setResourceSaving] = useState(false);
-  const [agents, setAgents] = useState<AiAgentRecord[]>([]);
-
-  async function fetchAgents() {
-    try {
-      const res = await getAgents();
-      setAgents(res.agents || []);
-    } catch {}
-  }
 
   async function fetchHealth() {
     try {
@@ -81,7 +72,7 @@ export default function SystemPage() {
     } catch {}
   }
 
-  useEffect(() => { fetchHealth(); fetchLocale(); fetchResources(); fetchAgents(); }, []);
+  useEffect(() => { fetchHealth(); fetchLocale(); fetchResources(); }, []);
 
   async function handleLocaleSave() {
     setLocaleSaving(true);
@@ -391,20 +382,6 @@ export default function SystemPage() {
                 <p className="text-xs font-medium text-gray-400">Retry Delay</p>
                 <p className="text-sm text-gray-900">{resources.retry_delay_minutes} min</p>
               </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* AI Agent Team */}
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">AI Agent Team</h2>
-        <div className="mt-3">
-          {agents.length > 0 ? (
-            <AgentOrgChart agents={agents} />
-          ) : (
-            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
-              Loading agents...
             </div>
           )}
         </div>

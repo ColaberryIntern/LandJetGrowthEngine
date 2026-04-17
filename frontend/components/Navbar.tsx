@@ -8,6 +8,7 @@ const PRIMARY_ITEMS = [
   { href: '/outreach', label: 'Outreach' },
   { href: '/campaigns', label: 'Campaigns' },
   { href: '/inbound', label: 'Inbound' },
+  { href: '/agents', label: 'Agents' },
 ];
 
 const ADMIN_ITEMS = [
