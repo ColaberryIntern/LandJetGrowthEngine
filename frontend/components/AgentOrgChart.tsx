@@ -40,7 +40,7 @@ const DEPT_ANCHORS: Record<string, Pos> = {
   infrastructure: { x: 400, y: 470 },
 };
 
-export default function AgentOrgChart({ agents }: { agents: AiAgentRecord[] }) {
+export default function AgentOrgChart({ agents, activeAgents }: { agents: AiAgentRecord[]; activeAgents?: Set<string> }) {
   const [positions, setPositions] = useState<Record<string, Pos>>({});
   const [homePositions, setHomePositions] = useState<Record<string, Pos>>({});
   const [dragging, setDragging] = useState<string | null>(null);
@@ -206,8 +206,8 @@ export default function AgentOrgChart({ agents }: { agents: AiAgentRecord[] }) {
         </div>
 
         {/* Control Tower */}
-        <div className="absolute flex flex-col items-center justify-center rounded-full bg-gray-900 text-white shadow-xl cursor-grab active:cursor-grabbing"
-          style={{ left: ct.x - 38, top: ct.y - 38, width: 76, height: 76, zIndex: 10 }}
+        <div className={`absolute flex flex-col items-center justify-center rounded-full bg-gray-900 text-white shadow-xl cursor-grab active:cursor-grabbing transition-all duration-300 ${activeAgents && activeAgents.size > 0 ? 'scale-105' : ''}`}
+          style={{ left: ct.x - 38, top: ct.y - 38, width: 76, height: 76, zIndex: 10, boxShadow: activeAgents && activeAgents.size > 0 ? '0 0 25px rgba(16,185,129,0.4), 0 0 50px rgba(16,185,129,0.2)' : undefined }}
           onMouseDown={e => onDown('__ct__', e)}
           onClick={() => controlTower && clickAgent(controlTower)}>
           <span className="text-lg">&#x1F3EF;</span>
@@ -220,11 +220,12 @@ export default function AgentOrgChart({ agents }: { agents: AiAgentRecord[] }) {
           const pos = positions[agent.name]; if (!pos) return null;
           const c = DEPT_COLORS[agent.department || ''] || DEFAULT_COLOR;
           const isSel = selectedAgent?.name === agent.name;
+          const isActive = activeAgents?.has(agent.name);
           const ab = agent.name.split('_').map(w => w[0]?.toUpperCase()).join('').slice(0, 2);
           return (
             <div key={agent.name}
-              className={`absolute flex items-center justify-center rounded-full shadow-md cursor-grab active:cursor-grabbing transition-transform ${isSel ? 'scale-125 ring-2 ring-offset-2 ring-gray-400' : 'hover:scale-110 hover:shadow-lg'}`}
-              style={{ left: pos.x - 21, top: pos.y - 21, width: 42, height: 42, backgroundColor: c.bg, zIndex: dragging === agent.name ? 20 : 5 }}
+              className={`absolute flex items-center justify-center rounded-full shadow-md cursor-grab active:cursor-grabbing transition-all duration-300 ${isSel ? 'scale-125 ring-2 ring-offset-2 ring-gray-400' : isActive ? 'scale-125 shadow-lg' : 'hover:scale-110 hover:shadow-lg'}`}
+              style={{ left: pos.x - 21, top: pos.y - 21, width: 42, height: 42, backgroundColor: c.bg, zIndex: dragging === agent.name ? 20 : isActive ? 15 : 5, boxShadow: isActive ? `0 0 20px ${c.bg}80, 0 0 40px ${c.bg}40` : undefined }}
               onMouseDown={e => onDown(agent.name, e)}
               onClick={() => clickAgent(agent)}
               title={formatName(agent.name)}>

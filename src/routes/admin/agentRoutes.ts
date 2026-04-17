@@ -9,6 +9,25 @@ import { logger } from '../../config/logger';
 const router = Router();
 router.use(authenticate);
 
+router.get('/activity', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const hours = Number(req.query.hours) || 24;
+    const limit = Number(req.query.limit) || 200;
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const { AgentRun } = require('../../models/AgentRun');
+    const runs = await AgentRun.findAll({
+      where: { created_at: { [require('sequelize').Op.gte]: since } },
+      order: [['created_at', 'DESC']],
+      limit,
+      raw: true,
+    });
+    res.json({ runs, total: runs.length });
+  } catch (e) {
+    logger.error('GET /agents/activity failed', { error: (e as Error).message });
+    next(e);
+  }
+});
+
 router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agents = await listAgents({

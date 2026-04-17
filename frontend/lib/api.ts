@@ -721,6 +721,10 @@ export function getAgentRunHistory(name: string, limit?: number) {
   return request<{ runs: AgentRunRecord[]; total: number }>(`/admin/agents/${name}/history${limit ? '?limit=' + limit : ''}`);
 }
 
+export function getAgentActivity(hours?: number) {
+  return request<{ runs: AgentRunRecord[]; total: number }>(`/admin/agents/activity${hours ? '?hours=' + hours : ''}`);
+}
+
 // User Profile
 export interface UserProfile {
   user: { id: string; email: string; first_name: string; last_name: string; role: string; status: string; last_login_at: string | null };
