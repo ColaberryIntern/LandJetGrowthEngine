@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAgents, getAgentActivity, type AiAgentRecord, type AgentRunRecord } from '@/lib/api';
 import AgentOrgChart from '@/components/AgentOrgChart';
 
@@ -23,11 +23,16 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
   const [activeAgents, setActiveAgents] = useState<Set<string>>(new Set());
   const [flashRun, setFlashRun] = useState<string | null>(null);
+  const [replayMode, setReplayMode] = useState(true);
+  const [replayIndex, setReplayIndex] = useState(-1);
+  const [visibleRuns, setVisibleRuns] = useState<AgentRunRecord[]>([]);
+  const [replayStatus, setReplayStatus] = useState('Initializing...');
   const activityRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevRunCountRef = useRef(0);
+  const replayDataRef = useRef<AgentRunRecord[]>([]);
 
-  async function fetchAll() {
+  async function fetchAll(isInitial = false) {
     try {
       const [agentRes, actRes] = await Promise.allSettled([
         getAgents(),
@@ -38,16 +43,18 @@ export default function AgentsPage() {
         const runs = actRes.value.runs || [];
         setActivity(runs);
 
-        // Flash new runs
-        if (prevRunCountRef.current > 0 && runs.length > prevRunCountRef.current) {
+        if (isInitial) {
+          // Store last 10 for replay (reversed so oldest plays first)
+          replayDataRef.current = runs.slice(0, 10).reverse();
+          setVisibleRuns([]);
+          return;
+        }
+
+        // Live mode: flash new runs
+        if (!replayMode && prevRunCountRef.current > 0 && runs.length > prevRunCountRef.current) {
           const newRuns = runs.slice(0, runs.length - prevRunCountRef.current);
           for (const r of newRuns) {
-            setActiveAgents(prev => new Set([...prev, r.agent_name]));
-            setFlashRun(r.id);
-            setTimeout(() => {
-              setActiveAgents(prev => { const n = new Set(prev); n.delete(r.agent_name); return n; });
-              setFlashRun(null);
-            }, 2000);
+            triggerFlash(r.agent_name, r.id);
           }
         }
         prevRunCountRef.current = runs.length;
@@ -56,44 +63,108 @@ export default function AgentsPage() {
     setLoading(false);
   }
 
+  function triggerFlash(agentName: string, runId: string) {
+    setActiveAgents(prev => new Set([...prev, agentName]));
+    setFlashRun(runId);
+    setTimeout(() => {
+      setActiveAgents(prev => { const n = new Set(prev); n.delete(agentName); return n; });
+      setFlashRun(null);
+    }, 1500);
+  }
+
+  // Initial load + replay
   useEffect(() => {
-    fetchAll();
-    // Poll every 10 seconds for live updates
-    pollRef.current = setInterval(fetchAll, 10000);
+    fetchAll(true).then(() => {
+      // Start replay after data loads
+      setTimeout(() => setReplayIndex(0), 800);
+    });
+  }, []);
+
+  // Replay engine
+  useEffect(() => {
+    if (replayIndex < 0) return;
+    const replayItems = replayDataRef.current;
+
+    if (replayIndex >= replayItems.length) {
+      // Replay done, switch to live
+      setReplayMode(false);
+      setReplayStatus('');
+      setVisibleRuns(activity);
+      prevRunCountRef.current = activity.length;
+      // Start live polling
+      pollRef.current = setInterval(() => fetchAll(false), 10000);
+      return;
+    }
+
+    const run = replayItems[replayIndex];
+    const delay = 600 + Math.random() * 400; // Staggered timing
+
+    setReplayStatus(`Replaying ${formatName(run.agent_name)}...`);
+
+    const timeout = setTimeout(() => {
+      // Add to visible runs (prepend so newest is on top)
+      setVisibleRuns(prev => [run, ...prev]);
+      // Flash the agent node
+      triggerFlash(run.agent_name, run.id);
+      // Scroll to top of feed
+      if (activityRef.current) activityRef.current.scrollTop = 0;
+      // Next
+      setReplayIndex(prev => prev + 1);
+    }, delay);
+
+    return () => clearTimeout(timeout);
+  }, [replayIndex, activity]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
+  // In live mode, sync visibleRuns with activity
+  useEffect(() => {
+    if (!replayMode && activity.length > 0) {
+      setVisibleRuns(activity);
+    }
+  }, [replayMode, activity]);
+
   // Stats
+  const displayRuns = replayMode ? visibleRuns : activity;
   const totalRuns = activity.length;
   const successRuns = activity.filter(r => r.status === 'success').length;
   const failedRuns = activity.filter(r => r.status === 'failed').length;
   const activeAgentNames = new Set(activity.map(r => r.agent_name));
   const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 100;
 
-  // Group activity by hour for the timeline bar
+  // Hour buckets
   const hourBuckets: Record<number, number> = {};
-  for (const r of activity) {
-    const h = new Date(r.created_at).getHours();
-    hourBuckets[h] = (hourBuckets[h] || 0) + 1;
-  }
+  for (const r of activity) { const h = new Date(r.created_at).getHours(); hourBuckets[h] = (hourBuckets[h] || 0) + 1; }
   const maxBucket = Math.max(...Object.values(hourBuckets), 1);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 -mx-6 px-6" style={{ maxWidth: '100vw' }}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-900">AI War Room</h1>
-          <p className="mt-1 text-sm text-gray-500">Live agent operations -- last 24 hours</p>
+          <p className="mt-1 text-sm text-gray-500">
+            {replayMode ? replayStatus : 'Live agent operations -- last 24 hours'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-gray-500">Live</span>
-          </div>
-          <button onClick={() => { setLoading(true); fetchAll(); }} disabled={loading}
+          {replayMode ? (
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-xs text-amber-600 font-medium">Replaying</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs text-gray-500">Live</span>
+            </div>
+          )}
+          <button onClick={() => { window.location.reload(); }} disabled={loading}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-            {loading ? 'Refreshing...' : 'Refresh'}
+            Refresh
           </button>
         </div>
       </div>
@@ -102,7 +173,7 @@ export default function AgentsPage() {
       <div className="grid gap-3 grid-cols-4">
         <div className="rounded-lg bg-gray-900 p-4 text-white">
           <p className="text-xs text-gray-400 uppercase tracking-wider">Executions (24h)</p>
-          <p className="mt-1 text-2xl font-bold">{totalRuns}</p>
+          <p className="mt-1 text-2xl font-bold">{replayMode ? visibleRuns.length : totalRuns}</p>
         </div>
         <div className="rounded-lg bg-emerald-600 p-4 text-white">
           <p className="text-xs text-emerald-200 uppercase tracking-wider">Success Rate</p>
@@ -114,7 +185,7 @@ export default function AgentsPage() {
         </div>
         <div className="rounded-lg bg-blue-600 p-4 text-white">
           <p className="text-xs text-blue-200 uppercase tracking-wider">Active Agents</p>
-          <p className="mt-1 text-2xl font-bold">{activeAgentNames.size} / {agents.length}</p>
+          <p className="mt-1 text-2xl font-bold">{replayMode ? new Set(visibleRuns.map(r => r.agent_name)).size : activeAgentNames.size} / {agents.length}</p>
         </div>
       </div>
 
@@ -138,41 +209,42 @@ export default function AgentsPage() {
       </div>
 
       {/* Main Layout: Graph + Activity Feed */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Network Graph (2/3 width) */}
-        <div className="lg:col-span-2">
+      <div className="grid gap-4 lg:grid-cols-4">
+        {/* Network Graph */}
+        <div className="lg:col-span-3">
           {agents.length > 0 ? (
             <AgentOrgChart agents={agents} activeAgents={activeAgents} />
           ) : (
-            <div className="rounded-xl border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">
-              Loading agents...
-            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">Loading agents...</div>
           )}
         </div>
 
-        {/* Live Activity Feed (1/3 width) */}
+        {/* Live Activity Feed */}
         <div className="rounded-xl border border-gray-200 bg-gray-900 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-sm font-semibold text-white">Live Activity</span>
+              <div className={`h-2 w-2 rounded-full ${replayMode ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`} />
+              <span className="text-sm font-semibold text-white">{replayMode ? 'Replay' : 'Live Activity'}</span>
             </div>
-            <span className="text-xs text-gray-500">{totalRuns} events</span>
+            <span className="text-xs text-gray-500">{displayRuns.length} events</span>
           </div>
           <div ref={activityRef} className="overflow-y-auto" style={{ maxHeight: 520 }}>
-            {activity.length === 0 ? (
-              <div className="p-8 text-center text-sm text-gray-600">No activity in the last 24 hours</div>
+            {displayRuns.length === 0 ? (
+              <div className="p-8 text-center">
+                <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-gray-600 border-t-emerald-500" />
+                <p className="mt-3 text-sm text-gray-600">Loading activity...</p>
+              </div>
             ) : (
               <div className="divide-y divide-gray-800">
-                {activity.map(run => {
-                  const isNew = flashRun === run.id;
+                {displayRuns.map((run, idx) => {
+                  const isNew = flashRun === run.id || (replayMode && idx === 0 && replayIndex > 0);
                   const color = DEPT_COLORS[agents.find(a => a.name === run.agent_name)?.department || ''] || '#6B7280';
                   return (
-                    <div key={run.id}
-                      className={`px-4 py-2.5 transition-all duration-500 ${isNew ? 'bg-emerald-900/30' : 'hover:bg-gray-800/50'}`}>
+                    <div key={`${run.id}-${idx}`}
+                      className={`px-4 py-2.5 transition-all duration-700 ${isNew ? 'bg-emerald-900/40 border-l-2 border-l-emerald-400' : 'hover:bg-gray-800/50 border-l-2 border-l-transparent'}`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                          <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 transition-all duration-500 ${isNew ? 'scale-150' : ''}`}
                             style={{ backgroundColor: run.status === 'success' ? '#10B981' : run.status === 'failed' ? '#EF4444' : '#6B7280' }} />
                           <div className="h-5 w-5 rounded-full flex items-center justify-center flex-shrink-0"
                             style={{ backgroundColor: color }}>
