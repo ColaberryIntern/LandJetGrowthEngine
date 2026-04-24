@@ -395,7 +395,41 @@ Claude is planner and system hardener — not the worker.
 - Escalation replaces paralysis  
 - Daily reporting ensures oversight  
 
-Be deliberate.  
-Be testable.  
-Be autonomous.  
+Be deliberate.
+Be testable.
+Be autonomous.
 Be governed — only where necessary.
+
+---
+
+# Session Start Protocol
+
+At the beginning of every session, Claude must:
+
+1. Read `CLAUDE.md` (this file) fully
+2. Read `PROGRESS.md` at the repository root
+3. Summarize current project state and the first unchecked task
+4. Make no code changes during this step
+
+---
+
+# Progress Update Rule
+
+After every completed change, Claude must:
+
+- Update `PROGRESS.md` to mark completed tasks with `[x]`
+- Add a brief note under the task if anything notable happened (blockers, decisions, deviations)
+- Never mark a task complete unless it has been verified
+- Add new tasks discovered during work to the Active Tasks section
+- Log session activity in the Session Log section
+
+---
+
+# Session Log Rule
+
+At the end of each session (or at natural breakpoints), Claude must append a session entry to `PROGRESS.md` including:
+
+- Date
+- Summary of work completed
+- Any blockers or decisions made
+- What should be picked up next

@@ -1,5 +1,5 @@
 import { generateMessage } from '../services/aiMessageService';
-import { registerAgent, getAgent } from '../intelligence/agents/agentRegistry';
+import { registerAgent, getAgent, recordAgentRun } from '../intelligence/agents/agentRegistry';
 import { CampaignLead } from '../models/CampaignLead';
 import { Unsubscribe } from '../models/Unsubscribe';
 import { InteractionOutcome } from '../models/InteractionOutcome';
@@ -60,8 +60,10 @@ Body: ${input.inboundBody}`,
     // Take action based on classification
     await handleClassificationAction(parsed, input);
 
+    recordAgentRun('response_classifier', { classification: parsed.classification, confidence: parsed.confidence, leadId: input.leadId }).catch(() => {});
     return parsed;
   } catch (error) {
+    recordAgentRun('response_classifier', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Response classification failed', { error: (error as Error).message });
     return { classification: 'unknown', confidence: 0, summary: 'Classification failed', recommended_action: 'escalate_to_human' };
   }

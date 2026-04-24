@@ -10,7 +10,6 @@ export default function AutoLogin() {
     async function ensureToken() {
       const existing = localStorage.getItem('token');
 
-      // Check if token is expired by decoding the payload
       if (existing) {
         try {
           const payload = JSON.parse(atob(existing.split('.')[1]));
@@ -22,13 +21,16 @@ export default function AutoLogin() {
       try {
         const res = await login('admin@landjet.com', 'Admin123!');
         localStorage.setItem('token', res.token);
+        // Reload so all components pick up the new token
         window.location.reload();
       } catch {
-        // Silent fail — backend may not be running
+        // Silent fail -- backend may not be running
       }
     }
 
-    ensureToken();
+    // Small delay to let page components attempt their own auth first
+    const timer = setTimeout(ensureToken, 500);
+    return () => clearTimeout(timer);
   }, []);
 
   return null;

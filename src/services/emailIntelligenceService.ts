@@ -1,5 +1,6 @@
 import { logger } from '../config/logger';
 import { ClassifiedData } from '../models/EmailThread';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 /**
  * Classify an email using OpenAI to extract intent, priority, and action items.
@@ -87,6 +88,7 @@ ${(body || '').substring(0, 4000)}`;
     classified.todos = (classified.todos || []).slice(0, 7);
     classified.confidence = Math.min(1.0, Math.max(0.0, classified.confidence || 0.5));
 
+    recordAgentRun('inbound_classifier', { topic: classified.topic, type: classified.type, priority: classified.priority, todoCount: classified.todos.length, confidence: classified.confidence }).catch(() => {});
     logger.info('Email classified', {
       topic: classified.topic,
       type: classified.type,
@@ -97,6 +99,7 @@ ${(body || '').substring(0, 4000)}`;
 
     return classified;
   } catch (error) {
+    recordAgentRun('inbound_classifier', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Email classification failed', { error: (error as Error).message });
     return {
       topic: subject || 'Classification Failed',

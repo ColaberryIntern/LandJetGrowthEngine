@@ -1,6 +1,7 @@
 import { Campaign } from '../models/Campaign';
 import { FollowUpSequence } from '../models/FollowUpSequence';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 export interface QAResult {
   campaignId: string;
@@ -55,7 +56,9 @@ export async function runQACycle(): Promise<QAResult[]> {
   }
 
   if (results.length > 0) {
-    logger.info('QA cycle complete', { campaigns: results.length, failed: results.filter(r => r.status === 'failed').length });
+    const failedCount = results.filter(r => r.status === 'failed').length;
+    recordAgentRun('campaign_qa', { campaigns: results.length, passed: results.filter(r => r.status === 'passed').length, failed: failedCount }).catch(() => {});
+    logger.info('QA cycle complete', { campaigns: results.length, failed: failedCount });
   }
 
   return results;

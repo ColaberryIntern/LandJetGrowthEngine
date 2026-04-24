@@ -9,6 +9,7 @@ import { evaluateSend } from './communicationSafetyService';
 import { generateMessage } from './aiMessageService';
 import { dispatchAction } from './channelDispatcher';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 /**
  * Step 0: Claim pending actions atomically.
@@ -273,8 +274,10 @@ export async function runSchedulerCycle(): Promise<{ processed: number; errors: 
       }
     }
 
+    recordAgentRun('scheduler_engine', { processed, errors }).catch(() => {});
     logger.info('Scheduler cycle complete', { processed, errors });
   } catch (error) {
+    recordAgentRun('scheduler_engine', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Scheduler cycle failed', { error: (error as Error).message });
   }
 

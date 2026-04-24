@@ -1,5 +1,6 @@
 import { Lead } from '../models/Lead';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 export interface QuoteRequest {
   lead_id?: number;
@@ -101,11 +102,14 @@ Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`,
 
     try {
       const parsed = JSON.parse(cleaned);
+      recordAgentRun('quote_generator', { leadId, service_type: request.service_type }).catch(() => {});
       return { subject: parsed.subject || 'Re: Your LandJet Inquiry', body: parsed.body || cleaned, lead_id: leadId };
     } catch {
+      recordAgentRun('quote_generator', { leadId, service_type: request.service_type }).catch(() => {});
       return { subject: 'Re: Your LandJet Inquiry', body: cleaned, lead_id: leadId };
     }
   } catch (error) {
+    recordAgentRun('quote_generator', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Failed to generate quote response', { error: (error as Error).message });
     throw error;
   }

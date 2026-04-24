@@ -1,5 +1,6 @@
 import { sendOutreachEmail } from './outreachEmailService';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -119,12 +120,14 @@ export async function generateMorningBriefing(userEmail: string = 'rlandry@landj
     const data = (await resp.json()) as any;
     const body = (data.choices?.[0]?.message?.content || '').trim();
 
+    recordAgentRun('morning_briefing', { events_count: events.length }).catch(() => {});
     return {
       subject: `Morning Briefing - ${new Date().toLocaleDateString()} - ${events.length} Meeting${events.length !== 1 ? 's' : ''}`,
       body,
       events_count: events.length,
     };
   } catch (error) {
+    recordAgentRun('morning_briefing', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Morning briefing AI generation failed', { error: (error as Error).message });
     // Fallback to plain event list
     return {

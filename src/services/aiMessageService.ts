@@ -1,4 +1,5 @@
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 export interface MessageGenerationInput {
   channel: 'email' | 'sms' | 'voice';
@@ -212,8 +213,10 @@ export async function generateMessage(
       }
     }
 
+    recordAgentRun('draft_writer', { channel: input.channel, tokens_used: tokensUsed, model }).catch(() => {});
     return { body, subject, tokens_used: tokensUsed, model };
   } catch (error) {
+    recordAgentRun('draft_writer', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('AI message generation failed', { error: (error as Error).message });
     return {
       body: fallbackBody || 'Message generation unavailable.',

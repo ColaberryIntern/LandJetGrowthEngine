@@ -299,8 +299,10 @@ router.post('/strategies', authorize('campaigns:write'), async (req: Request, re
 router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const campaignId = req.params.campaignId as string;
+    // Re-read fresh from DB to pick up any recently saved steps
     const campaign = await Campaign.findByPk(campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    await campaign.reload();
 
     const campaignVars = (campaign.settings as any)?.variables || {};
     const campaignVarNames = Object.keys(campaignVars).map(k => `{{${k}}}`);
@@ -334,16 +336,19 @@ WHAT TO WRITE:
 
 campaign_prompt (system prompt, under 200 words):
 - Instructions for generating a personalized email to {{first_name}} at {{company}}
-- Weave in the campaign variables: ${campaignVarNames.join(', ') || 'none'}
+- You MUST reference every single campaign variable at least once across the campaign_prompt and step prompts. Missing any variable is unacceptable. Variables: ${campaignVarNames.join(', ') || 'none'}
 - Specify: tone (founder-direct, not salesy), length (under 120 words), sign off as Ryan
 
-steps (3 sequence steps):
-- Step 1: Initial outreach. Use {{first_name}}, {{company}}, and key campaign vars. Under 100 words.
-- Step 2: Follow-up with different proof points. Under 80 words.
-- Step 3: Brief final touch. Only {{first_name}}. Under 70 words.
+steps (${currentSteps.length || 3} sequence steps):
+${(currentSteps.length > 0 ? currentSteps : [{ step: 1 }, { step: 2 }, { step: 3 }]).map((s: any, i: number) => {
+  const total = currentSteps.length || 3;
+  if (i === 0) return `- Step ${s.step}: Initial outreach. Use {{first_name}}, {{company}}, and key campaign vars. Under 100 words.`;
+  if (i === total - 1) return `- Step ${s.step}: Brief final touch. Only {{first_name}}. Under 70 words.`;
+  return `- Step ${s.step}: Follow-up ${i}. Use different proof points and campaign vars. Under 80 words.`;
+}).join('\n')}
 
 Return JSON: {"campaign_prompt": "...", "steps": [{step, delay_days, prompt, channel}]}
-Keep existing delay_days and channel from current steps. Output exactly 3 steps.`;
+Keep existing delay_days and channel from current steps. Output exactly ${currentSteps.length || 3} steps matching the step numbers above.`;
 
     const userContent = `CURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
 
@@ -372,6 +377,14 @@ Keep existing delay_days and channel from current steps. Output exactly 3 steps.
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned);
+
+    // Validate all campaign variables are referenced
+    const allGeneratedText = parsed.campaign_prompt + ' ' + (parsed.steps || []).map((s: any) => s.prompt || '').join(' ');
+    const missingVars = Object.keys(campaignVars).filter(k => !allGeneratedText.includes('{{' + k + '}}'));
+    if (missingVars.length > 0) {
+      // Inject missing variables into campaign prompt
+      parsed.campaign_prompt += '\nReference these in your emails: ' + missingVars.map(k => '{{' + k + '}}').join(', ') + '.';
+    }
 
     // Update campaign
     campaign.ai_system_prompt = parsed.campaign_prompt;

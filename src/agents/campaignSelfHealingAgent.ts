@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import { ScheduledEmail } from '../models/ScheduledEmail';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 /**
  * Self-healing agent: find and retry failed actions from the last 6 hours.
@@ -35,6 +36,7 @@ export async function runSelfHealingCycle(): Promise<{ retried: number; skipped:
     }
   }
 
+  recordAgentRun('health_scanner', { retried, skipped, failed_found: failedActions.length }).catch(() => {});
   if (retried > 0) {
     logger.info('Self-healing cycle complete', { retried, skipped });
   }

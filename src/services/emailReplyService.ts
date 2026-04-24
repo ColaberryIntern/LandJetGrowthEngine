@@ -1,4 +1,5 @@
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -124,7 +125,7 @@ Return JSON array: [{ index, draft_subject, draft_body, category, confidence }]`
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const drafts = JSON.parse(cleaned);
 
-    return drafts.map((d: any) => {
+    const results = drafts.map((d: any) => {
       const email = emails[d.index];
       if (!email) return null;
       return {
@@ -137,7 +138,11 @@ Return JSON array: [{ index, draft_subject, draft_body, category, confidence }]`
         confidence: d.confidence,
       };
     }).filter(Boolean) as DraftReply[];
+
+    recordAgentRun('reply_drafter', { drafts_generated: results.length, emails_processed: emails.length }).catch(() => {});
+    return results;
   } catch (error) {
+    recordAgentRun('reply_drafter', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Draft reply generation failed', { error: (error as Error).message });
     throw error;
   }

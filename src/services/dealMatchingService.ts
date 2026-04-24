@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import { Lead } from '../models/Lead';
 import { logger } from '../config/logger';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 export interface DealSummary {
   deal_name: string;
@@ -109,9 +110,11 @@ Only return the top ${limit} matches. Sort by score descending.`,
       });
     }
 
+    recordAgentRun('deal_matcher', { deal: deal.deal_name, matches: results.length }).catch(() => {});
     logger.info('Deal matched to investors', { deal: deal.deal_name, matches: results.length });
     return results;
   } catch (error) {
+    recordAgentRun('deal_matcher', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Deal matching failed', { deal: deal.deal_name, error: (error as Error).message });
     throw error;
   }

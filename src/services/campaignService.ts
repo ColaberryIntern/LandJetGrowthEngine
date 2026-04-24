@@ -76,6 +76,18 @@ export async function updateCampaign(id: string, updates: Partial<CampaignCreati
     }
   }
 
+  // Merge settings and channel_config instead of replacing
+  if (updates.settings && campaign.settings) {
+    (updates as any).settings = { ...(campaign.settings as any), ...(updates.settings as any) };
+    // Deep merge variables if both exist
+    if ((campaign.settings as any).variables && (updates.settings as any).variables) {
+      (updates as any).settings.variables = { ...(campaign.settings as any).variables, ...(updates.settings as any).variables };
+    }
+  }
+  if ((updates as any).channel_config && campaign.channel_config) {
+    (updates as any).channel_config = { ...(campaign.channel_config as any), ...(updates as any).channel_config };
+  }
+
   await campaign.update(updates);
   return campaign;
 }

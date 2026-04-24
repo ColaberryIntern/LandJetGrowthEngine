@@ -212,8 +212,13 @@ export interface OutreachSettings {
   sender_name: string;
   sender_role: string;
   sender_email: string;
+  email_signature: string;
   test_mode: boolean;
   test_email: string;
+  send_days: number[];
+  send_start_hour: number;
+  send_end_hour: number;
+  send_timezone: string;
 }
 
 export function getOutreachSettings() {

@@ -1,5 +1,5 @@
 import { generateMessage } from '../services/aiMessageService';
-import { registerAgent, getAgent } from '../intelligence/agents/agentRegistry';
+import { registerAgent, getAgent, recordAgentRun } from '../intelligence/agents/agentRegistry';
 import { logger } from '../config/logger';
 
 export interface PolishInput {
@@ -129,6 +129,7 @@ export async function polish(input: PolishInput): Promise<PolishOutput> {
       }
     }
 
+    recordAgentRun('email_polisher', { quality_score: qualityScore, changes: changesMade.length, tokens_used: result.tokens_used }).catch(() => {});
     return {
       subject: input.subject, // Polisher doesn't change subject per n8n spec
       body: polishedBody,
@@ -137,6 +138,7 @@ export async function polish(input: PolishInput): Promise<PolishOutput> {
       tokens_used: result.tokens_used,
     };
   } catch (error) {
+    recordAgentRun('email_polisher', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Email polisher failed, returning original', { error: (error as Error).message });
     return {
       subject: input.subject,

@@ -2,7 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV, rewriteCampaignPrompts } from '@/lib/api';
+import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV, rewriteCampaignPrompts, login } from '@/lib/api';
+
+async function ensureAuth() {
+  if (typeof window === 'undefined') return;
+  const existing = localStorage.getItem('token');
+  if (existing) {
+    try { const p = JSON.parse(atob(existing.split('.')[1])); if (p.exp * 1000 > Date.now()) return; } catch {}
+    localStorage.removeItem('token');
+  }
+  try { const r = await login('admin@landjet.com', 'Admin123!'); localStorage.setItem('token', r.token); } catch {}
+}
 
 type Tab = 'overview' | 'leads' | 'strategy' | 'settings';
 
@@ -33,6 +43,7 @@ export default function CampaignDetailPage() {
   const [followUpDelay, setFollowUpDelay] = useState(4);
   const [campaignPriority, setCampaignPriority] = useState(50);
   const [aiDrafts, setAiDrafts] = useState(true);
+  const [emailSignature, setEmailSignature] = useState('');
 
   // Leads state
   const [search, setSearch] = useState('');
@@ -44,6 +55,7 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     const timer = setTimeout(async () => {
+      await ensureAuth();
       try {
         const fetches: Promise<any>[] = [
           getCampaignContacts(id),
@@ -68,6 +80,7 @@ export default function CampaignDetailPage() {
           setFollowUpDelay(c.settings?.follow_up_delay_days || 4);
           setAiDrafts(c.settings?.ai_drafts_enabled ?? true);
           setCampaignPriority(c.settings?.priority || 50);
+          setEmailSignature(c.settings?.email_signature || '');
         }
       } catch {}
       setLoading(false);
@@ -80,10 +93,26 @@ export default function CampaignDetailPage() {
     setSaving(section);
     try {
       const res = await updateCampaignFields(id, updates);
-      setCampaign(res.campaign);
+      const c = res.campaign;
+      setCampaign(c);
+      // Re-sync all local state from the saved campaign to prevent drift
+      if (c.ai_system_prompt !== undefined) setPrompt(c.ai_system_prompt || '');
+      if (c.sequence_steps !== undefined) setSteps(c.sequence_steps || []);
+      if (c.settings) {
+        setSenderName(c.settings.sender_name || senderName);
+        setSenderRole(c.settings.sender_role || senderRole);
+        setSenderEmail(c.settings.sender_email || senderEmail);
+        setFollowUpDelay(c.settings.follow_up_delay_days || followUpDelay);
+        setAiDrafts(c.settings.ai_drafts_enabled ?? aiDrafts);
+        setCampaignPriority(c.settings.priority || campaignPriority);
+        setEmailSignature(c.settings.email_signature || emailSignature);
+      }
+      if (c.channel_config?.email?.daily_limit !== undefined) setEmailsPerDay(c.channel_config.email.daily_limit);
       setFlash(section);
       setTimeout(() => setFlash(null), 2000);
-    } catch {}
+    } catch (err) {
+      alert('Save failed: ' + (err as Error).message);
+    }
     setSaving(null);
   }
 
@@ -163,7 +192,17 @@ export default function CampaignDetailPage() {
           const contactedPct = total > 0 ? Math.round((contacted / total) * 100) : 0;
           const stages = Object.entries(analytics.by_stage || {}).sort(([a], [b]) => Number(a) - Number(b));
           const verticals = Object.entries(analytics.by_vertical || {}).sort(([, a], [, b]) => (b as number) - (a as number));
-          const stageLabels: Record<string, string> = { '1': 'Initial Outreach', '2': 'Follow-up', '3': 'Final Touch', '4': 'Completed' };
+          const stageLabels: Record<string, string> = {};
+          (steps.length > 0 ? steps : []).forEach((s: any) => {
+            const channelLabel = s.channel === 'email' ? 'Email' : s.channel === 'linkedin_connect' ? 'LinkedIn' : s.channel || 'Email';
+            stageLabels[String(s.step)] = `Step ${s.step} (${channelLabel})`;
+          });
+          if (Object.keys(stageLabels).length === 0) {
+            stageLabels['1'] = 'Initial Outreach';
+            stageLabels['2'] = 'Follow-up';
+            stageLabels['3'] = 'Final Touch';
+          }
+          stageLabels['4'] = 'Completed';
 
           return (
             <div className="space-y-6">
@@ -285,6 +324,23 @@ export default function CampaignDetailPage() {
                     <div className="mt-4">
                       <p className="text-gray-400 text-xs">AI Prompt</p>
                       <p className="mt-1 text-sm text-gray-600 bg-gray-50 rounded-md p-3">{campaign.ai_system_prompt}</p>
+                      {/* Variable Usage */}
+                      {campaign.settings?.variables && Object.keys(campaign.settings.variables).length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Campaign Variables</p>
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(campaign.settings.variables).map(([key, val]: [string, any]) => {
+                              const isUsed = (campaign.ai_system_prompt || '').includes('{{' + key + '}}');
+                              return (
+                                <span key={key} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${isUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${isUsed ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+                                  {'{{'}{key}{'}}'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -353,7 +409,7 @@ export default function CampaignDetailPage() {
                         <td className="py-2 text-gray-500">{c.email}</td>
                         <td className="py-2 text-gray-500">{c.company || '-'}</td>
                         <td className="py-2">{c.vertical ? <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">{c.vertical}</span> : '-'}</td>
-                        <td className="py-2 text-gray-500">{c.sequence_stage}/3</td>
+                        <td className="py-2 text-gray-500">{c.sequence_stage}/{steps.length || 3}</td>
                         <td className="py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${c.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{c.status}</span></td>
                       </tr>
                       {expandedId === c.id && (
@@ -444,6 +500,34 @@ export default function CampaignDetailPage() {
                             className="w-14 rounded-md border border-gray-300 px-2 py-1 text-sm text-center focus:border-gray-500 focus:outline-none bg-white" />
                           days
                         </label>
+                        <div className="ml-auto flex items-center gap-1">
+                          {i > 0 && (
+                            <button onClick={() => {
+                              const updated = [...steps];
+                              [updated[i - 1], updated[i]] = [updated[i], updated[i - 1]];
+                              setSteps(updated.map((s: any, idx: number) => ({ ...s, step: idx + 1 })));
+                            }} className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-200 hover:text-gray-700" title="Move up">
+                              ↑
+                            </button>
+                          )}
+                          {i < steps.length - 1 && (
+                            <button onClick={() => {
+                              const updated = [...steps];
+                              [updated[i], updated[i + 1]] = [updated[i + 1], updated[i]];
+                              setSteps(updated.map((s: any, idx: number) => ({ ...s, step: idx + 1 })));
+                            }} className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-200 hover:text-gray-700" title="Move down">
+                              ↓
+                            </button>
+                          )}
+                          {steps.length > 1 && (
+                            <button onClick={() => {
+                              const updated = steps.filter((_: any, idx: number) => idx !== i).map((s: any, idx: number) => ({ ...s, step: idx + 1 }));
+                              setSteps(updated);
+                            }} className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500" title="Remove step">
+                              Remove
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <textarea value={s.prompt} onChange={e => updateStep(i, 'prompt', e.target.value)} rows={2}
                         placeholder={ch.startsWith('linkedin') ? 'Message to send (will be interpolated with variables)' : 'Step-specific prompt (overrides campaign prompt for this stage)'}
@@ -452,13 +536,33 @@ export default function CampaignDetailPage() {
                   );
                 })}
               </div>
-              <button onClick={() => saveField('steps', { sequence_steps: steps.length > 0 ? steps : [
-                { step: 1, delay_days: 0, prompt: '' },
-                { step: 2, delay_days: 4, prompt: '' },
-                { step: 3, delay_days: 7, prompt: '' },
-              ] })} disabled={saving === 'steps'}
+              <button onClick={() => {
+                const nextStep = steps.length > 0 ? Math.max(...steps.map((s: any) => s.step)) + 1 : 1;
+                const newSteps = [...steps, { step: nextStep, delay_days: 4, channel: 'email', prompt: '' }];
+                setSteps(newSteps);
+              }} className="mt-2 w-full rounded-md border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-700">
+                + Add Step
+              </button>
+              <button onClick={() => saveField('steps', { sequence_steps: steps })} disabled={saving === 'steps'}
                 className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
                 {saving === 'steps' ? 'Saving...' : 'Save Steps'}
+              </button>
+              <button onClick={async () => {
+                setSaving('autogen' as any);
+                try {
+                  await saveField('steps', { sequence_steps: steps });
+                  await new Promise(r => setTimeout(r, 500));
+                  const result = await rewriteCampaignPrompts(id as string);
+                  if (result.campaign_prompt) setPrompt(result.campaign_prompt);
+                  if (result.steps) setSteps(result.steps);
+                  setCampaign((prev: any) => prev ? ({ ...prev, ai_system_prompt: result.campaign_prompt, sequence_steps: result.steps }) : prev);
+                  setFlash('steps');
+                  setTimeout(() => setFlash(null), 2000);
+                } catch {}
+                setSaving(null);
+              }} disabled={!!saving}
+              className="mt-3 ml-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">
+                {saving === 'autogen' ? 'Generating...' : 'Auto-Generate Prompts'}
               </button>
             </div>
           </div>
@@ -532,9 +636,17 @@ export default function CampaignDetailPage() {
                     <span className="text-xs text-gray-400">{aiDrafts ? 'ON' : 'OFF'}</span>
                   </div>
                 </div>
+                {/* Email Signature */}
+                <div className="border-t border-gray-100 pt-3">
+                  <label className="text-xs text-gray-400">Email Signature (HTML) - Campaign Override</label>
+                  <textarea value={emailSignature} onChange={e => setEmailSignature(e.target.value)}
+                    rows={4} placeholder="Leave blank to use the global signature..."
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm font-mono focus:border-gray-400 focus:outline-none resize-y" />
+                  <p className="mt-1 text-xs text-gray-400">Overrides the global email signature for this campaign only</p>
+                </div>
               </div>
               <button onClick={() => saveField('config', {
-                settings: { ...(campaign?.settings || {}), follow_up_delay_days: followUpDelay, ai_drafts_enabled: aiDrafts, priority: campaignPriority },
+                settings: { ...(campaign?.settings || {}), follow_up_delay_days: followUpDelay, ai_drafts_enabled: aiDrafts, priority: campaignPriority, email_signature: emailSignature },
                 channel_config: { ...(campaign?.channel_config || {}), email: { ...(campaign?.channel_config?.email || {}), enabled: true, daily_limit: emailsPerDay } },
               })} disabled={saving === 'config'}
                 className="mt-4 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">

@@ -10,18 +10,8 @@ import { createDraft } from './draftService';
 import { advanceLead, markSequenceCompleted } from './leadProgressionService';
 import { createNotification } from './notificationService';
 import { logger } from '../config/logger';
-
-// CEO signature HTML - matches n8n's Ryan Landry signature
-const CEO_SIGNATURE_HTML = `
-<br><br>
-<table cellpadding="0" cellspacing="0" border="0" style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; color: #000000;">
-  <tr><td style="padding-bottom: 10px;"><strong style="font-size: 16px;">Ryan Landry</strong></td></tr>
-  <tr><td style="padding-bottom: 8px;">Chief Executive Officer</td></tr>
-  <tr><td style="padding-bottom: 10px;">M: <a href="tel:9494122682" style="color: #000000; text-decoration: none;">949.412.2682</a> P: <a href="tel:8665263538" style="color: #000000; text-decoration: none;">866.LANDJET</a></td></tr>
-  <tr><td style="padding-bottom: 12px;"><a href="https://www.landjet.com" style="color: #0066cc; text-decoration: none;">www.landjet.com</a></td></tr>
-  <tr><td style="padding-bottom: 8px;"><img src="https://landjet.com/assets/images/logo.png" alt="LANDJET" style="height: 30px; display: block;" /></td></tr>
-  <tr><td style="color: #000000; font-size: 13px;">Get In. Get Connected. Get Things Done.</td></tr>
-</table>`;
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { getSignatureForCampaign } from './outreachQueryService';
 
 export interface DraftCycleResult {
   draftsCreated: number;
@@ -100,6 +90,7 @@ export async function runDailyDraftCycle(): Promise<DraftCycleResult> {
     }
   }
 
+  recordAgentRun('sequence_engine', { draftsCreated: result.draftsCreated, leadsProcessed: result.leadsProcessed, errors: result.errors.length }).catch(() => {});
   logger.info('Daily draft cycle complete', result);
   return result;
 }
@@ -155,7 +146,8 @@ export async function generateDraftForLead(
   });
 
   // Step 3: Append CEO signature
-  const bodyWithSignature = polished.body + CEO_SIGNATURE_HTML;
+  const signature = await getSignatureForCampaign(campaign);
+  const bodyWithSignature = signature ? polished.body + signature : polished.body;
 
   // Step 4: Create draft
   const draft = await createDraft({

@@ -3,6 +3,7 @@ import { Unsubscribe } from '../models/Unsubscribe';
 import { DncList } from '../models/DncList';
 import { CommunicationLog } from '../models/CommunicationLog';
 import { Campaign } from '../models/Campaign';
+import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 
 export interface SafetyEvaluation {
   allowed: boolean;
@@ -31,6 +32,7 @@ export async function evaluateSend(input: SafetyInput): Promise<SafetyEvaluation
   if (input.leadEmail) {
     const unsub = await Unsubscribe.findOne({ where: { email: input.leadEmail.toLowerCase() } });
     if (unsub) {
+      recordAgentRun('communication_safety', { leadId: input.leadId, channel: input.channel, allowed: false, reason: 'unsubscribed' }).catch(() => {});
       return { allowed: false, blockedReason: 'Lead is unsubscribed', deliveryMode: 'production' };
     }
   }
@@ -43,6 +45,7 @@ export async function evaluateSend(input: SafetyInput): Promise<SafetyEvaluation
   if (dncWhere.length > 0) {
     const dnc = await DncList.findOne({ where: { [Op.or]: dncWhere } });
     if (dnc) {
+      recordAgentRun('communication_safety', { leadId: input.leadId, channel: input.channel, allowed: false, reason: 'dnc' }).catch(() => {});
       return { allowed: false, blockedReason: 'Lead is on Do-Not-Contact list', deliveryMode: 'production' };
     }
   }
@@ -57,6 +60,7 @@ export async function evaluateSend(input: SafetyInput): Promise<SafetyEvaluation
       },
     });
     if (hardBounce) {
+      recordAgentRun('communication_safety', { leadId: input.leadId, channel: input.channel, allowed: false, reason: 'hard_bounce' }).catch(() => {});
       return { allowed: false, blockedReason: 'Lead has hard bounced - never retry', deliveryMode: 'production' };
     }
   }
@@ -76,6 +80,7 @@ export async function evaluateSend(input: SafetyInput): Promise<SafetyEvaluation
     });
 
     if (sentToday >= MAX_EMAILS_PER_DAY_PER_LEAD) {
+      recordAgentRun('communication_safety', { leadId: input.leadId, channel: input.channel, allowed: false, reason: 'rate_limit' }).catch(() => {});
       return { allowed: false, blockedReason: `Rate limit: max ${MAX_EMAILS_PER_DAY_PER_LEAD} emails/day per lead`, deliveryMode: 'production' };
     }
   }
@@ -103,5 +108,6 @@ export async function evaluateSend(input: SafetyInput): Promise<SafetyEvaluation
     }
   }
 
+  recordAgentRun('communication_safety', { leadId: input.leadId, channel: input.channel, allowed: true, deliveryMode }).catch(() => {});
   return { allowed: true, deliveryMode, redirect };
 }

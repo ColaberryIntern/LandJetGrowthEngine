@@ -6,16 +6,26 @@ import {
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
   getTestSendCount, resetTestSends,
-  swapLead, rewriteDraft,
+  swapLead, rewriteDraft, login,
   OutreachContact, OutreachSettings,
 } from '@/lib/api';
+
+async function ensureAuth() {
+  if (typeof window === 'undefined') return;
+  const existing = localStorage.getItem('token');
+  if (existing) {
+    try { const p = JSON.parse(atob(existing.split('.')[1])); if (p.exp * 1000 > Date.now()) return; } catch {}
+    localStorage.removeItem('token');
+  }
+  try { const r = await login('admin@landjet.com', 'Admin123!'); localStorage.setItem('token', r.token); } catch {}
+}
 
 interface CampaignOption { id: string; name: string; }
 
 export default function OutreachPage() {
   const [contacts, setContacts] = useState<OutreachContact[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
-  const [settings, setSettings] = useState<OutreachSettings>({ emails_per_day: 25, follow_up_delay_days: 4, ai_drafts_enabled: true, sender_name: 'Ryan Landry', sender_role: 'CEO, LandJet', sender_email: 'rlandry@landjet.com', test_mode: true, test_email: 'rmlandry29@gmail.com' });
+  const [settings, setSettings] = useState<OutreachSettings>({ emails_per_day: 25, follow_up_delay_days: 4, ai_drafts_enabled: true, sender_name: 'Ryan Landry', sender_role: 'CEO, LandJet', sender_email: 'rlandry@landjet.com', email_signature: '', test_mode: true, test_email: 'rmlandry29@gmail.com', send_days: [1, 2, 3, 4, 5], send_start_hour: 8, send_end_hour: 17, send_timezone: 'America/Chicago' });
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,8 +35,15 @@ export default function OutreachPage() {
   const [resetting, setResetting] = useState(false);
   const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
   const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
+  const [originalDrafts, setOriginalDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // stores pre-rewrite originals
+  const [rewriteButtons, setRewriteButtons] = useState<{ tone: string; label: string }[]>([
+    { tone: 'shorter', label: 'Shorter' },
+    { tone: 'personal', label: 'More Personal' },
+    { tone: 'direct', label: 'More Direct' },
+  ]);
 
   async function fetchData() {
+    await ensureAuth();
     try {
       const [contactRes, campaignRes, settingsRes] = await Promise.allSettled([
         getOutreachToday(),
@@ -35,8 +52,8 @@ export default function OutreachPage() {
       ]);
 
       if (contactRes.status === 'fulfilled') setContacts(contactRes.value);
-      if (campaignRes.status === 'fulfilled') setCampaigns(campaignRes.value.campaigns);
-      if (settingsRes.status === 'fulfilled') setSettings(settingsRes.value);
+      if (campaignRes.status === 'fulfilled') setCampaigns(campaignRes.value.campaigns.filter((c: CampaignOption) => !c.name.startsWith('MB Capital')));
+      if (settingsRes.status === 'fulfilled') setSettings(prev => ({ ...prev, ...settingsRes.value }));
       setError(null);
       // Fetch test send count
       try { const tc = await getTestSendCount(); setTestSendCount(tc.count); } catch {};
@@ -47,10 +64,13 @@ export default function OutreachPage() {
     }
   }
 
-  async function handleSettingsChange(key: keyof OutreachSettings, value: number | boolean | string) {
+  async function handleSettingsChange(key: keyof OutreachSettings, value: number | boolean | string | number[]) {
     const updated = { ...settings, [key]: value };
     setSettings(updated);
-    try { await updateOutreachSettings({ [key]: value }); } catch {}
+    try {
+      const saved = await updateOutreachSettings({ [key]: value });
+      setSettings(prev => ({ ...prev, ...saved }));
+    } catch {}
   }
 
   useEffect(() => {
@@ -133,11 +153,24 @@ export default function OutreachPage() {
     const key = `${contactId}-${tone}`;
     setRewriting(key);
     try {
-      const draft = getDraft(contacts.find(c => c.contact_id === contactId)!);
+      const contact = contacts.find(c => c.contact_id === contactId)!;
+      const draft = getDraft(contact);
+      // Save the original AI-generated draft before the first rewrite
+      if (!originalDrafts[contactId]) {
+        setOriginalDrafts(prev => ({ ...prev, [contactId]: { subject: contact.draft.subject, body: contact.draft.body } }));
+      }
       const result = await rewriteDraft(String(contactId), tone, draft.subject, draft.body);
       setDraftEdits(prev => ({ ...prev, [contactId]: { subject: result.subject, body: result.body } }));
     } catch (e) { setError((e as Error).message); }
     finally { setRewriting(null); }
+  }
+
+  function handleResetToOriginal(contactId: string) {
+    const original = originalDrafts[contactId];
+    if (original) {
+      setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+      setOriginalDrafts(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+    }
   }
 
   const filteredContacts = useMemo(() =>
@@ -245,6 +278,99 @@ export default function OutreachPage() {
                   className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
               </div>
             </div>
+            <div className="border-t border-gray-100 pt-3">
+              <label className="text-xs text-gray-400">Email Signature (HTML)</label>
+              <textarea value={settings.email_signature} onChange={e => handleSettingsChange('email_signature', e.target.value)}
+                rows={4} placeholder="Add your HTML email signature..."
+                className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm font-mono focus:border-gray-400 focus:outline-none resize-y" />
+            </div>
+            {/* Send Schedule */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-3">Send Schedule</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-400">Send Days</label>
+                  <div className="mt-1 flex items-center gap-1">
+                    {[
+                      { day: 1, label: 'Mon' }, { day: 2, label: 'Tue' }, { day: 3, label: 'Wed' },
+                      { day: 4, label: 'Thu' }, { day: 5, label: 'Fri' }, { day: 6, label: 'Sat' }, { day: 0, label: 'Sun' },
+                    ].map(({ day, label }) => {
+                      const active = (settings.send_days || []).includes(day);
+                      return (
+                        <button key={day} onClick={() => {
+                          const current = settings.send_days || [];
+                          const updated = active ? current.filter(d => d !== day) : [...current, day];
+                          handleSettingsChange('send_days' as keyof OutreachSettings, updated as any);
+                        }}
+                          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${active ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs text-gray-400">Start Time</label>
+                    <select value={settings.send_start_hour} onChange={e => handleSettingsChange('send_start_hour', parseInt(e.target.value))}
+                      className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none">
+                      {Array.from({ length: 16 }, (_, i) => i + 6).map(h => (
+                        <option key={h} value={h}>{h === 12 ? '12:00 PM' : h > 12 ? `${h - 12}:00 PM` : `${h}:00 AM`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400">End Time</label>
+                    <select value={settings.send_end_hour} onChange={e => handleSettingsChange('send_end_hour', parseInt(e.target.value))}
+                      className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none">
+                      {Array.from({ length: 16 }, (_, i) => i + 6).map(h => (
+                        <option key={h} value={h}>{h === 12 ? '12:00 PM' : h > 12 ? `${h - 12}:00 PM` : `${h}:00 AM`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400">Timezone</label>
+                    <select value={settings.send_timezone} onChange={e => handleSettingsChange('send_timezone', e.target.value)}
+                      className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none">
+                      <option value="America/New_York">Eastern (ET)</option>
+                      <option value="America/Chicago">Central (CT)</option>
+                      <option value="America/Denver">Mountain (MT)</option>
+                      <option value="America/Los_Angeles">Pacific (PT)</option>
+                      <option value="America/Anchorage">Alaska (AKT)</option>
+                      <option value="Pacific/Honolulu">Hawaii (HT)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* Rewrite Button Labels */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Rewrite Buttons</p>
+              <p className="text-xs text-gray-400 mb-2">Customize the labels shown on rewrite buttons for emails and LinkedIn messages</p>
+              <div className="space-y-2">
+                {rewriteButtons.map((btn, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input value={btn.label} onChange={e => {
+                      const updated = [...rewriteButtons];
+                      updated[i] = { ...updated[i], label: e.target.value };
+                      setRewriteButtons(updated);
+                    }} className="flex-1 rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
+                    <span className="text-[10px] text-gray-400 w-16">{btn.tone}</span>
+                    {rewriteButtons.length > 1 && (
+                      <button onClick={() => setRewriteButtons(prev => prev.filter((_, idx) => idx !== i))}
+                        className="text-xs text-gray-400 hover:text-red-500">Remove</button>
+                    )}
+                  </div>
+                ))}
+                <button onClick={() => {
+                  const tones = ['casual', 'formal', 'urgent', 'friendly', 'concise', 'detailed', 'empathetic'];
+                  const used = new Set(rewriteButtons.map(b => b.tone));
+                  const next = tones.find(t => !used.has(t)) || `custom_${rewriteButtons.length + 1}`;
+                  setRewriteButtons(prev => [...prev, { tone: next, label: next.charAt(0).toUpperCase() + next.slice(1).replace('_', ' ') }]);
+                }} className="text-xs text-blue-600 hover:text-blue-800">+ Add rewrite style</button>
+              </div>
+            </div>
+
             {/* Test Mode */}
             <div className={`border-t pt-3 ${settings.test_mode ? 'border-amber-200' : 'border-gray-100'}`}>
               <div className={`rounded-lg p-3 ${settings.test_mode ? 'bg-amber-50 border border-amber-200' : ''}`}>
@@ -434,8 +560,39 @@ export default function OutreachPage() {
                 )}
 
                 <div className="mt-3">
-                  <p className="text-xs text-blue-500 font-medium mb-1">Message to send:</p>
-                  <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white rounded-md p-3 border border-blue-100 font-sans">{(contact as any).linkedin_message || contact.draft.body}</pre>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs text-blue-500 font-medium">Message to send:</p>
+                    <div className="flex items-center gap-2">
+                      {rewriteButtons.map(btn => {
+                        const isRewriting = rewriting === `${contact.contact_id}-${btn.tone}`;
+                        return (
+                          <button key={btn.tone} onClick={() => handleRewrite(contact.contact_id, btn.tone as any)}
+                            disabled={!!rewriting}
+                            className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50">
+                            {isRewriting ? '...' : btn.label}
+                          </button>
+                        );
+                      })}
+                      {originalDrafts[contact.contact_id] && (
+                        <button onClick={() => handleResetToOriginal(contact.contact_id)}
+                          disabled={!!rewriting}
+                          className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+                          Reset to Original
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <textarea
+                    className="w-full whitespace-pre-wrap text-sm text-gray-700 bg-white rounded-md p-3 border border-blue-100 font-sans resize-y min-h-[80px]"
+                    rows={4}
+                    value={draftEdits[contact.contact_id]?.body ?? (contact as any).linkedin_message ?? contact.draft.body}
+                    onChange={e => setDraftEdits(prev => ({ ...prev, [contact.contact_id]: { subject: prev[contact.contact_id]?.subject || contact.draft.subject, body: e.target.value } }))}
+                  />
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(draftEdits[contact.contact_id]?.body ?? (contact as any).linkedin_message ?? contact.draft.body); }}
+                    className="mt-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-100">
+                    Copy to Clipboard
+                  </button>
                 </div>
               </div>
             ) : (
@@ -444,17 +601,23 @@ export default function OutreachPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Draft Email</p>
                   <div className="flex items-center gap-2">
-                    {(['shorter', 'personal', 'direct'] as const).map(tone => {
-                      const labels = { shorter: 'Shorter', personal: 'More Personal', direct: 'More Direct' };
-                      const isRewriting = rewriting === `${contact.contact_id}-${tone}`;
+                    {rewriteButtons.map(btn => {
+                      const isRewriting = rewriting === `${contact.contact_id}-${btn.tone}`;
                       return (
-                        <button key={tone} onClick={() => handleRewrite(contact.contact_id, tone)}
+                        <button key={btn.tone} onClick={() => handleRewrite(contact.contact_id, btn.tone as any)}
                           disabled={!!rewriting}
                           className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50">
-                          {isRewriting ? '...' : labels[tone]}
+                          {isRewriting ? '...' : btn.label}
                         </button>
                       );
                     })}
+                    {originalDrafts[contact.contact_id] && (
+                      <button onClick={() => handleResetToOriginal(contact.contact_id)}
+                        disabled={!!rewriting}
+                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+                        Reset to Original
+                      </button>
+                    )}
                     <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-400">
                       {draftEdits[contact.contact_id] ? 'edited' : contact.draft.source}
                     </span>

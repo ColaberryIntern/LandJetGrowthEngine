@@ -69,8 +69,13 @@ export interface OutreachSettings {
   sender_name: string;
   sender_role: string;
   sender_email: string;
+  email_signature: string;
   test_mode: boolean;
   test_email: string;
+  send_days: number[];
+  send_start_hour: number;
+  send_end_hour: number;
+  send_timezone: string;
 }
 
 const DEFAULTS: OutreachSettings = {
@@ -80,8 +85,13 @@ const DEFAULTS: OutreachSettings = {
   sender_name: 'Ryan Landry',
   sender_role: 'CEO, LandJet',
   sender_email: 'rlandry@landjet.com',
+  email_signature: '',
   test_mode: true,
   test_email: 'rmlandry29@gmail.com',
+  send_days: [1, 2, 3, 4, 5],
+  send_start_hour: 8,
+  send_end_hour: 17,
+  send_timezone: 'America/Chicago',
 };
 
 export async function getOutreachSettings(): Promise<OutreachSettings> {
@@ -101,8 +111,13 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
       sender_name: val.sender_name ?? DEFAULTS.sender_name,
       sender_role: val.sender_role ?? DEFAULTS.sender_role,
       sender_email: val.sender_email ?? DEFAULTS.sender_email,
+      email_signature: val.email_signature ?? DEFAULTS.email_signature,
       test_mode: val.test_mode ?? DEFAULTS.test_mode,
       test_email: val.test_email ?? DEFAULTS.test_email,
+      send_days: val.send_days ?? DEFAULTS.send_days,
+      send_start_hour: val.send_start_hour ?? DEFAULTS.send_start_hour,
+      send_end_hour: val.send_end_hour ?? DEFAULTS.send_end_hour,
+      send_timezone: val.send_timezone ?? DEFAULTS.send_timezone,
     };
     _settingsCache = { data, expiresAt: Date.now() + CACHE_TTL };
     return data;
@@ -119,6 +134,13 @@ export async function updateOutreachSettings(updates: Partial<OutreachSettings>)
   invalidateSettingsCache();
   _settingsCache = { data: merged, expiresAt: Date.now() + CACHE_TTL };
   return merged;
+}
+
+export async function getSignatureForCampaign(campaign?: any): Promise<string> {
+  const campaignSig = campaign?.settings?.email_signature;
+  if (campaignSig) return campaignSig;
+  const globalSettings = await getOutreachSettings();
+  return globalSettings.email_signature || '';
 }
 
 // --- Priority Scoring ---
@@ -173,6 +195,7 @@ export interface EmailDraft {
   body: string;
   prompt: string;
   source: 'ai' | 'template';
+  signature: string;
 }
 
 function templateDraft(name: string, context: string, prompt: string, senderName: string): EmailDraft {
@@ -182,6 +205,7 @@ function templateDraft(name: string, context: string, prompt: string, senderName
     body: `Hi ${name},\n\n${context}\n\nLet me know if it makes sense to reconnect.\n\nBest,\n${firstName}`,
     prompt,
     source: 'template',
+    signature: '',
   };
 }
 
@@ -276,6 +300,7 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
 
   // Merge all variables and interpolate the prompt
   const vars = await mergeVariables(lead, campaign);
+  const signature = await getSignatureForCampaign(campaign);
   const prompt = interpolateVariables(rawPrompt, vars);
 
   const senderName = campaignSettings?.sender_name || globalSettings.sender_name;
@@ -287,11 +312,11 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
     if (aiResult) {
       recordAgentRun('draft_writer').catch(() => {});
       recordAgentRun('email_polisher').catch(() => {});
-      return { subject: aiResult.subject, body: aiResult.body, prompt, source: 'ai' };
+      return { subject: aiResult.subject, body: aiResult.body, prompt, source: 'ai', signature };
     }
   }
 
-  return templateDraft(name, context, prompt, senderName);
+  return { ...templateDraft(name, context, prompt, senderName), signature };
 }
 
 // --- Lead Queries ---
@@ -387,7 +412,8 @@ export async function advanceLead(leadId: string): Promise<Lead | null> {
   lead.last_contacted_at = now;
   lead.pipeline_stage = 'contacted';
 
-  if (lead.sequence_stage > 3) {
+  const maxSteps = steps.length || 3;
+  if (lead.sequence_stage > maxSteps) {
     lead.outreach_status = 'COMPLETED';
     lead.next_action_at = null;
   } else {
