@@ -2,75 +2,70 @@ require('dotenv').config();
 
 const body = `Ryan,
 
-Thank you for the detailed feedback. You are thinking about this exactly right. Let me address everything and share what has been built since your last email.
+Thank you for the detailed feedback. Here is where everything stands.
 
-CAMPAIGN STRATEGY -- 3 LAYERS
+SAVE BUG -- FIXED
 
-You nailed it. Here is how I have organized everything:
+That was a real bug on our end, not user error. The system was replacing your campaign settings instead of merging them, so when one field saved, it would wipe out edits you made to other fields. This is now fixed. Your edits will stick.
 
-Layer 1 -- Current/Past Customers (existing campaigns):
-Manufacturing, Insurance Broker, Banking & Finance, Sports & Events, Legal, Healthcare, Construction & Engineering, and Technology & Staffing. These already have your past customers loaded. We will refine the messaging to acknowledge the existing relationship so it does not read like a cold email to someone who already knows LandJet.
+STEP REORDER -- DONE
 
-Layer 2 -- Cold Outreach (just created):
-I built 6 new cold outreach campaigns: Cold Outreach - Manufacturing, Cold Outreach - Insurance, Cold Outreach - Banking & Finance, Cold Outreach - Sports & Events, Cold Outreach - Legal, and Cold Outreach - Healthcare. Each has its own prompts written for first contact with people who have never heard of LandJet. The Apollo API is now fully connected and tested. I ran a search and found 15,938 matching leads just in Texas alone (VPs, CEOs, Executive Assistants at companies with 50-500 employees). Once you confirm which markets to target first (Iowa, San Antonio, Dallas?), I will start pulling leads in.
+You can now move steps up and down with arrow buttons on each step in the Strategy tab. Add a step anywhere and reorder it to the position you want.
 
-Layer 3 -- Investor Outreach + General:
-I am keeping Investor Outreach active. I imported all 35 investors from your Excel file into the campaign. That includes 20 direct contacts (named partners and directors with verified emails like Adam VeVerka at NewSpring, Alisa Carmichael at VMG Partners, Tim Doyle at Destiny Capital) and 15 general/IR contacts. I also captured the 5 upcoming events from your EVENTS tab:
-  - 2026 Multi-Unit Franchising Conference (Las Vegas)
-  - ACG DealMAX 2026 (Las Vegas)
-  - IFA26 Legal Symposium (Washington DC)
-  - U.S. Travel Association IPW (Fort Lauderdale)
-  - GBTA Convention 2026 (Chicago)
+COLD OUTREACH MARKETS -- LOADED
 
-For General Outreach, I like your idea of using it as a newsletter/brand touchpoint channel. We can set that up on our next call. It could be brand-wide for all of LandJet or franchisee-specific. Either way the system supports it.
+I pulled 154 cold leads from Apollo across your three target markets:
+- Iowa + Quad Cities (including Rock Island, Henry, and Mercer counties in Illinois)
+- Dallas MSA (Dallas, Fort Worth, Plano, Arlington, Irving, Frisco, McKinney, Denton, Richardson, Garland, Grand Prairie, and surrounding cities)
+- San Antonio MSA (San Antonio, New Braunfels, San Marcos, Seguin, Schertz, Cibolo, Boerne)
 
-INVESTOR OUTREACH -- YOUR EXCEL FILE
+Titles included: CEO, COO, VP Operations, President, Owner (under 250 employees), Executive Assistant, Travel Coordinator, Travel Manager, Regional Director, Managing Director, Partner.
 
-Imported and ready. For future uploads, you can either send me the Excel files directly or use the "Upload CSV" button on the campaign Leads tab. I can walk you through it on our next call.
+Used 294 of your 5,000 monthly Apollo credits. The leads are distributed across your 6 cold outreach campaigns by industry.
 
-For the contacts missing LinkedIn URLs or direct emails, Apollo can now fill those in automatically. I can run an enrichment pass on all 35 investor contacts to pull verified emails and LinkedIn profiles from Apollo's database. Just say the word.
+NARROWING THE LIST
 
-APOLLO API
+You asked great questions about prioritization. Here are the options:
 
-Fully connected and tested on the Basic plan. Both critical endpoints work:
-- People Search: finds leads by title, industry, location, company size (does not cost credits)
-- People Enrichment: pulls verified email addresses (costs 1 credit per lead, you have 5,000/month)
+1. Multi-location companies: Apollo can filter by companies with multiple office locations. I can run a search specifically for companies with 2+ locations in your target markets.
 
-You do not need to connect Gmail or Outlook to Apollo. All sending goes through our system.
+2. Lookalike audiences from current customers: I can analyze your existing customer base (industry, company size, title patterns, geography) and build a scoring model that ranks cold leads by how similar they are to your best customers.
 
-One note: the API key I created on the free plan had limited permissions. Now that you are on Basic, I created a new key with full access. Everything is working. Next time I need to log in I will give you a heads up for the verification code.
+3. Website visitor lookalike: Once Percy installs the Apollo tracking script (I sent him instructions), we will start collecting data on who visits landjet.com. After 2-3 weeks of data, the AI can identify patterns and auto-add similar profiles to your cold campaigns.
 
-EMAIL SIGNATURE
+Happy to walk through the scoring approach on our next call.
 
-Done. I pulled your signature from the email (name, title, phone numbers, website, tagline, Book a Meeting link) and loaded it as the global default. Every outgoing email will now include it. If any campaign needs a different signature, you can set an override in that campaign's Settings tab.
+INVESTOR CONTACTS -- 1,600 NEW
 
-NEW FEATURES SINCE YOUR LAST EMAIL
+You were right that we missed contacts. The original import only pulled from one sheet (35 contacts from Capital Navigator). I found the full Investor Database file with 2,356 potential fits across Tier 1, Tier 2, and Tier 3. After deduplication, I imported 1,600 new investor contacts into your Investor Outreach campaign.
 
-Here is what has been built and deployed:
+Your Investor Outreach campaign now has over 2,500 contacts total.
 
-1. Campaign Variables in Prompts -- When you go to a campaign's Overview tab, you will now see green badges showing which campaign variables (like pain_point, value_prop, proof_point) are being used in the AI prompt. Gray badges show variables that are defined but not yet referenced. When you click "Rewrite Prompts with AI" on the Strategy tab, it now guarantees that every single variable gets included in the rewritten prompts.
+You also mentioned 2-3K contacts across all the Excel docs. Let us go through those on the next call to make sure nothing else was missed.
 
-2. Strategy Tab Upgrades -- You can now add steps, remove steps, and auto-generate prompts:
-   - "+ Add Step" button lets you add new sequence steps (email, LinkedIn, SMS, voice)
-   - "Remove" button on each step lets you delete it (remaining steps renumber automatically)
-   - "Auto-Generate Prompts" button uses AI to write prompts for all steps based on your campaign variables
-   - Step count is no longer limited to 3. You can have as many steps as you want.
+EVENTS
 
-3. Rewrite Buttons on LinkedIn -- The Shorter, More Personal, and More Direct buttons now work on LinkedIn messages too, not just emails. You also have "Reset to Original" on both email and LinkedIn.
-
-4. Customizable Rewrite Buttons -- In the Outreach settings (gear icon), there is now a "Rewrite Buttons" section where you can rename the buttons (e.g., change "Shorter" to "Punchier" or "Add Stats") or add new rewrite styles. This way as you get used to how you like messages rewritten, you can set it up exactly how you want.
-
-5. Dynamic Step Tracking -- The Leads tab now shows the correct step count for each lead based on the actual number of steps in the campaign, not a hardcoded "1/3". If you add a 4th or 5th step, leads will track through all of them.
+I captured the 5 events from your spreadsheet. We can discuss on the next call how you want to use those -- whether as a separate campaign, as context for investor outreach timing, or both.
 
 WEBSITE VISITOR TRACKING
 
-Ready to set up. I can add landjet.com to Apollo's visitor tracking and install the script through your CMS. Want me to go ahead?
+landjet.com is registered in Apollo. I sent Percy the tracking script to install on the website. Once he adds it (one line of code in the CMS), Apollo will start identifying companies visiting your site. The status will change from "Inactive" to "Active" in your Apollo dashboard under Inbound > Website Visitors.
+
+CAMPAIGN PROMPT WORD COUNT
+
+The word count in the prompt (like "under 120 words") is just an instruction to the AI, not a hard system limit. You can change it to 300 or whatever you want. The save issue you experienced was the same bug I fixed above -- your edits were reverting. Try it again now and it should stick.
+
+SYSTEM TOTALS
+
+- 7,782 total leads (up from 5,831)
+- 16 active LandJet campaigns (10 existing + 6 cold outreach)
+- Apollo: 294 of 5,000 monthly credits used
+- Email signature loaded as global default
 
 NEXT STEPS
-1. Which markets do you want cold leads from first? (Iowa, San Antonio, Dallas?)
-2. Want me to run the Apollo enrichment on your 35 investor contacts to fill in missing LinkedIn and emails?
-3. Want me to turn on website visitor tracking for landjet.com?
-4. Let me know when works for a call to walk through the new campaign structure and upload process.
+1. Want me to run the multi-location company filter on your cold leads?
+2. Percy tracking script -- once installed, visitor tracking goes live automatically
+3. Let me know when works for a call to walk through the new structure and the upload process
 
 Best,
 Ali`;
@@ -93,7 +88,7 @@ async function send() {
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message: {
-        subject: 'Re: Growth Engine -- Full Update + New Features',
+        subject: 'Re: Growth Engine -- All Items Addressed + 1,600 New Investor Contacts Loaded',
         body: { contentType: 'Text', content: body },
         toRecipients: [{ emailAddress: { address: 'rmlandry29@gmail.com' } }],
         ccRecipients: [{ emailAddress: { address: 'rlandry@landjet.com' } }],

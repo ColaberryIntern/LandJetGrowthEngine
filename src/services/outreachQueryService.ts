@@ -162,6 +162,23 @@ export function computePriorityScore(lead: Lead): number {
     case 3: score += 1; break;
   }
 
+  // Multi-location boost: companies with multiple offices/locations are higher value
+  // because they likely have more cross-city travel needs
+  const notes = lead.notes as any;
+  if (notes) {
+    const subOrgs = notes.num_suborganizations || 0;
+    const retailLocations = notes.retail_location_count || 0;
+    const employees = lead.company_size || 0;
+
+    if (subOrgs >= 10 || retailLocations >= 50) {
+      score += 8; // Major multi-location enterprise
+    } else if (subOrgs >= 3 || retailLocations >= 5) {
+      score += 5; // Mid-size multi-location
+    } else if (subOrgs >= 1 || retailLocations >= 1 || employees >= 1000) {
+      score += 2; // Likely has multiple offices
+    }
+  }
+
   return score;
 }
 
