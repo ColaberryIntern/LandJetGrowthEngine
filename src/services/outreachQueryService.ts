@@ -48,7 +48,25 @@ export async function getGlobalVariables(): Promise<Record<string, string>> {
  */
 export async function mergeVariables(lead: Lead, campaign?: any): Promise<Record<string, string>> {
   const globalVars = await getGlobalVariables();
+  const globalSettings = await getOutreachSettings();
   const campaignVars = campaign?.settings?.variables || {};
+  const campSettings = campaign?.settings || {};
+
+  // Sender comes from campaign override or global default
+  const senderName = campSettings.sender_name || globalSettings.sender_name || 'Ryan Landry';
+  const senderFirstName = senderName.split(' ')[0];
+  const senderRole = campSettings.sender_role || globalSettings.sender_role || '';
+  const senderEmail = campSettings.sender_email || globalSettings.sender_email || '';
+
+  const senderVars: Record<string, string> = {
+    sender_name: senderName,
+    sender_first_name: senderFirstName,
+    sender_role: senderRole,
+    sender_email: senderEmail,
+    sender_company: 'LandJet',
+    sender_title: senderRole,
+  };
+
   const leadVars: Record<string, string> = {
     first_name: lead.first_name || '',
     last_name: lead.last_name || '',
@@ -57,7 +75,7 @@ export async function mergeVariables(lead: Lead, campaign?: any): Promise<Record
     title: lead.title || '',
     vertical: lead.vertical || '',
   };
-  return { ...globalVars, ...campaignVars, ...leadVars };
+  return { ...globalVars, ...senderVars, ...campaignVars, ...leadVars };
 }
 
 // --- Settings (global defaults, overridden by campaign settings) ---

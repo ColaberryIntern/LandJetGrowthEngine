@@ -160,6 +160,35 @@ router.get('/:id/leads', authorize('campaigns:read'), async (req: Request, res: 
   } catch (error) { next(error); }
 });
 
+// --- Apollo Lead Sourcing ---
+
+router.post('/:id/pull-apollo', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { pullLeadsForCampaign } = await import('../../services/apolloLeadService');
+    const count = Math.min(parseInt(req.body?.count, 10) || 25, 100);
+    const result = await pullLeadsForCampaign(req.params.id as string, count);
+    await createAuditLog({
+      userId: (req as any).user?.id,
+      action: 'campaign.apollo_pull',
+      entityType: 'campaign',
+      entityId: req.params.id as string,
+      metadata: { count, ...result, details: undefined },
+    } as any);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('POST /campaigns/:id/pull-apollo failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.get('/apollo/credits', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getApolloCreditUsage } = await import('../../services/apolloLeadService');
+    const usage = await getApolloCreditUsage();
+    res.json(usage);
+  } catch (error) { next(error); }
+});
+
 // --- Sequences ---
 
 router.post('/sequences', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {

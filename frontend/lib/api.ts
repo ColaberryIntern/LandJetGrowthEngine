@@ -100,6 +100,17 @@ export function approveCampaign(campaignId: string, status: string) {
   });
 }
 
+export function pullApolloLeads(campaignId: string, count: number = 25) {
+  return request<{ success: boolean; created: number; credits_used: number; duplicates: number; errors: number; details: string[] }>(`/admin/campaigns/${campaignId}/pull-apollo`, {
+    method: 'POST',
+    body: JSON.stringify({ count }),
+  });
+}
+
+export function getApolloCredits() {
+  return request<{ used: number; limit: number }>(`/admin/campaigns/apollo/credits`);
+}
+
 export function linkSequence(campaignId: string, sequenceId: string) {
   return request(`/admin/campaigns/${campaignId}/link-sequence`, {
     method: 'POST',

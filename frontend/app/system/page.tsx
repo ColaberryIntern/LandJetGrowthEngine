@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, type LocalePreferences, type ResourceConfig } from '@/lib/api';
+import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, getApolloCredits, type LocalePreferences, type ResourceConfig } from '@/lib/api';
 import { useTranslation, SUPPORTED_LANGUAGES, LANGUAGE_LABELS, type Language } from '@/lib/i18n';
 
 interface HealthData {
@@ -41,6 +41,7 @@ export default function SystemPage() {
   const [editingResources, setEditingResources] = useState(false);
   const [resourceForm, setResourceForm] = useState({ max_per_cycle: 40, max_per_campaign: 10, send_window_start: 8, send_window_end: 17, max_daily_calls: 50, api_rate_limit: 100, retry_delay_minutes: 30 });
   const [resourceSaving, setResourceSaving] = useState(false);
+  const [apolloCredits, setApolloCredits] = useState<{ used: number; limit: number } | null>(null);
 
   async function fetchHealth() {
     try {
@@ -72,7 +73,10 @@ export default function SystemPage() {
     } catch {}
   }
 
-  useEffect(() => { fetchHealth(); fetchLocale(); fetchResources(); }, []);
+  useEffect(() => {
+    fetchHealth(); fetchLocale(); fetchResources();
+    getApolloCredits().then(setApolloCredits).catch(() => {});
+  }, []);
 
   async function handleLocaleSave() {
     setLocaleSaving(true);
@@ -145,6 +149,33 @@ export default function SystemPage() {
           </span>
         </div>
       </div>
+
+      {/* Apollo Credits Widget */}
+      {apolloCredits && (() => {
+        const used = apolloCredits.used;
+        const limit = apolloCredits.limit;
+        const pct = Math.min(100, Math.round((used / limit) * 100));
+        const remaining = limit - used;
+        const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+        const textColor = pct >= 90 ? 'text-red-700' : pct >= 70 ? 'text-amber-700' : 'text-emerald-700';
+        return (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-white p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-900">Apollo Lead Sourcing Credits</p>
+                <p className="mt-0.5 text-sm text-gray-500">Used to pull and enrich cold leads. Resets monthly.</p>
+              </div>
+              <div className="text-right">
+                <p className={`text-2xl font-bold ${textColor}`}>{used.toLocaleString()} / {limit.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">{remaining.toLocaleString()} remaining ({100 - pct}% available)</p>
+              </div>
+            </div>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+              <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* System Metrics */}
       <section className="mt-6">

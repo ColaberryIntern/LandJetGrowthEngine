@@ -16,6 +16,22 @@ interface SendEmailInput {
   body: string;
   from?: string;
   senderName?: string;
+  signature?: string;
+}
+
+/**
+ * Strip AI-generated sign-offs from email body.
+ * Removes lines like "Best, Ryan", "- Ryan", "Thanks, Ryan" at the end so the
+ * signature from settings is the only sign-off in the email.
+ */
+function stripSignOff(body: string): string {
+  if (!body) return body;
+  // Match common closings followed by a name on its own line at the end
+  const closings = ['best', 'thanks', 'thank you', 'regards', 'sincerely', 'cheers', 'kind regards', 'warm regards', 'best regards', 'all the best'];
+  const closingPattern = closings.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  // Pattern: optional closing line + name line at the end
+  const re = new RegExp(`\\n+\\s*(?:(?:${closingPattern})[,!.]?\\s*\\n+\\s*)?[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?\\.?\\s*$`, 'i');
+  return body.replace(re, '').trimEnd();
 }
 
 interface SendEmailResult {
@@ -104,6 +120,23 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
   try {
     const token = await getGraphToken();
 
+    // Strip any AI-generated sign-off from the body so signature is the only one
+    const cleanBody = stripSignOff(input.body);
+
+    // If signature is provided, build HTML email; otherwise plain text
+    let contentType: 'Text' | 'HTML' = 'Text';
+    let content = cleanBody;
+    if (input.signature && input.signature.trim()) {
+      contentType = 'HTML';
+      // Convert plain text body to HTML (preserve line breaks) and append signature
+      const htmlBody = cleanBody
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+      content = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333">${htmlBody}<br><br>${input.signature}</div>`;
+    }
+
     const graphResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${fromEmail}/sendMail`, {
       method: 'POST',
       headers: {
@@ -113,7 +146,7 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
       body: JSON.stringify({
         message: {
           subject: input.subject,
-          body: { contentType: 'Text', content: input.body },
+          body: { contentType, content },
           toRecipients: [{ emailAddress: { address: input.to } }],
           from: { emailAddress: { name: senderName, address: fromEmail } },
         },

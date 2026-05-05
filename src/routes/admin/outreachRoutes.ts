@@ -237,6 +237,7 @@ router.post('/inbound/send', authorize('campaigns:write'), async (req: Request, 
       body,
       from: 'rlandry@landjet.com',
       senderName: 'Ryan Landry',
+      signature: settings.email_signature || '',
     });
 
     res.json({ ...result, test_mode: settings.test_mode });
@@ -316,7 +317,34 @@ router.post('/campaigns/:campaignId/rewrite-prompts', authorize('campaigns:write
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured' });
 
-    const systemInstruction = `You are rewriting outreach email prompts. Write the prompts as instructions to an AI that will generate the actual email.
+    // Extract user's tone and length preferences from CURRENT prompt so we don't overwrite them
+    const currentLower = currentPrompt.toLowerCase();
+    const lengthMatch = currentPrompt.match(/(?:under|max(?:imum)?)\s*(\d{2,4})\s*words?/i);
+    const preservedLength = lengthMatch ? `under ${lengthMatch[1]} words` : 'under 150 words';
+    const preservedTone = currentLower.includes('ceo style') || currentLower.includes('ceo-style') || currentLower.includes('write as ceo') ? 'CEO style'
+      : currentLower.includes('founder-direct') || currentLower.includes('founder direct') ? 'founder-direct'
+      : currentLower.includes('formal') ? 'formal'
+      : currentLower.includes('casual') ? 'casual'
+      : 'professional and direct';
+
+    // Channel-specific guidance for each step
+    const channelGuidance = (channel: string): string => {
+      switch (channel) {
+        case 'linkedin_connect':
+          return 'LinkedIn connection request note (max 280 characters total). The note must invite them to connect, NOT pitch services. Mention one shared interest or proof point briefly.';
+        case 'linkedin_message':
+          return 'LinkedIn direct message (assumes already connected). Personal, conversational, no formal sign-off needed. NOT a connection request -- do NOT ask to connect.';
+        case 'sms':
+          return 'Plain text SMS (under 160 characters). Casual, direct, no signature block.';
+        case 'voice':
+          return 'Voice script for a 30-second voicemail. Conversational tone, mention one specific value point, leave callback ask.';
+        case 'email':
+        default:
+          return `Standard outreach email. ${preservedLength}. Tone: ${preservedTone}.`;
+      }
+    };
+
+    const systemInstruction = `You are rewriting outreach prompts. Write the prompts as instructions to an AI that will generate the actual outbound message.
 
 THE ONLY VARIABLES YOU MAY USE (complete list):
 ${allAllowedVars.join(', ')}
@@ -332,23 +360,34 @@ ${campaignVarList || 'None defined'}
 
 LEAD VARIABLES (filled at send time): {{first_name}}, {{last_name}}, {{company}}, {{title}}, {{vertical}}
 
+USER PREFERENCES TO PRESERVE (extracted from current prompt):
+- Tone: ${preservedTone}
+- Email length: ${preservedLength}
+
 WHAT TO WRITE:
 
 campaign_prompt (system prompt, under 200 words):
-- Instructions for generating a personalized email to {{first_name}} at {{company}}
+- Instructions for generating a personalized message to {{first_name}} at {{company}}
 - You MUST reference every single campaign variable at least once across the campaign_prompt and step prompts. Missing any variable is unacceptable. Variables: ${campaignVarNames.join(', ') || 'none'}
-- Specify: tone (founder-direct, not salesy), length (under 120 words), sign off as Ryan
+- Specify the tone: ${preservedTone}
+- For email-channel steps, specify length: ${preservedLength}
+- Sign off as Ryan
 
 steps (${currentSteps.length || 3} sequence steps):
-${(currentSteps.length > 0 ? currentSteps : [{ step: 1 }, { step: 2 }, { step: 3 }]).map((s: any, i: number) => {
+${(currentSteps.length > 0 ? currentSteps : [{ step: 1, channel: 'email' }, { step: 2, channel: 'email' }, { step: 3, channel: 'email' }]).map((s: any, i: number) => {
   const total = currentSteps.length || 3;
-  if (i === 0) return `- Step ${s.step}: Initial outreach. Use {{first_name}}, {{company}}, and key campaign vars. Under 100 words.`;
-  if (i === total - 1) return `- Step ${s.step}: Brief final touch. Only {{first_name}}. Under 70 words.`;
-  return `- Step ${s.step}: Follow-up ${i}. Use different proof points and campaign vars. Under 80 words.`;
+  const channel = s.channel || 'email';
+  const role = i === 0 ? 'Initial outreach' : i === total - 1 ? 'Brief final touch' : `Follow-up ${i}`;
+  return `- Step ${s.step} (channel=${channel}): ${role}. Channel rules: ${channelGuidance(channel)}. Use {{first_name}}${i === 0 ? ', {{company}}, and key campaign vars' : i === total - 1 ? ' only' : ' and different proof points'}.`;
 }).join('\n')}
 
+CRITICAL CHANNEL RULES:
+- linkedin_connect prompts MUST instruct AI to write a connection request (max 280 chars), NOT a sales message
+- linkedin_message prompts MUST instruct AI to write a direct message (assumes connected), NOT a connection request -- never include phrases like "let's connect" or "would love to connect"
+- email prompts use full email format with the preserved tone and length
+
 Return JSON: {"campaign_prompt": "...", "steps": [{step, delay_days, prompt, channel}]}
-Keep existing delay_days and channel from current steps. Output exactly ${currentSteps.length || 3} steps matching the step numbers above.`;
+Keep existing delay_days and channel from current steps EXACTLY. Output exactly ${currentSteps.length || 3} steps matching the step numbers and channels above.`;
 
     const userContent = `CURRENT CAMPAIGN PROMPT:\n${currentPrompt}\n\nCURRENT STEPS:\n${JSON.stringify(currentSteps, null, 2)}`;
 
@@ -681,7 +720,17 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
               body: JSON.stringify({
                 model: process.env.AI_MODEL || 'gpt-4o',
                 messages: [
-                  { role: 'system', content: `Generate ONLY the final message text. No instructions, no labels, no quotation marks. The message must be ready to copy and paste directly. Max ${maxChars} characters.` },
+                  { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'message'} FROM the SENDER (${vars.sender_name || vars.sender_first_name || 'the sender'}) TO the RECIPIENT (${c.first_name} ${c.last_name || ''}, ${c.title || ''} at ${c.company || ''}).
+
+CRITICAL RULES:
+- The message is written FROM the sender's perspective TO the recipient
+- Greet the RECIPIENT by their first name: "Hi ${c.first_name}"
+- Sign off as the SENDER: ${vars.sender_first_name || vars.sender_name || 'the sender'}
+- DO NOT write as if you are the recipient
+- DO NOT greet the sender by name
+- DO NOT ask the sender for their services -- the SENDER is offering services
+- Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly.
+- Max ${maxChars} characters.` },
                   { role: 'user', content: interpolatedPrompt },
                 ],
                 temperature: 0.7,
@@ -758,7 +807,42 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
     const campaign = (newLead as any).outreachCampaign;
     const stepInfo = getStepInfo(newLead);
     const channel = stepInfo?.channel || 'email';
-    const draft = channel === 'email' ? await generateDraft(newLead, campaign?.ai_system_prompt) : { subject: '', body: '', prompt: '', source: 'template' as const };
+    const vars = await mergeVariables(newLead, campaign);
+
+    // Generate LinkedIn message if this step is LinkedIn (matches /today endpoint behavior)
+    let linkedinMessage: string | null = null;
+    if (channel.startsWith('linkedin') && stepInfo?.prompt) {
+      const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        try {
+          const maxChars = channel === 'linkedin_connect' ? 280 : 500;
+          const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: process.env.AI_MODEL || 'gpt-4o',
+              messages: [
+                { role: 'system', content: `Generate ONLY the final message text. No instructions, no labels, no quotation marks. The message must be ready to copy and paste directly. Max ${maxChars} characters.` },
+                { role: 'user', content: interpolatedPrompt },
+              ],
+              temperature: 0.7,
+              max_tokens: 256,
+            }),
+          });
+          if (aiResp.ok) {
+            const aiData = (await aiResp.json()) as any;
+            const msg = (aiData.choices?.[0]?.message?.content || '').trim();
+            if (msg) linkedinMessage = msg;
+          }
+        } catch {}
+      }
+      if (!linkedinMessage) linkedinMessage = interpolatedPrompt;
+    }
+
+    const draft = channel === 'email'
+      ? await generateDraft(newLead, campaign?.ai_system_prompt)
+      : { subject: '', body: linkedinMessage || '', prompt: '', source: 'template' as const };
 
     res.json({
       contact_id: newLead.id,
@@ -766,7 +850,9 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
       email: newLead.email,
       relationship_type: newLead.lead_source || 'past_client',
       sequence_stage: newLead.sequence_stage,
-      suggested_action: channel === 'email' ? (newLead.sequence_stage === 1 ? 'Initial Outreach' : 'Follow-up') : 'LinkedIn',
+      suggested_action: channel === 'linkedin_connect' ? 'Send Connection Request' :
+        channel === 'linkedin_message' ? 'Send LinkedIn Message' :
+        (newLead.sequence_stage === 1 ? 'Initial Outreach' : 'Follow-up'),
       priority_score: newLead.priority_score,
       vertical: newLead.vertical,
       tier: newLead.tier,
@@ -774,6 +860,7 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
       message_context: getMessageContext(newLead),
       channel,
       linkedin_url: newLead.linkedin_url,
+      linkedin_message: linkedinMessage,
       draft,
       status: newLead.outreach_status,
     });
@@ -923,12 +1010,16 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         await trackTestSend(leadBefore);
       }
 
+      // Use campaign-specific signature if set, otherwise global signature
+      const signature = (campaign?.settings as any)?.email_signature || globalSettings.email_signature || '';
+
       emailResult = await sendOutreachEmail({
         to: recipientEmail,
         subject: globalSettings.test_mode ? `[TEST -> ${leadBefore.email}] ${emailSubject}` : emailSubject,
         body: emailBody,
         from: senderEmail,
         senderName,
+        signature,
       });
     }
 

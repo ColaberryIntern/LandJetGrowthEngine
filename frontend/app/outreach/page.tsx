@@ -33,6 +33,7 @@ export default function OutreachPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [testSendCount, setTestSendCount] = useState(0);
   const [resetting, setResetting] = useState(false);
+  const [signatureView, setSignatureView] = useState<'code' | 'preview'>('code');
   const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
   const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
   const [originalDrafts, setOriginalDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // stores pre-rewrite originals
@@ -279,10 +280,32 @@ export default function OutreachPage() {
               </div>
             </div>
             <div className="border-t border-gray-100 pt-3">
-              <label className="text-xs text-gray-400">Email Signature (HTML)</label>
-              <textarea value={settings.email_signature} onChange={e => handleSettingsChange('email_signature', e.target.value)}
-                rows={4} placeholder="Add your HTML email signature..."
-                className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm font-mono focus:border-gray-400 focus:outline-none resize-y" />
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-gray-400">Email Signature</label>
+                <div className="flex rounded-md border border-gray-200 overflow-hidden">
+                  <button type="button" onClick={() => setSignatureView('code')}
+                    className={`px-2 py-0.5 text-xs ${signatureView === 'code' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    HTML
+                  </button>
+                  <button type="button" onClick={() => setSignatureView('preview')}
+                    className={`px-2 py-0.5 text-xs border-l border-gray-200 ${signatureView === 'preview' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    Preview
+                  </button>
+                </div>
+              </div>
+              {signatureView === 'code' ? (
+                <textarea value={settings.email_signature} onChange={e => handleSettingsChange('email_signature', e.target.value)}
+                  rows={4} placeholder="Add your HTML email signature..."
+                  className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm font-mono focus:border-gray-400 focus:outline-none resize-y" />
+              ) : (
+                <div className="mt-1 min-h-[100px] rounded-md border border-gray-200 bg-white p-3 text-sm">
+                  {settings.email_signature ? (
+                    <div dangerouslySetInnerHTML={{ __html: settings.email_signature }} />
+                  ) : (
+                    <p className="text-gray-400 italic">No signature set. Switch to HTML to add one.</p>
+                  )}
+                </div>
+              )}
             </div>
             {/* Send Schedule */}
             <div className="border-t border-gray-100 pt-3">

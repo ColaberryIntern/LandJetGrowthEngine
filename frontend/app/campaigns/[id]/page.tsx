@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV, rewriteCampaignPrompts, login } from '@/lib/api';
+import { getCampaignById, updateCampaignFields, getCampaignContacts, getCampaignAnalytics, uploadCampaignCSV, rewriteCampaignPrompts, approveCampaign, pullApolloLeads, login } from '@/lib/api';
 
 async function ensureAuth() {
   if (typeof window === 'undefined') return;
@@ -142,7 +142,8 @@ export default function CampaignDetailPage() {
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q) || (c.company || '').toLowerCase().includes(q);
+      const fullName = (c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '').toLowerCase();
+      return fullName.includes(q) || (c.email || '').toLowerCase().includes(q) || (c.company || '').toLowerCase().includes(q);
     }
     return true;
   });
@@ -163,11 +164,62 @@ export default function CampaignDetailPage() {
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
           {!isVirtual && campaign && (
             <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${campaign.approval_status === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-              {campaign.approval_status === 'live' ? 'Active' : campaign.status}
+              {campaign.approval_status === 'live' ? 'Active' : campaign.approval_status === 'draft' ? 'Draft' : campaign.approval_status}
             </span>
           )}
         </div>
-        <a href="/campaigns" className="text-sm text-gray-500 hover:text-gray-900">Back</a>
+        <div className="flex items-center gap-3">
+          {!isVirtual && campaign && campaign.name?.toLowerCase().includes('cold outreach') && (
+            <button
+              onClick={async () => {
+                if (saving === 'apollo') return;
+                const count = parseInt(window.prompt('How many leads to pull from Apollo? (max 100)', '25') || '0', 10);
+                if (!count || count < 1) return;
+                setSaving('apollo');
+                try {
+                  const res = await pullApolloLeads(id, Math.min(count, 100));
+                  alert(`Apollo pull complete!\n\nCreated: ${res.created}\nDuplicates skipped: ${res.duplicates}\nApollo credits used: ${res.credits_used}\nErrors: ${res.errors}`);
+                  // Refresh contacts
+                  const refreshed = await getCampaignContacts(id);
+                  setContacts(refreshed.contacts);
+                } catch (err) {
+                  alert('Apollo pull failed: ' + (err as Error).message);
+                }
+                setSaving(null);
+              }}
+              disabled={saving === 'apollo'}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              title="Pull more leads from Apollo for this campaign"
+            >
+              {saving === 'apollo' ? 'Pulling...' : '+ Pull from Apollo'}
+            </button>
+          )}
+          {!isVirtual && campaign && campaign.approval_status !== 'live' && (
+            <button
+              onClick={async () => {
+                if (saving === 'activate') return;
+                setSaving('activate');
+                try {
+                  for (const status of ['pending_approval', 'approved', 'live']) {
+                    if (campaign.approval_status === status) continue;
+                    const res = await approveCampaign(id, status) as any;
+                    if (res?.campaign) setCampaign(res.campaign);
+                  }
+                  setFlash('activate');
+                  setTimeout(() => setFlash(null), 2000);
+                } catch (err) {
+                  alert('Activation failed: ' + (err as Error).message);
+                }
+                setSaving(null);
+              }}
+              disabled={saving === 'activate'}
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving === 'activate' ? 'Activating...' : flash === 'activate' ? '✓ Activated' : 'Activate Campaign'}
+            </button>
+          )}
+          <a href="/campaigns" className="text-sm text-gray-500 hover:text-gray-900">Back</a>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -405,7 +457,7 @@ export default function CampaignDetailPage() {
                     <>
                       <tr key={c.id} onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
                         className="border-b border-gray-50 cursor-pointer hover:bg-gray-50">
-                        <td className="py-2 text-gray-900">{c.name}</td>
+                        <td className="py-2 text-gray-900">{c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '-'}</td>
                         <td className="py-2 text-gray-500">{c.email}</td>
                         <td className="py-2 text-gray-500">{c.company || '-'}</td>
                         <td className="py-2">{c.vertical ? <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">{c.vertical}</span> : '-'}</td>
@@ -543,14 +595,19 @@ export default function CampaignDetailPage() {
               }} className="mt-2 w-full rounded-md border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-700">
                 + Add Step
               </button>
-              <button onClick={() => saveField('steps', { sequence_steps: steps })} disabled={saving === 'steps'}
-                className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
-                {saving === 'steps' ? 'Saving...' : 'Save Steps'}
+              <button onClick={() => saveField('steps', { sequence_steps: steps, ai_system_prompt: prompt.trim() })} disabled={saving === 'steps'}
+                className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+                title="Saves both the campaign prompt and all sequence steps">
+                {saving === 'steps' ? 'Saving...' : 'Save All'}
               </button>
               <button onClick={async () => {
                 setSaving('autogen' as any);
                 try {
-                  await saveField('steps', { sequence_steps: steps });
+                  // Save BOTH prompt and steps before regenerating so the AI sees the latest manual edits
+                  await updateCampaignFields(id as string, {
+                    ai_system_prompt: prompt.trim(),
+                    sequence_steps: steps,
+                  });
                   await new Promise(r => setTimeout(r, 500));
                   const result = await rewriteCampaignPrompts(id as string);
                   if (result.campaign_prompt) setPrompt(result.campaign_prompt);
