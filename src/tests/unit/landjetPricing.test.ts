@@ -1,4 +1,4 @@
-import { calculateQuote, detectFlatRateRoute, detectCustomerCategory, type QuoteInput } from '../../services/landjetPricing';
+import { calculateQuote, detectFlatRateRoute, detectCustomerCategory, isIowaOnlyTrip, isForwardOnlyMarket, type QuoteInput } from '../../services/landjetPricing';
 
 describe('LandJet Pricing Engine', () => {
 
@@ -220,42 +220,61 @@ describe('LandJet Pricing Engine', () => {
       expect(hourlyLine?.amount).toBe(4 * 175); // Austin $175/hr
     });
 
-    it('uses Kansas City $200/hr rate', () => {
+    it('uses Quad Cities $150/hr rate (KC excluded as forward-only)', () => {
       const q = calculateQuote({
-        market: 'kansas_city',
+        market: 'quad_cities',
         service_type: 'hourly_local',
         passenger_miles: 0,
         service_hours: 5,
         payment: 'check',
       });
       const hourlyLine = q.lines.find(l => l.label.includes('Hourly Rate'));
-      expect(hourlyLine?.amount).toBe(5 * 200);
+      expect(hourlyLine?.amount).toBe(5 * 150);
     });
   });
 
   // ===================================================================
-  // KANSAS CITY APPROVALS
+  // KANSAS CITY -- FORWARD ONLY (per Percy 2026-05-06)
   // ===================================================================
 
-  describe('Kansas City "needs approval" handling', () => {
-    it('flags fuel surcharge for KC and applies default', () => {
+  describe('Kansas City forward-only behavior', () => {
+    it('does NOT generate a quote for KC', () => {
       const q = calculateQuote({
         market: 'kansas_city',
         service_type: 'one_way',
         passenger_miles: 200,
         payment: 'credit_card',
       });
-      expect(q.approvals_needed.some(a => a.includes('fuel surcharge'))).toBe(true);
-      expect(q.approvals_needed.some(a => a.includes('CC fee'))).toBe(true);
+      expect(q.pricing_mode).toBe('forward_only');
+      expect(q.lines).toHaveLength(0);
+      expect(q.grand_total).toBe(0);
     });
 
-    it('does not need approval for non-KC markets', () => {
+    it('returns the KC team email addresses to forward to', () => {
+      const q = calculateQuote({
+        market: 'kansas_city',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'credit_card',
+      });
+      expect(q.forward_to).toContain('holly@kclandjet.com');
+      expect(q.forward_to).toContain('scott@kclandjet.com');
+      expect(q.forward_reason).toBeDefined();
+    });
+
+    it('exposes KC as a forward-only market via helper', () => {
+      expect(isForwardOnlyMarket('kansas_city')).toBe(true);
+      expect(isForwardOnlyMarket('dallas')).toBe(false);
+    });
+
+    it('still generates quotes for non-forward markets', () => {
       const q = calculateQuote({
         market: 'dallas',
         service_type: 'one_way',
         passenger_miles: 200,
         payment: 'credit_card',
       });
+      expect(q.pricing_mode).toBe('distance');
       expect(q.approvals_needed).toHaveLength(0);
     });
   });
@@ -280,11 +299,11 @@ describe('LandJet Pricing Engine', () => {
   });
 
   // ===================================================================
-  // IOWA TAX
+  // IOWA TAX (per Percy 2026-05-06: pickup AND dropoff AND ALL stops in IA)
   // ===================================================================
 
   describe('Iowa-only 7% tax', () => {
-    it('applies 7% tax for Iowa-only trip in QC market', () => {
+    it('applies 7% tax for Iowa-only trip in QC market (legacy boolean)', () => {
       const q = calculateQuote({
         market: 'quad_cities',
         service_type: 'one_way',
@@ -297,6 +316,51 @@ describe('LandJet Pricing Engine', () => {
       expect(taxLine?.amount).toBeGreaterThan(0);
     });
 
+    it('applies 7% tax when all stops are in IA', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: '123 Main St, Davenport', state: 'IA' },
+          { address: '456 Oak St, Iowa City', state: 'IA' },
+          { address: '789 Pine St, Des Moines', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label === 'Iowa Tax (7%)')).toBeDefined();
+    });
+
+    it('does NOT apply tax when ANY stop is outside Iowa', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'check',
+        stops: [
+          { address: '123 Main St, Davenport', state: 'IA' },
+          { address: '456 Oak St, Moline', state: 'IL' }, // intermediate stop in Illinois
+          { address: '789 Pine St, Des Moines', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('stops list overrides legacy is_iowa_only boolean', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        is_iowa_only: true, // legacy says yes
+        stops: [
+          { address: 'Quad Cities, IA', state: 'IA' },
+          { address: 'Chicago, IL', state: 'IL' }, // but stops say no
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
     it('does NOT apply Iowa tax for Texas markets', () => {
       const q = calculateQuote({
         market: 'dallas',
@@ -306,6 +370,20 @@ describe('LandJet Pricing Engine', () => {
         is_iowa_only: true, // even if the flag is set, Texas markets don't pay it
       });
       expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('isIowaOnlyTrip helper returns true for all-IA stops', () => {
+      expect(isIowaOnlyTrip({ stops: [
+        { address: 'a', state: 'IA' },
+        { address: 'b', state: 'ia' }, // case insensitive
+      ]})).toBe(true);
+    });
+
+    it('isIowaOnlyTrip helper returns false when any stop is outside IA', () => {
+      expect(isIowaOnlyTrip({ stops: [
+        { address: 'a', state: 'IA' },
+        { address: 'b', state: 'IL' },
+      ]})).toBe(false);
     });
   });
 

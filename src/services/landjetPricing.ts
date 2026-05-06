@@ -46,6 +46,16 @@ export type ServiceType = 'one_way' | 'round_trip' | 'hourly_local';
 
 export type Payment = 'credit_card' | 'check' | 'invoice';
 
+/**
+ * Trip stop -- pickup, dropoff, or intermediate. State must be the 2-letter abbreviation
+ * (e.g., 'IA', 'IL'). Used for Iowa-only tax determination per Percy's rule:
+ * "Iowa tax when Drop off and Pick-up and ALL STOPS are in Iowa"
+ */
+export interface TripStop {
+  address: string;
+  state: string; // 'IA', 'IL', 'TX', etc.
+}
+
 export interface QuoteInput {
   market: Market;
   customer_category?: CustomerCategory;
@@ -54,7 +64,8 @@ export interface QuoteInput {
   deadleg_miles?: number;  // total empty repositioning miles
   service_hours?: number;  // for hourly trips, OR additional hours over the 10 included
   pickup_at_local?: Date;  // used for after-hours surcharge detection
-  is_iowa_only?: boolean;  // both pickup AND dropoff in Iowa -> 7% tax
+  is_iowa_only?: boolean;  // legacy: pre-computed Iowa-only flag (true = pickup AND dropoff AND all stops in Iowa)
+  stops?: TripStop[];      // preferred: list every stop. Iowa tax applies only if ALL are in IA.
   payment: Payment;
   // Optional: pre-priced flat-rate route override (when caller already detected one)
   flat_rate_amount?: number;
@@ -85,7 +96,7 @@ export interface QuoteOutput {
   market: Market;
   customer_category: CustomerCategory;
   service_type: ServiceType;
-  pricing_mode: 'flat_rate' | 'hourly' | 'distance';
+  pricing_mode: 'flat_rate' | 'hourly' | 'distance' | 'forward_only';
   lines: QuoteLine[];
   subtotal: number;        // before gratuity, fuel, CC fees
   secondary_total: number; // after tax + overnight + per diem + flat gratuity
@@ -93,6 +104,30 @@ export interface QuoteOutput {
   grand_total: number;     // after CC fee
   warnings: string[];      // e.g., DOT compliance, "needs approval"
   approvals_needed: string[]; // line items that need concierge approval
+  forward_to?: string[];   // populated when pricing_mode === 'forward_only'
+  forward_reason?: string; // human-readable reason for forwarding
+}
+
+/**
+ * Markets the AI engine should NOT quote for. Inbound emails routed to these markets
+ * are forwarded to the local concierge team to quote on their own.
+ *
+ * Per Percy on 2026-05-06: "For now leave KC out. It will be forwarded to an email
+ * address and they will quote on their own."
+ */
+const FORWARD_ONLY_MARKETS: Partial<Record<Market, { recipients: string[]; reason: string }>> = {
+  kansas_city: {
+    recipients: ['holly@kclandjet.com', 'scott@kclandjet.com'],
+    reason: 'Kansas City quotes are handled by the local team (Holly, Scott). Per Percy, AI does not generate KC quotes.',
+  },
+};
+
+export function isForwardOnlyMarket(market: Market): boolean {
+  return market in FORWARD_ONLY_MARKETS;
+}
+
+export function getForwardConfig(market: Market) {
+  return FORWARD_ONLY_MARKETS[market];
 }
 
 // =====================================================================
@@ -282,6 +317,20 @@ export function detectCustomerCategory(email?: string): CustomerCategory {
   return KNOWN_DOMAINS[domain] || 'standard';
 }
 
+/**
+ * Determine if Iowa 7% tax applies. Per Percy on 2026-05-06: tax only when
+ * pickup, dropoff, AND every intermediate stop are all in Iowa.
+ *
+ * Accepts either pre-computed `is_iowa_only` boolean or an explicit `stops` list.
+ * If `stops` provided, it overrides the boolean (more reliable).
+ */
+export function isIowaOnlyTrip(input: Pick<QuoteInput, 'is_iowa_only' | 'stops'>): boolean {
+  if (input.stops && input.stops.length > 0) {
+    return input.stops.every(s => s.state.trim().toUpperCase() === 'IA');
+  }
+  return !!input.is_iowa_only;
+}
+
 // =====================================================================
 // MAIN QUOTE FUNCTION
 // =====================================================================
@@ -290,6 +339,26 @@ export function calculateQuote(input: QuoteInput): QuoteOutput {
   const market = input.market;
   const rates = MARKET_RATES[market];
   if (!rates) throw new Error(`Unknown market: ${market}`);
+
+  // Forward-only markets short-circuit: AI does NOT quote, just routes to local team
+  if (isForwardOnlyMarket(market)) {
+    const cfg = getForwardConfig(market)!;
+    return {
+      market,
+      customer_category: input.customer_category || 'standard',
+      service_type: input.service_type,
+      pricing_mode: 'forward_only',
+      lines: [],
+      subtotal: 0,
+      secondary_total: 0,
+      third_total: 0,
+      grand_total: 0,
+      warnings: [`Forward-only market: ${market}. ${cfg.reason}`],
+      approvals_needed: [],
+      forward_to: cfg.recipients,
+      forward_reason: cfg.reason,
+    };
+  }
 
   // Determine customer category (explicit > email-detected > standard)
   const customer_category: CustomerCategory =
@@ -458,8 +527,8 @@ function finalizeQuote(args: FinalizeArgs): QuoteOutput {
 
   const subtotal = sum(lines);
 
-  // Tax (Iowa-only trips at 7%)
-  const apply_iowa_tax = !!(input.is_iowa_only && rates.iowa_tax_eligible);
+  // Tax (Iowa-only trips at 7%) -- per Percy: pickup AND dropoff AND ALL stops in Iowa
+  const apply_iowa_tax = !!(isIowaOnlyTrip(input) && rates.iowa_tax_eligible);
   const tax = apply_iowa_tax ? subtotal * 0.07 : 0;
   if (tax > 0) lines.push({ label: 'Iowa Tax (7%)', amount: tax });
 
