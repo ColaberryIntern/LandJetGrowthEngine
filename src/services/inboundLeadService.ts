@@ -1,6 +1,8 @@
 import { Lead } from '../models/Lead';
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine';
+import { QuoteOutput } from './landjetPricing';
 
 export interface QuoteRequest {
   lead_id?: number;
@@ -19,6 +21,18 @@ export interface QuoteResponse {
   subject: string;
   body: string;
   lead_id: number | null;
+  // Pricing engine metadata (populated when the inbound matched a BookRides email)
+  pricing_mode?: 'priced' | 'forward_only' | 'manual';
+  market?: string;
+  forward_to?: string[];
+  forward_reason?: string;
+  quote_summary?: {
+    subtotal: number;
+    grand_total: number;
+    customer_category: string;
+    warnings: string[];
+    approvals_needed: string[];
+  };
 }
 
 /**
@@ -55,16 +69,18 @@ export async function generateQuoteResponse(request: QuoteRequest): Promise<Quot
     }
   }
 
-  const context = [
-    `Inquiry from: ${request.name || 'Unknown'}`,
-    request.company ? `Company: ${request.company}` : null,
-    request.message ? `Their message: "${request.message}"` : null,
-    request.service_type ? `Service requested: ${request.service_type}` : null,
-    request.pickup_city ? `Pickup: ${request.pickup_city}` : null,
-    request.dropoff_city ? `Dropoff: ${request.dropoff_city}` : null,
-    request.passengers ? `Passengers: ${request.passengers}` : null,
-    request.date ? `Requested date: ${request.date}` : null,
-  ].filter(Boolean).join('\n');
+  // ---------------------------------------------------------------
+  // Pricing engine pre-pass: if the inbound is a BookRides email,
+  // run it through the deterministic pricing engine first. The AI
+  // then drafts the email AROUND the calculated numbers in Lorie's
+  // voice, instead of guessing at pricing on its own.
+  // ---------------------------------------------------------------
+  let pricing: InboundProcessResult = { mode: 'manual', manual_reason: 'no_message' };
+  if (request.message) {
+    pricing = processInboundEmail(request.message, request.email);
+  }
+
+  const promptContext = buildPromptContext(request, pricing);
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -73,24 +89,11 @@ export async function generateQuoteResponse(request: QuoteRequest): Promise<Quot
       body: JSON.stringify({
         model: process.env.AI_MODEL || 'gpt-4o',
         messages: [
-          {
-            role: 'system',
-            content: `You are drafting a response as Ryan Landry, CEO of LandJet, a premium ground transportation company. LandJet provides executive-level chauffeured transportation for business travel, with a fleet of luxury vehicles.
-
-When responding to inquiries:
-- Be warm, professional, and responsive
-- If they asked about pricing, provide a general range and offer to put together a custom quote
-- If they asked about service areas, mention LandJet serves major business corridors across multiple cities
-- Always offer to schedule a brief call to understand their needs
-- Keep the response under 150 words
-- Sign off as Ryan
-
-Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`,
-          },
-          { role: 'user', content: context },
+          { role: 'system', content: buildSystemPrompt(pricing) },
+          { role: 'user', content: promptContext },
         ],
-        temperature: 0.7,
-        max_tokens: 512,
+        temperature: pricing.mode === 'priced' ? 0.4 : 0.7, // tighter when we have real numbers
+        max_tokens: 700,
       }),
     });
 
@@ -100,17 +103,137 @@ Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`,
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
+    let parsedSubject = 'Re: Your LandJet Inquiry';
+    let parsedBody = cleaned;
     try {
       const parsed = JSON.parse(cleaned);
-      recordAgentRun('quote_generator', { leadId, service_type: request.service_type }).catch(() => {});
-      return { subject: parsed.subject || 'Re: Your LandJet Inquiry', body: parsed.body || cleaned, lead_id: leadId };
+      parsedSubject = parsed.subject || parsedSubject;
+      parsedBody = parsed.body || cleaned;
     } catch {
-      recordAgentRun('quote_generator', { leadId, service_type: request.service_type }).catch(() => {});
-      return { subject: 'Re: Your LandJet Inquiry', body: cleaned, lead_id: leadId };
+      // fall through with cleaned text as body
     }
+
+    recordAgentRun('quote_generator', {
+      leadId,
+      pricing_mode: pricing.mode,
+      market: pricing.market,
+    }).catch(() => {});
+
+    const result: QuoteResponse = {
+      subject: parsedSubject,
+      body: parsedBody,
+      lead_id: leadId,
+      pricing_mode: pricing.mode,
+      market: pricing.market,
+      forward_to: pricing.forward_to,
+      forward_reason: pricing.forward_reason,
+    };
+    if (pricing.mode === 'priced' && pricing.quote) {
+      result.quote_summary = summarizeQuote(pricing.quote);
+    }
+    return result;
   } catch (error) {
     recordAgentRun('quote_generator', undefined, 'failed', (error as Error).message).catch(() => {});
     logger.error('Failed to generate quote response', { error: (error as Error).message });
     throw error;
   }
+}
+
+// =====================================================================
+// PROMPT BUILDERS
+// =====================================================================
+
+function buildSystemPrompt(pricing: InboundProcessResult): string {
+  if (pricing.mode === 'forward_only') {
+    return `You are drafting an internal forwarding note for a LandJet concierge. The trip is in Kansas City, which the local KC team (Holly, Scott) handles directly -- LandJet AI does NOT generate KC quotes.
+
+Your job: write a brief, professional forwarding note to send to the customer letting them know their request has been received and routed to the local Kansas City team for a custom quote. Do NOT include any pricing. Do NOT mention internal tooling.
+
+Return JSON with "subject" and "body" fields only. Plain text body, no HTML. Sign off as the LandJet Reservations Team.`;
+  }
+
+  if (pricing.mode === 'priced') {
+    return `You are drafting a quote response as the LandJet Reservations team (Lorie's voice -- warm, concierge style, never pushy). You will be given a structured pricing breakdown calculated by the LandJet pricing engine. You must use those EXACT numbers in your reply -- do not guess, do not round, do not invent line items.
+
+Format the body as a clean concierge quote:
+- Open with a friendly acknowledgment of the trip request (reference the date and route).
+- List the line items as a simple breakdown.
+- State the grand total clearly.
+- If there are warnings or "needs approval" items, note them honestly ("we will confirm tolls/fuel surcharge when finalizing").
+- Close with a clear next step ("reply to confirm and we'll send the booking link").
+- Keep it under 200 words.
+
+Sign off as the LandJet Reservations Team. Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`;
+  }
+
+  // manual fallback -- generic AI quote (legacy behavior)
+  return `You are drafting a response as Ryan Landry, CEO of LandJet, a premium ground transportation company. LandJet provides executive-level chauffeured transportation for business travel.
+
+When responding to inquiries:
+- Be warm, professional, and responsive
+- If they asked about pricing, provide a general range and offer to put together a custom quote
+- If they asked about service areas, mention LandJet serves major business corridors across multiple cities
+- Always offer to schedule a brief call to understand their needs
+- Keep the response under 150 words
+- Sign off as Ryan
+
+Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`;
+}
+
+function buildPromptContext(request: QuoteRequest, pricing: InboundProcessResult): string {
+  const parts: string[] = [];
+  parts.push(`Inquiry from: ${request.name || 'Unknown'} <${request.email || 'no-email'}>`);
+  if (request.company) parts.push(`Company: ${request.company}`);
+
+  if (pricing.mode === 'priced' && pricing.quote && pricing.trip) {
+    parts.push('');
+    parts.push('=== STRUCTURED TRIP (from BookRides) ===');
+    parts.push(`Passenger: ${pricing.trip.passenger_name}`);
+    parts.push(`Date: ${pricing.trip.date_of_service || 'TBD'}  Time: ${pricing.trip.start_time || 'TBD'}`);
+    parts.push(`Service: ${pricing.trip.service_type || 'One Way'}  Vehicle: ${pricing.trip.vehicle || 'TBD'}`);
+    parts.push(`Pickup: ${pricing.trip.pickup_address || 'TBD'}`);
+    parts.push(`Dropoff: ${pricing.trip.dropoff_address || 'TBD'}`);
+    parts.push(`Passengers: ${pricing.trip.passengers ?? 'TBD'}  Luggage: ${pricing.trip.luggage ?? 'TBD'}`);
+    parts.push('');
+    parts.push('=== PRICING (calculated by LandJet engine -- USE THESE EXACT NUMBERS) ===');
+    parts.push(`Market: ${pricing.market}`);
+    parts.push(`Customer category: ${pricing.quote.customer_category}`);
+    parts.push(`Pricing mode: ${pricing.quote.pricing_mode}`);
+    parts.push('Line items:');
+    pricing.quote.lines.forEach(l => {
+      parts.push(`  - ${l.label}: $${l.amount.toFixed(2)}${l.note ? ` (${l.note})` : ''}`);
+    });
+    parts.push(`Subtotal: $${pricing.quote.subtotal.toFixed(2)}`);
+    parts.push(`After tax/extras: $${pricing.quote.secondary_total.toFixed(2)}`);
+    parts.push(`After gratuity: $${pricing.quote.third_total.toFixed(2)}`);
+    parts.push(`GRAND TOTAL: $${pricing.quote.grand_total.toFixed(2)}`);
+    if (pricing.quote.warnings.length) parts.push(`Warnings: ${pricing.quote.warnings.join('; ')}`);
+    if (pricing.quote.approvals_needed.length) parts.push(`Needs approval: ${pricing.quote.approvals_needed.join('; ')}`);
+  } else if (pricing.mode === 'forward_only' && pricing.trip) {
+    parts.push('');
+    parts.push('=== KC TRIP -- FORWARDING (no quote) ===');
+    parts.push(`Passenger: ${pricing.trip.passenger_name}`);
+    parts.push(`Pickup: ${pricing.trip.pickup_address}`);
+    parts.push(`Dropoff: ${pricing.trip.dropoff_address}`);
+    parts.push(`Forward to: ${pricing.forward_to?.join(', ')}`);
+  } else {
+    if (request.message) parts.push(`Their message: "${request.message}"`);
+    if (request.service_type) parts.push(`Service requested: ${request.service_type}`);
+    if (request.pickup_city) parts.push(`Pickup: ${request.pickup_city}`);
+    if (request.dropoff_city) parts.push(`Dropoff: ${request.dropoff_city}`);
+    if (request.passengers) parts.push(`Passengers: ${request.passengers}`);
+    if (request.date) parts.push(`Requested date: ${request.date}`);
+  }
+
+  return parts.join('\n');
+}
+
+function summarizeQuote(quote: QuoteOutput) {
+  return {
+    subtotal: quote.subtotal,
+    grand_total: quote.grand_total,
+    customer_category: quote.customer_category,
+    warnings: quote.warnings,
+    approvals_needed: quote.approvals_needed,
+  };
 }

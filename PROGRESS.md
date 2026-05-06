@@ -79,6 +79,25 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
 - [x] Percy enabled Mail.Read permission -- Inbound page working (19 inquiries found)
 - [x] CMS guide received from Ryan, uploaded to Basecamp
 
+### Reservations AI Engine (2026-05-06)
+
+- [x] LandJet pricing engine + BookRides parser foundation (commit a3dab25)
+  - Date: 2026-05-06
+  - What changed: New `src/services/landjetPricing.ts` (7 markets, 5 customer categories, flat-rate routes, gratuity tiers, after-hours, DOT, CC fees) + `src/services/bookRidesParser.ts` (regex BookRides email parser)
+  - Verification: Jest unit tests pass (37 pricing + 13 parser)
+
+- [x] Percy's pricing decisions: Iowa stops + KC forward-only (commit ffc1eb8)
+  - Date: 2026-05-06
+  - What changed: `TripStop` interface + `stops[]` input; `isIowaOnlyTrip()` requires every stop in IA; `FORWARD_ONLY_MARKETS` short-circuits KC to `pricing_mode='forward_only'` with `forward_to=[holly,scott]@kclandjet.com`
+  - Verification: 57/57 tests passing (44 pricing + 13 parser); Percy notified by email
+  - Notes: JD round-trip base rate (initial leg only vs both legs) still open; `apply_base_to_return_leg` flag in code so behavior can flip without code change
+
+- [x] Wire pricing engine into Inbound page (no commit yet)
+  - Date: 2026-05-06
+  - What changed: New `src/services/inboundQuoteEngine.ts` orchestrates parser -> market detection -> Iowa-stop extraction -> `calculateQuote()`. `inboundLeadService.generateQuoteResponse()` now does a deterministic pricing pre-pass; LLM is fed real numbers in Lorie's voice when the email parses, falls back to legacy generic prompt otherwise. KC inbound returns `pricing_mode='forward_only'` with internal forward instructions.
+  - Verification: 98/98 unit tests passing (44 pricing + 13 parser + 41 inbound engine); `tsc --noEmit` clean
+  - Notes: Mileage detection deferred -- non-flat-rate trips price with `passenger_miles=0` and concierge confirms before send. Distance Matrix integration is a follow-up. No frontend changes this iteration.
+
 ---
 
 ## Key Decisions & Context
