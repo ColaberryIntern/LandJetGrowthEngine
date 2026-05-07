@@ -110,6 +110,12 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `tsc --noEmit` clean (frontend); browser test deferred until next deploy.
   - Notes: No backend changes needed -- engine fields were already in the API response. Only UI consumed them this round.
 
+- [x] FAQ knowledge base scraped + service built
+  - Date: 2026-05-07
+  - What changed: New `src/services/landjetFaqService.ts` -- 12 Q/A pairs scraped from https://landjet.com/about/faqs (cancellation, weather, gratuity, overnight, confidentiality, presentations, on-call pilot, additional stops, connections, etc.). Exposes `searchFaqs(query, opts)` (keyword overlap with question tokens weighted 2x answer tokens) and `looksLikeFaq(query, threshold)` for quick boolean classification. Stopword filter prevents greeting-only inputs from matching.
+  - Verification: 17 new unit tests (119/119 total); `tsc --noEmit` clean
+  - Notes: Static array for v1. If FAQ count grows past ~30 entries or admin-UI editing is needed, migrate to a Sequelize model + seed. Embeddings are a future enhancement; keyword overlap is the v1 baseline.
+
 ---
 
 ## Key Decisions & Context
