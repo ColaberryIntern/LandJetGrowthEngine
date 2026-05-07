@@ -117,6 +117,65 @@ describe('LandJet Pricing Engine', () => {
     });
   });
 
+  // ===================================================================
+  // JD ROUND-TRIP BASE RATE -- both legs (Percy 2026-05-07)
+  // ===================================================================
+
+  describe('JD round-trip base rate -- both legs by default', () => {
+    it('JD employee round-trip applies $200 base to BOTH legs without explicit flag', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        customer_category: 'jd_employee',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'credit_card',
+      });
+      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
+      expect(baseLines).toHaveLength(2);
+      expect(baseLines[0].amount + baseLines[1].amount).toBe(400); // $200 + $200
+    });
+
+    it('JD Shuttle round-trip applies $250 base to BOTH legs without explicit flag', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        customer_category: 'jd_shuttle',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'credit_card',
+      });
+      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
+      expect(baseLines).toHaveLength(2);
+      expect(baseLines[0].amount + baseLines[1].amount).toBe(500); // $250 + $250
+    });
+
+    it('standard customer round-trip still applies base to initial leg only', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        customer_category: 'standard',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'credit_card',
+      });
+      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
+      expect(baseLines).toHaveLength(1);
+      expect(baseLines[0].amount).toBe(400); // $400 base, initial leg only
+    });
+
+    it('explicit input flag overrides JD customer default (false wins)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        customer_category: 'jd_employee',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'credit_card',
+        apply_base_to_return_leg: false, // explicit override
+      });
+      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
+      expect(baseLines).toHaveLength(1);
+      expect(baseLines[0].amount).toBe(200);
+    });
+  });
+
   describe('Lockton / Investor / LJ Member -- $400 trip fee discount', () => {
     it('zeros out trip fee for Lockton', () => {
       const q = calculateQuote({

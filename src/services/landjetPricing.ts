@@ -11,12 +11,12 @@
  *   5. THIRD = SECONDARY + (% Gratuity * SECONDARY)
  *   6. GRAND = THIRD + (3% * THIRD) when CC payment
  *
- * Open items flagged TODO_PERCY -- waiting on confirmation from Percy:
- *   - Customer category detection rule (we use email domain match by default)
- *   - "Iowa-only trip" 7% tax: assumes BOTH pickup and dropoff in Iowa
- *   - Kansas City "needs approval" line items: we apply corp default and flag for concierge
- *   - JD round-trip base rate: master doc says base only on initial leg; sample JD quote applied to both legs.
- *     Default behavior: follow master doc. Override with `applyBaseToReturnLeg` if needed.
+ * Resolved decisions (Percy, 2026-05-06 + 2026-05-07):
+ *   - Customer category detection: email-domain match for John Deere only; concierge sets others
+ *   - Iowa 7% tax: applied only when pickup AND dropoff AND every intermediate stop are in IA
+ *   - Kansas City: AI does NOT quote; inbound is forwarded to holly@kclandjet.com + scott@kclandjet.com
+ *   - JD round-trip base rate: applies to BOTH legs for jd_employee and jd_shuttle (master doc rule
+ *     "initial leg only" still holds for non-JD categories until Lorie confirms otherwise)
  */
 
 import { logger } from '../config/logger';
@@ -209,6 +209,15 @@ interface CustomerOverride {
    * (used for Lockton, Investor, LJ Member where master doc says "$400 discount")
    */
   trip_fee_discount?: number;
+  /**
+   * Round-trip base rate behavior. When true, the base rate is billed on BOTH the
+   * initial AND return leg. When false/unset, master doc default applies (initial leg only).
+   *
+   * Per Percy on 2026-05-07: "It's should be both legs" -- confirmed for John Deere
+   * employees and JD Shuttle (the case the question was asked about). For other
+   * customer categories, master doc rule still applies until Lorie confirms otherwise.
+   */
+  apply_base_to_return_leg?: boolean;
   notes?: string[];
 }
 
@@ -219,14 +228,16 @@ const CUSTOMER_OVERRIDES: Record<CustomerCategory, CustomerOverride> = {
     mileage_rate: 2.20,
     min_mileage: 200,
     default_gratuity_amount: 100, // master doc: "$75 or $100"
-    notes: ['John Deere employee pricing applied'],
+    apply_base_to_return_leg: true, // Percy confirmed 2026-05-07
+    notes: ['John Deere employee pricing applied', 'Base rate billed on both legs of round-trips'],
   },
   jd_shuttle: {
     trip_fee: 250,
     mileage_rate: 1.65,
     min_mileage: 303.03, // master doc value
     default_gratuity_amount: 100,
-    notes: ['John Deere shuttle pricing applied'],
+    apply_base_to_return_leg: true, // Percy confirmed 2026-05-07
+    notes: ['John Deere shuttle pricing applied', 'Base rate billed on both legs of round-trips'],
   },
   lockton_employee: {
     mileage_rate: 2.20,
@@ -401,8 +412,12 @@ export function calculateQuote(input: QuoteInput): QuoteOutput {
   // DISTANCE MODE (default for one-way and round-trip)
   // ------------------------------------------------------------------
   // Trip Fee (base rate)
-  // Master doc rule: applied to one-way trips and the INITIAL leg of round-trips, NOT the return leg
-  // Override available via apply_base_to_return_leg (matches some JD quotes)
+  // Resolution order for round-trip behavior:
+  //   1. Explicit input.apply_base_to_return_leg (caller override)
+  //   2. Customer category default (JD employee + JD Shuttle = both legs, per Percy 2026-05-07)
+  //   3. Master doc default (initial leg only)
+  const applyBaseToReturnLeg =
+    input.apply_base_to_return_leg ?? override.apply_base_to_return_leg ?? false;
   const passenger_miles = input.passenger_miles;
   const deadleg_miles = input.deadleg_miles ?? 0;
 
@@ -410,9 +425,9 @@ export function calculateQuote(input: QuoteInput): QuoteOutput {
   if (input.service_type === 'one_way') {
     lines.push({ label: 'Base Rate', amount: effective_trip_fee });
   } else if (input.service_type === 'round_trip') {
-    if (input.apply_base_to_return_leg) {
+    if (applyBaseToReturnLeg) {
       lines.push({ label: 'Base Rate (initial leg)', amount: effective_trip_fee });
-      lines.push({ label: 'Base Rate (return leg)', amount: effective_trip_fee, note: 'TODO_PERCY: master doc says return leg is $0; this matches JD sample quote' });
+      lines.push({ label: 'Base Rate (return leg)', amount: effective_trip_fee });
     } else {
       lines.push({ label: 'Base Rate (initial leg only)', amount: effective_trip_fee });
     }

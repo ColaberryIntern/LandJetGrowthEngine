@@ -92,11 +92,17 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: 57/57 tests passing (44 pricing + 13 parser); Percy notified by email
   - Notes: JD round-trip base rate (initial leg only vs both legs) still open; `apply_base_to_return_leg` flag in code so behavior can flip without code change
 
-- [x] Wire pricing engine into Inbound page (no commit yet)
+- [x] Wire pricing engine into Inbound page (commit bbfa989)
   - Date: 2026-05-06
   - What changed: New `src/services/inboundQuoteEngine.ts` orchestrates parser -> market detection -> Iowa-stop extraction -> `calculateQuote()`. `inboundLeadService.generateQuoteResponse()` now does a deterministic pricing pre-pass; LLM is fed real numbers in Lorie's voice when the email parses, falls back to legacy generic prompt otherwise. KC inbound returns `pricing_mode='forward_only'` with internal forward instructions.
   - Verification: 98/98 unit tests passing (44 pricing + 13 parser + 41 inbound engine); `tsc --noEmit` clean
   - Notes: Mileage detection deferred -- non-flat-rate trips price with `passenger_miles=0` and concierge confirms before send. Distance Matrix integration is a follow-up. No frontend changes this iteration.
+
+- [x] JD round-trip base rate -- both legs (Percy confirmed 2026-05-07)
+  - Date: 2026-05-07
+  - What changed: `CustomerOverride.apply_base_to_return_leg` field added; `jd_employee` and `jd_shuttle` default to `true`. Resolution order in `calculateQuote()`: explicit input flag > customer override > master doc default. Standard/Lockton/Investor/LJ Member round-trips still bill base on initial leg only (open question for Lorie at next concierge call).
+  - Verification: 102/102 unit tests passing (4 new JD round-trip tests); `tsc --noEmit` clean
+  - Notes: Percy's reply was JD-specific ("it's should be both legs"). Whether the rule extends to non-JD round-trips is an open question for the next concierge call.
 
 ---
 
