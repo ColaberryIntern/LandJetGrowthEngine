@@ -32,8 +32,9 @@ import {
   TripStop,
   QuoteOutput,
 } from './landjetPricing';
+import { searchFaqs, FaqMatch } from './landjetFaqService';
 
-export type InboundProcessMode = 'priced' | 'forward_only' | 'manual';
+export type InboundProcessMode = 'priced' | 'forward_only' | 'faq' | 'manual';
 
 export interface InboundProcessResult {
   mode: InboundProcessMode;
@@ -42,6 +43,7 @@ export interface InboundProcessResult {
   quote?: QuoteOutput;           // present for 'priced'
   forward_to?: string[];         // present for 'forward_only'
   forward_reason?: string;       // present for 'forward_only'
+  faq_matches?: FaqMatch[];      // present for 'faq' (top matched FAQ entries)
   manual_reason?: string;        // present for 'manual' (e.g., 'not_bookrides', 'unknown_market')
 }
 
@@ -171,6 +173,15 @@ export function mapServiceType(bookRidesType?: string): ServiceType {
 export function processInboundEmail(emailBody: string, senderEmail?: string): InboundProcessResult {
   // Step 1: is this a BookRides email at all?
   if (!isBookRidesEmail(emailBody)) {
+    // Try FAQ pre-pass before falling through to manual.
+    // Threshold of 0.35 catches typical FAQ-style questions ("how is conversation
+    // kept confidential", "what is your cancellation policy") without firing on
+    // generic greetings or trip availability questions. The LLM gets the matched
+    // FAQ entries and can still decide they aren't relevant.
+    const faqMatches = searchFaqs(emailBody, { limit: 3, threshold: 0.35 });
+    if (faqMatches.length > 0) {
+      return { mode: 'faq', faq_matches: faqMatches };
+    }
     return { mode: 'manual', manual_reason: 'not_bookrides' };
   }
 

@@ -220,10 +220,24 @@ export default function InboundPage() {
                   </p>
                 </div>
               )}
+              {draftMeta?.pricing_mode === 'faq' && draftMeta.faq_matches && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-blue-700">Matched FAQ knowledge base</div>
+                  <ul className="mt-2 space-y-1">
+                    {draftMeta.faq_matches.map((m, idx) => (
+                      <li key={idx} className="text-xs text-blue-900">
+                        <span className="font-medium">Q:</span> {m.question}
+                        <span className="ml-2 text-blue-600">({(m.score * 100).toFixed(0)}% match)</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-blue-700">AI answer is grounded in these FAQ entries; verify before sending.</p>
+                </div>
+              )}
               {draftMeta?.pricing_mode === 'manual' && (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
                   <div className="text-xs font-semibold uppercase tracking-wider text-gray-600">Manual draft</div>
-                  <p className="mt-1 text-xs text-gray-600">No structured pricing detected. AI drafted a generic response; concierge to review and add quote details.</p>
+                  <p className="mt-1 text-xs text-gray-600">No structured pricing or FAQ match detected. AI drafted a generic response; concierge to review and add details.</p>
                 </div>
               )}
 

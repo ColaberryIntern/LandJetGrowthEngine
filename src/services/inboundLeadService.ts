@@ -3,6 +3,7 @@ import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine';
 import { QuoteOutput } from './landjetPricing';
+import { FaqMatch } from './landjetFaqService';
 
 export interface QuoteRequest {
   lead_id?: number;
@@ -22,7 +23,7 @@ export interface QuoteResponse {
   body: string;
   lead_id: number | null;
   // Pricing engine metadata (populated when the inbound matched a BookRides email)
-  pricing_mode?: 'priced' | 'forward_only' | 'manual';
+  pricing_mode?: 'priced' | 'forward_only' | 'faq' | 'manual';
   market?: string;
   forward_to?: string[];
   forward_reason?: string;
@@ -33,6 +34,7 @@ export interface QuoteResponse {
     warnings: string[];
     approvals_needed: string[];
   };
+  faq_matches?: Array<{ question: string; answer: string; score: number }>;
 }
 
 /**
@@ -131,6 +133,13 @@ export async function generateQuoteResponse(request: QuoteRequest): Promise<Quot
     if (pricing.mode === 'priced' && pricing.quote) {
       result.quote_summary = summarizeQuote(pricing.quote);
     }
+    if (pricing.mode === 'faq' && pricing.faq_matches) {
+      result.faq_matches = pricing.faq_matches.map(m => ({
+        question: m.entry.question,
+        answer: m.entry.answer,
+        score: m.score,
+      }));
+    }
     return result;
   } catch (error) {
     recordAgentRun('quote_generator', undefined, 'failed', (error as Error).message).catch(() => {});
@@ -150,6 +159,20 @@ function buildSystemPrompt(pricing: InboundProcessResult): string {
 Your job: write a brief, professional forwarding note to send to the customer letting them know their request has been received and routed to the local Kansas City team for a custom quote. Do NOT include any pricing. Do NOT mention internal tooling.
 
 Return JSON with "subject" and "body" fields only. Plain text body, no HTML. Sign off as the LandJet Reservations Team.`;
+  }
+
+  if (pricing.mode === 'faq') {
+    return `You are answering a FAQ-style inquiry as the LandJet Reservations team (Lorie's voice -- warm, concierge style, never pushy). You will be given the customer's question AND the matching FAQ entries from the LandJet knowledge base.
+
+Your job:
+- Answer the customer's question directly using the facts in the matched FAQ(s).
+- Use the EXACT facts from the FAQ -- do not invent details, do not contradict, do not add policies that aren't there.
+- If multiple FAQs are relevant, weave them together in plain prose.
+- Sound like a person, not a script. No "thank you for reaching out" filler.
+- Keep it under 150 words.
+- Sign off as the LandJet Reservations Team.
+
+Return JSON with "subject" and "body" fields only. Plain text body, no HTML.`;
   }
 
   if (pricing.mode === 'priced') {
@@ -216,6 +239,16 @@ function buildPromptContext(request: QuoteRequest, pricing: InboundProcessResult
     parts.push(`Pickup: ${pricing.trip.pickup_address}`);
     parts.push(`Dropoff: ${pricing.trip.dropoff_address}`);
     parts.push(`Forward to: ${pricing.forward_to?.join(', ')}`);
+  } else if (pricing.mode === 'faq' && pricing.faq_matches?.length) {
+    parts.push('');
+    parts.push("=== CUSTOMER'S QUESTION ===");
+    parts.push(request.message || '(no message body)');
+    parts.push('');
+    parts.push('=== MATCHED FAQ ENTRIES (use these facts; do not invent) ===');
+    pricing.faq_matches.forEach((m, i) => {
+      parts.push(`[${i + 1}] Q: ${m.entry.question}`);
+      parts.push(`    A: ${m.entry.answer}`);
+    });
   } else {
     if (request.message) parts.push(`Their message: "${request.message}"`);
     if (request.service_type) parts.push(`Service requested: ${request.service_type}`);

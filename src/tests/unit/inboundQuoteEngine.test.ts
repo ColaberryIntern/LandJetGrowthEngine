@@ -271,8 +271,40 @@ describe('Inbound Quote Engine', () => {
     });
   });
 
+  describe('processInboundEmail (FAQ mode)', () => {
+    it('returns faq mode for a clear FAQ-style cancellation question', () => {
+      const result = processInboundEmail(
+        'Hi, what is your cancellation policy if I need to cancel my trip? Thanks.'
+      );
+      expect(result.mode).toBe('faq');
+      expect(result.faq_matches).toBeDefined();
+      expect(result.faq_matches!.length).toBeGreaterThan(0);
+      expect(result.faq_matches![0].entry.question.toLowerCase()).toContain('cancel');
+    });
+
+    it('returns faq mode for an overnight stay question', () => {
+      const result = processInboundEmail('Can I stay overnight on a LandJet trip?');
+      expect(result.mode).toBe('faq');
+      expect(result.faq_matches![0].entry.question.toLowerCase()).toContain('overnight');
+    });
+
+    it('returns faq mode for a confidentiality question', () => {
+      const result = processInboundEmail(
+        'How is conversation kept confidential during my trip? Are pilots trained on confidentiality?'
+      );
+      expect(result.mode).toBe('faq');
+      expect(result.faq_matches![0].entry.question.toLowerCase()).toContain('confidentially');
+    });
+
+    it('does NOT return faq mode for a non-FAQ availability question (falls through to manual)', () => {
+      const result = processInboundEmail(NON_BOOKRIDES);
+      expect(result.mode).toBe('manual');
+      expect(result.manual_reason).toBe('not_bookrides');
+    });
+  });
+
   describe('processInboundEmail (failure paths)', () => {
-    it('returns manual mode for non-BookRides email', () => {
+    it('returns manual mode for non-BookRides non-FAQ email', () => {
       const result = processInboundEmail(NON_BOOKRIDES);
       expect(result.mode).toBe('manual');
       expect(result.manual_reason).toBe('not_bookrides');

@@ -290,15 +290,22 @@ export interface QuoteSummary {
   approvals_needed: string[];
 }
 
+export interface FaqMatchSummary {
+  question: string;
+  answer: string;
+  score: number;
+}
+
 export interface QuoteResponseBody {
   subject: string;
   body: string;
   lead_id: number | null;
-  pricing_mode?: 'priced' | 'forward_only' | 'manual';
+  pricing_mode?: 'priced' | 'forward_only' | 'faq' | 'manual';
   market?: string;
   forward_to?: string[];
   forward_reason?: string;
   quote_summary?: QuoteSummary;
+  faq_matches?: FaqMatchSummary[];
 }
 
 export function generateQuoteResponse(data: { name: string; email: string; company?: string; message?: string; service_type?: string; pickup_city?: string; dropoff_city?: string; passengers?: number; date?: string }) {
