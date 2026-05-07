@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   scanInboundInquiries, generateQuoteResponse, sendInboundResponse, login,
-  type InboundInquiry,
+  type InboundInquiry, type QuoteResponseBody,
 } from '@/lib/api';
 
 async function ensureAuth() {
@@ -39,6 +39,7 @@ export default function InboundPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftSubject, setDraftSubject] = useState('');
   const [draftBody, setDraftBody] = useState('');
+  const [draftMeta, setDraftMeta] = useState<QuoteResponseBody | null>(null);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<Set<string>>(new Set());
@@ -70,6 +71,7 @@ export default function InboundPage() {
       });
       setDraftSubject(res.subject);
       setDraftBody(res.body);
+      setDraftMeta(res);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -81,11 +83,19 @@ export default function InboundPage() {
     if (!inquiry) return;
     setSending(true);
     try {
-      await sendInboundResponse(inquiry.from_email, draftSubject, draftBody);
+      // Forward-only mode (KC): send to forward_to recipients instead of original sender
+      if (draftMeta?.pricing_mode === 'forward_only' && draftMeta.forward_to?.length) {
+        for (const recipient of draftMeta.forward_to) {
+          await sendInboundResponse(recipient, draftSubject, draftBody);
+        }
+      } else {
+        await sendInboundResponse(inquiry.from_email, draftSubject, draftBody);
+      }
       setSent(prev => new Set([...prev, inquiry.gmail_id]));
       setSelectedId(null);
       setDraftSubject('');
       setDraftBody('');
+      setDraftMeta(null);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -172,10 +182,59 @@ export default function InboundPage() {
             </div>
           ) : (
             <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+              {/* Pricing engine status banner */}
+              {draftMeta?.pricing_mode === 'priced' && draftMeta.quote_summary && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Auto-priced by engine</span>
+                    <span className="text-xs text-emerald-600">{draftMeta.market?.replace(/_/g, ' ')} • {draftMeta.quote_summary.customer_category.replace(/_/g, ' ')}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-xs text-emerald-600">Subtotal</span>
+                      <div className="font-semibold text-emerald-900">${draftMeta.quote_summary.subtotal.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <span className="text-xs text-emerald-600">Grand Total</span>
+                      <div className="font-semibold text-emerald-900">${draftMeta.quote_summary.grand_total.toFixed(2)}</div>
+                    </div>
+                  </div>
+                  {draftMeta.quote_summary.warnings.length > 0 && (
+                    <div className="mt-2 text-xs text-amber-700">
+                      <span className="font-medium">Warnings:</span> {draftMeta.quote_summary.warnings.join('; ')}
+                    </div>
+                  )}
+                  {draftMeta.quote_summary.approvals_needed.length > 0 && (
+                    <div className="mt-1 text-xs text-rose-700">
+                      <span className="font-medium">Needs approval:</span> {draftMeta.quote_summary.approvals_needed.join('; ')}
+                    </div>
+                  )}
+                </div>
+              )}
+              {draftMeta?.pricing_mode === 'forward_only' && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-amber-700">Forward to local team</div>
+                  <p className="mt-1 text-sm text-amber-900">{draftMeta.forward_reason}</p>
+                  <p className="mt-2 text-xs text-amber-700">
+                    <span className="font-medium">Sending to:</span> {draftMeta.forward_to?.join(', ')}
+                  </p>
+                </div>
+              )}
+              {draftMeta?.pricing_mode === 'manual' && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-600">Manual draft</div>
+                  <p className="mt-1 text-xs text-gray-600">No structured pricing detected. AI drafted a generic response; concierge to review and add quote details.</p>
+                </div>
+              )}
+
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs text-gray-400">To</label>
-                  <span className="text-xs text-gray-500">{selected.from_email}</span>
+                  <span className="text-xs text-gray-500">
+                    {draftMeta?.pricing_mode === 'forward_only' && draftMeta.forward_to?.length
+                      ? draftMeta.forward_to.join(', ')
+                      : selected.from_email}
+                  </span>
                 </div>
               </div>
               <div>
@@ -192,18 +251,23 @@ export default function InboundPage() {
                 <textarea
                   value={draftBody}
                   onChange={e => setDraftBody(e.target.value)}
-                  rows={8}
+                  rows={10}
                   className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 focus:border-gray-400 focus:outline-none resize-y"
                 />
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                <button onClick={() => { setSelectedId(null); setDraftSubject(''); setDraftBody(''); }}
+                <button onClick={() => { setSelectedId(null); setDraftSubject(''); setDraftBody(''); setDraftMeta(null); }}
                   className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
                   Cancel
                 </button>
                 <button onClick={handleSend} disabled={sending || !draftSubject || !draftBody}
-                  className="rounded-md bg-gray-900 px-5 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
-                  {sending ? 'Sending...' : 'Send Response'}
+                  className={`rounded-md px-5 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+                    draftMeta?.pricing_mode === 'forward_only'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-gray-900 hover:bg-gray-800'
+                  }`}>
+                  {sending ? 'Sending...' :
+                    draftMeta?.pricing_mode === 'forward_only' ? 'Forward to Local Team' : 'Send Response'}
                 </button>
               </div>
               <div className="border-t border-gray-100 pt-3">

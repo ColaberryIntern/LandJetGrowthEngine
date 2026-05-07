@@ -282,8 +282,27 @@ export function scanInboundInquiries(hours?: number) {
   return request<{ inquiries: InboundInquiry[]; total: number }>(`/admin/outreach/inbound/scan${hours ? '?hours=' + hours : ''}`);
 }
 
+export interface QuoteSummary {
+  subtotal: number;
+  grand_total: number;
+  customer_category: string;
+  warnings: string[];
+  approvals_needed: string[];
+}
+
+export interface QuoteResponseBody {
+  subject: string;
+  body: string;
+  lead_id: number | null;
+  pricing_mode?: 'priced' | 'forward_only' | 'manual';
+  market?: string;
+  forward_to?: string[];
+  forward_reason?: string;
+  quote_summary?: QuoteSummary;
+}
+
 export function generateQuoteResponse(data: { name: string; email: string; company?: string; message?: string; service_type?: string; pickup_city?: string; dropoff_city?: string; passengers?: number; date?: string }) {
-  return request<{ subject: string; body: string; lead_id: number | null }>('/admin/outreach/inbound/quote', {
+  return request<QuoteResponseBody>('/admin/outreach/inbound/quote', {
     method: 'POST',
     body: JSON.stringify(data),
   });

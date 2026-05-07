@@ -104,6 +104,12 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: 102/102 unit tests passing (4 new JD round-trip tests); `tsc --noEmit` clean
   - Notes: Percy's reply was JD-specific ("it's should be both legs"). Whether the rule extends to non-JD round-trips is an open question for the next concierge call.
 
+- [x] Inbound page UI signals from pricing engine
+  - Date: 2026-05-07
+  - What changed: `frontend/lib/api.ts` exports `QuoteResponseBody` (with `pricing_mode`, `market`, `forward_to`, `forward_reason`, `quote_summary`). Inbound page now renders three banners: green "auto-priced by engine" with subtotal/grand total/customer category/warnings/approvals; amber "forward to local team" for KC with recipient list; gray "manual draft" fallback. Send button label and color shift to "Forward to Local Team" (amber) for KC trips, and the KC send loops through `forward_to` recipients (typically holly + scott) instead of the original sender.
+  - Verification: `tsc --noEmit` clean (frontend); browser test deferred until next deploy.
+  - Notes: No backend changes needed -- engine fields were already in the API response. Only UI consumed them this round.
+
 ---
 
 ## Key Decisions & Context
