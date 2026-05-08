@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandJet Growth Engine -- Update for Ryan -- May 8, 2026</title>
+<style>
+  body {
+    margin: 0;
+    padding: 32px 16px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #222222;
+    background-color: #f5f7fa;
+  }
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a365d 0%, #2b6cb0 100%);
+    color: #ffffff;
+    padding: 28px 32px;
+  }
+  .header h1 {
+    margin: 0 0 6px 0;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+  }
+  .header .subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255,255,255,0.85);
+  }
+  .body {
+    padding: 28px 32px;
+  }
+  h2 {
+    font-size: 17px;
+    font-weight: 600;
+    color: #1a365d;
+    margin: 28px 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  h2:first-of-type {
+    margin-top: 0;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2d3748;
+    margin: 18px 0 6px 0;
+  }
+  p {
+    margin: 0 0 12px 0;
+  }
+  .callout {
+    border-left: 4px solid #2b6cb0;
+    background-color: #ebf8ff;
+    padding: 14px 18px;
+    margin: 16px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .callout strong {
+    color: #1a365d;
+  }
+  .button-row {
+    display: table;
+    width: 100%;
+    margin: 14px 0;
+    border-collapse: separate;
+    border-spacing: 8px 0;
+  }
+  .button-row > div {
+    display: table-cell;
+    width: 33.33%;
+    padding: 14px 12px;
+    border-radius: 6px;
+    text-align: center;
+    vertical-align: top;
+  }
+  .btn-skip   { background-color: #f7fafc; border: 1px solid #e2e8f0; }
+  .btn-remove { background-color: #fffbeb; border: 1px solid #fde68a; }
+  .btn-block  { background-color: #fff1f2; border: 1px solid #fecdd3; }
+  .button-row .label { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .btn-skip .label   { color: #4a5568; }
+  .btn-remove .label { color: #92400e; }
+  .btn-block .label  { color: #9f1239; }
+  .button-row .desc { font-size: 12px; color: #718096; line-height: 1.45; }
+  ol {
+    padding-left: 22px;
+    margin: 10px 0;
+  }
+  ol li {
+    margin-bottom: 8px;
+  }
+  ul {
+    padding-left: 22px;
+    margin: 10px 0;
+  }
+  ul li {
+    margin-bottom: 6px;
+  }
+  .principle {
+    background-color: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 10px 0;
+  }
+  .principle strong {
+    color: #1a365d;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .footer {
+    padding: 22px 32px;
+    background-color: #f7fafc;
+    border-top: 1px solid #e2e8f0;
+    font-size: 12px;
+    color: #718096;
+  }
+  .footer p {
+    margin: 0 0 6px 0;
+  }
+  .checklist {
+    background-color: #f0fff4;
+    border: 1px solid #c6f6d5;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  .checklist strong { color: #22543d; }
+  .checklist ul { margin: 8px 0 0 0; }
+  .checklist li { color: #2d3748; }
+  code {
+    background-color: #edf2f7;
+    color: #2d3748;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="header">
+    <h1>Outreach Queue: Remove + Block</h1>
+    <p class="subtitle">LandJet Growth Engine update &middot; May 8, 2026 &middot; for Ryan Landry</p>
+  </div>
+
+  <div class="body">
+
+    <p>Ryan,</p>
+
+    <p>You flagged that hitting Skip on a lead wasn't getting them out of the queue. You were right. Skip only defers someone for 24 hours -- by the next day they're back. There was no permanent Remove option until today. Now there is.</p>
+
+    <h2>1. The three buttons, side by side</h2>
+
+    <p>You'll see them on every card in the Outreach queue, next to the Approve &amp; Send button.</p>
+
+    <div class="button-row">
+      <div class="btn-skip">
+        <div class="label">Skip</div>
+        <div class="desc">Defers 24 hours.<br>They show up tomorrow.</div>
+      </div>
+      <div class="btn-remove">
+        <div class="label">Remove</div>
+        <div class="desc">Out of THIS campaign permanently.<br>Lead stays in DB, can be re-assigned.</div>
+      </div>
+      <div class="btn-block">
+        <div class="label">Block</div>
+        <div class="desc">Out of ALL outreach.<br>Added to do-not-contact list.</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Both new buttons confirm before they do anything.</strong> You'll get a popup explaining what's about to happen so you can't blow someone away by accident.
+    </div>
+
+    <h2>2. When to use which</h2>
+
+    <h3>Skip (existing behavior)</h3>
+    <ul>
+      <li>You're not sure yet. Want to revisit them tomorrow.</li>
+      <li>They're traveling, or you just emailed them about something else.</li>
+      <li>Quick "not today" -- the 24-hour timer takes care of it.</li>
+    </ul>
+
+    <h3>Remove (new -- amber button)</h3>
+    <ul>
+      <li>The lead is in the wrong campaign (e.g., put in Manufacturing but they're really Banking).</li>
+      <li>Their fit isn't right for THIS campaign's messaging, but they're still a real prospect.</li>
+      <li>You want them gone from this queue but you might want to enroll them somewhere else later.</li>
+    </ul>
+
+    <h3>Block (new -- red button)</h3>
+    <ul>
+      <li>Spam or wrong-person enrollment. They should never get an email from us, period.</li>
+      <li>Unsubscribe request. They asked us not to contact them.</li>
+      <li>Personal connection or someone we shouldn't ever pitch.</li>
+    </ul>
+
+    <h2>3. How to verify it's working for you</h2>
+
+    <div class="checklist">
+      <strong>5-minute test (after I tell you it's deployed):</strong>
+      <ul>
+        <li>Open <code>/outreach</code></li>
+        <li>Pick the lead that kept reappearing this week</li>
+        <li>Click <strong>Remove</strong>, confirm the popup</li>
+        <li>Refresh the page -- they should be gone</li>
+        <li>Tomorrow, refresh again -- they should still be gone</li>
+        <li>If you ever change your mind, you can re-assign them on the Leads page</li>
+      </ul>
+    </div>
+
+    <h2>4. How we work going forward</h2>
+
+    <p>For every meaningful change to the Growth Engine, you'll get a one-pager like this. The structure is the same every time:</p>
+
+    <div class="principle">
+      <strong>What changed</strong>
+      One sentence on the actual problem we fixed -- in your words, not ours.
+    </div>
+
+    <div class="principle">
+      <strong>How to use it</strong>
+      Where the new behavior lives in the UI, side-by-side with anything that was already there, so you don't have to hunt for it.
+    </div>
+
+    <div class="principle">
+      <strong>How to verify</strong>
+      A short checklist you can run yourself in 5 minutes to make sure it does what we said it does. Trust but verify.
+    </div>
+
+    <div class="principle">
+      <strong>What we changed under the hood</strong>
+      Plain-language description of the engineering, so nothing is a black box. You can ask "what does this actually do" any time and we'll answer in code, not vibes.
+    </div>
+
+    <p>Behind the scenes the rules we follow are written down in our <code>CLAUDE.md</code> operating contract -- production-grade defaults, deterministic logic, idempotent operations, automated tests, structured logs, no destructive shortcuts. The short version: <strong>boring, predictable, auditable</strong>. That's what you should expect from us as we keep building.</p>
+
+    <h2>5. What's next</h2>
+
+    <ul>
+      <li>This update goes live as soon as I deploy it (later today). I'll ping you when it's done.</li>
+      <li>Once you've verified Remove + Block work, we'll keep going on the rest of the punch list -- cold outreach campaigns, email validation layer, and the Reservations AI engine for Percy's side.</li>
+      <li>If you find anything else that's "this should obviously work" but doesn't -- text or email me, same way you flagged this one. That's the fastest path to fixing it.</li>
+    </ul>
+
+    <p>Have a great weekend.</p>
+
+    <p>Ali</p>
+
+  </div>
+
+  <div class="footer">
+    <p><strong>LandJet Growth Engine</strong> &middot; built and operated by Colaberry Inc.</p>
+    <p>This update covers commit <code>96ef3ed</code> on the <code>main</code> branch. Logged in <code>PROGRESS.md</code> under "Outreach Quality of Life (2026-05-08)".</p>
+  </div>
+
+</div>
+
+</body>
+</html>
