@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount } from '../../services/outreachQueryService';
+import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, removeLeadFromCampaign, blockLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount } from '../../services/outreachQueryService';
 import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
@@ -1056,6 +1056,34 @@ router.post('/:id/skip', authorize('campaigns:write'), async (req: Request, res:
     }
 
     res.json({ contact_id: lead.id, next_action_at: lead.next_action_at });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/remove', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await removeLeadFromCampaign(req.params.id as string);
+    if (!result) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    res.json({
+      contact_id: result.lead.id,
+      removed_from_campaign_id: result.previousCampaignId,
+    });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/block', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const reason = (req.body?.reason as string) || 'manual_block';
+    const result = await blockLead(req.params.id as string, reason);
+    if (!result) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    res.json({
+      contact_id: result.lead.id,
+      status: result.lead.status,
+      dnc_created: result.dncCreated,
+    });
   } catch (error) { next(error); }
 });
 

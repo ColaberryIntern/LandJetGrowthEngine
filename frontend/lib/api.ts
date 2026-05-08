@@ -421,6 +421,20 @@ export function skipOutreachContact(contactId: string) {
   );
 }
 
+export function removeOutreachContact(contactId: string) {
+  return request<{ contact_id: string; removed_from_campaign_id: string | null }>(
+    `/admin/outreach/${contactId}/remove`,
+    { method: 'POST' },
+  );
+}
+
+export function blockOutreachContact(contactId: string, reason?: string) {
+  return request<{ contact_id: string; status: string; dnc_created: boolean }>(
+    `/admin/outreach/${contactId}/block`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+  );
+}
+
 export function createStrategy(name: string, prompt: string) {
   return request<{ strategy: { id: string; name: string; prompt: string } }>('/admin/outreach/strategies', {
     method: 'POST',

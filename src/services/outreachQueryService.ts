@@ -9,6 +9,7 @@ import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { logger } from '../config/logger';
 
 // --- TTL Cache ---
 
@@ -475,6 +476,89 @@ export async function skipLead(leadId: string): Promise<Lead | null> {
 }
 
 export const skipContact = skipLead;
+
+/**
+ * Remove a lead from its current campaign permanently. The lead stays in the
+ * DB so it can be re-assigned to another campaign later. Also marks any
+ * matching campaign_leads join row as 'removed' for auditability.
+ */
+export async function removeLeadFromCampaign(leadId: string): Promise<{ lead: Lead; previousCampaignId: string | null } | null> {
+  const lead = await Lead.findByPk(parseInt(leadId, 10));
+  if (!lead) return null;
+
+  const previousCampaignId = lead.campaign_id ?? null;
+
+  if (previousCampaignId) {
+    // Mark the join row as removed (even though the queue doesn't read it, this
+    // gives us an audit trail and matches the campaign_leads.status='removed' enum).
+    try {
+      const { CampaignLead } = await import('../models/CampaignLead');
+      await CampaignLead.update(
+        { status: 'removed' },
+        { where: { lead_id: lead.id, campaign_id: previousCampaignId } },
+      );
+    } catch (e) {
+      logger.warn('Could not update campaign_leads status to removed', {
+        leadId: lead.id, error: (e as Error).message,
+      });
+    }
+  }
+
+  lead.campaign_id = null;
+  lead.next_action_at = null; // prevent stale timer in unassigned queue
+  await lead.save();
+
+  logger.info('Lead removed from campaign', { leadId: lead.id, previousCampaignId });
+  return { lead, previousCampaignId };
+}
+
+/**
+ * Block a lead from ALL future outreach. Archives the lead and adds them to
+ * the do-not-contact list. Also marks all their campaign_leads rows as removed.
+ */
+export async function blockLead(leadId: string, reason?: string): Promise<{ lead: Lead; dncCreated: boolean } | null> {
+  const lead = await Lead.findByPk(parseInt(leadId, 10));
+  if (!lead) return null;
+
+  const { DncList } = await import('../models/DncList');
+  const { CampaignLead } = await import('../models/CampaignLead');
+
+  // Archive the lead so the queue filter (status='active') excludes them
+  lead.status = 'archived';
+  lead.outreach_status = 'BLOCKED';
+  lead.next_action_at = null;
+  lead.campaign_id = null;
+  await lead.save();
+
+  // Mark every campaign_leads row for this lead as removed
+  try {
+    await CampaignLead.update(
+      { status: 'removed' },
+      { where: { lead_id: lead.id } },
+    );
+  } catch (e) {
+    logger.warn('Could not mark campaign_leads as removed during block', {
+      leadId: lead.id, error: (e as Error).message,
+    });
+  }
+
+  // Add to DNC list (idempotent: skip if already present by email)
+  let dncCreated = false;
+  if (lead.email) {
+    const existing = await DncList.findOne({ where: { email: lead.email.toLowerCase() } });
+    if (!existing) {
+      await DncList.create({
+        email: lead.email.toLowerCase(),
+        phone: lead.phone || null,
+        reason: reason || 'manual_block',
+      } as any);
+      dncCreated = true;
+    }
+  }
+
+  logger.info('Lead blocked from all outreach', { leadId: lead.id, dncCreated, reason });
+  return { lead, dncCreated };
+}
 
 // --- Test Mode Tracking ---
 

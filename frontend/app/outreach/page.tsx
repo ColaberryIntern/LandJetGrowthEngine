@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import {
-  getOutreachToday, advanceOutreachContact, skipOutreachContact,
+  getOutreachToday, advanceOutreachContact, skipOutreachContact, removeOutreachContact, blockOutreachContact,
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
   getTestSendCount, resetTestSends,
@@ -101,6 +101,26 @@ export default function OutreachPage() {
     setActing(contactId);
     try {
       await skipOutreachContact(contactId);
+      setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+    } catch (e) { setError((e as Error).message); }
+    finally { setActing(null); }
+  }
+
+  async function handleRemove(contactId: string, contactName: string) {
+    if (!window.confirm(`Remove ${contactName} from this campaign? They'll stop showing up in this queue. (You can re-assign them to another campaign later.)`)) return;
+    setActing(contactId);
+    try {
+      await removeOutreachContact(contactId);
+      setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+    } catch (e) { setError((e as Error).message); }
+    finally { setActing(null); }
+  }
+
+  async function handleBlock(contactId: string, contactName: string) {
+    if (!window.confirm(`Block ${contactName} from ALL outreach? This adds them to the do-not-contact list permanently. Use only for spam, wrong people, or unsubscribe requests.`)) return;
+    setActing(contactId);
+    try {
+      await blockOutreachContact(contactId, 'manual_block_from_outreach');
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
     } catch (e) { setError((e as Error).message); }
     finally { setActing(null); }
@@ -522,8 +542,19 @@ export default function OutreachPage() {
                   {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <button onClick={() => handleSkip(contact.contact_id)} disabled={acting === contact.contact_id}
+                  title="Skip for 24 hours -- they'll show up again tomorrow"
                   className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
                   Skip
+                </button>
+                <button onClick={() => handleRemove(contact.contact_id, contact.name)} disabled={acting === contact.contact_id}
+                  title="Remove from this campaign permanently (lead stays in DB, can be re-assigned)"
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+                  Remove
+                </button>
+                <button onClick={() => handleBlock(contact.contact_id, contact.name)} disabled={acting === contact.contact_id}
+                  title="Block from ALL outreach -- archives the lead and adds to DNC list"
+                  className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50">
+                  Block
                 </button>
                 <button onClick={() => handleAdvance(contact.contact_id)} disabled={acting === contact.contact_id}
                   className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">
