@@ -135,6 +135,19 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: backend + frontend `tsc --noEmit` clean; 123/123 unit tests still passing. Live verification deferred to deploy.
   - Notes: Skip kept as-is (24h defer for "not now") so users have three escalation levels: Skip (today) -> Remove (this campaign) -> Block (everywhere). Both new actions are reversible at the DB level.
 
+- [x] Production deploy: Remove/Block + all Reservations AI work
+  - Date: 2026-05-09
+  - What changed: SSH'd to `95.216.199.47`, stashed production-only `frontend/next.config.ts` port tweak (3000 -> 3011), pulled `e34f776`, popped stash cleanly, ran `docker compose -f docker-compose.production.yml up -d --build backend frontend`. Production jumped from `552d1e8` to `e34f776` (skipped 13 commits including all the pricing engine, FAQ classifier, Inbound UI, and Remove/Block work).
+  - Verification: `docker ps` shows landjet-backend + landjet-frontend recreated and Up; backend `/api/health` returns 200; `POST /api/admin/outreach/0/remove` returns 401 (route exists, auth gate working).
+  - Notes: Production was stale by ~3 weeks of work. From here, deploy cadence should match merge-to-main cadence so production doesn't drift.
+
+- [x] Basecamp task tracking established (rule + helper + 6 backfill todos)
+  - Date: 2026-05-09
+  - Triggered by: Ali made it a standing rule -- every stakeholder request gets a Basecamp todo with the request quoted; every shipped task gets the todo closed with explanation comment, commit SHAs, and verification.
+  - What changed: (1) Saved standing rule as feedback memory `feedback_basecamp_task_tracking.md`. (2) Built `/opt/landjet-growth-engine/scripts/basecamp-tools/helper.js` on the VPS -- pulls live token from MSSQL `CCPP.Basecamp_AuthInfo` via the `getToken()` pattern, exposes `listTodos()`, `createTodo()`, `completeTodo()`, `commentTodo()`. Uses `mssql` + `dotenv` from local node_modules. (3) Backfilled 6 todos for the recent shipped work (Percy pricing foundation, Iowa+KC rules, Inbound page wiring, JD round-trip, Inbound UI+FAQ classifier, Ryan's Remove+Block) on the LandJet Outreach Pilot Project todolist (ID 9734159722). Each todo has request-source description and a closing comment with commit SHAs + verification.
+  - Verification: All 6 todo URLs returned by the script (e.g., 9874732392 through 9874732501); each was created, commented, and marked complete in one pass.
+  - Notes: The helper lives on the VPS only for now (depends on MSSQL_* env vars in `/opt/colaberry-accelerator/.env`). To use it from a fresh shell on the VPS: `cd /opt/landjet-growth-engine/scripts/basecamp-tools && node helper.js list`. Going forward, every stakeholder request gets a todo created on intake, every ship closes it.
+
 ---
 
 ## Key Decisions & Context
