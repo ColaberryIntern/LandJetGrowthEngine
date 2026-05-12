@@ -1087,4 +1087,18 @@ router.post('/:id/block', authorize('campaigns:write'), async (req: Request, res
   } catch (error) { next(error); }
 });
 
+router.post('/bounces/process', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { processBounces } = await import('../../services/bounceProcessorService');
+    const hoursBack = req.body?.hours_back ? parseInt(req.body.hours_back, 10) : 72;
+    const limit = req.body?.limit ? parseInt(req.body.limit, 10) : 100;
+    const dryRun = req.body?.dry_run === true;
+    const result = await processBounces({ hoursBack, limit, dryRun });
+    res.json(result);
+  } catch (error) {
+    logger.error('POST /bounces/process failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 export default router;

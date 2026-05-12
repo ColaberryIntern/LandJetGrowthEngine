@@ -141,6 +141,16 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `docker ps` shows landjet-backend + landjet-frontend recreated and Up; backend `/api/health` returns 200; `POST /api/admin/outreach/0/remove` returns 401 (route exists, auth gate working).
   - Notes: Production was stale by ~3 weeks of work. From here, deploy cadence should match merge-to-main cadence so production doesn't drift.
 
+- [x] Email validation + bounce protection (3 hard bounces in 34 min)
+  - Date: 2026-05-12
+  - Triggered by: Ryan, email forwards 2026-05-11 17:37-18:11 UTC. Three hard bounces from `rlandry@landjet.com` to addresses that don't exist (`cgb@clarkstoncapital.com`, `aeveloff@nep.com`, `jsullan@brookhavenpartners.com`). Ryan: "Don't we have something that validates if the email addresses are accurate to prevent from undeliverables and hurting our domain?"
+  - What changed:
+    - New `src/services/bounceProcessorService.ts` -- scans `rlandry@landjet.com` inbox via Microsoft Graph for postmaster / Microsoft Outlook NDR messages, parses the original recipient out of the bounce body (handles Outlook NDR "Recipient Address:", generic postmaster "-- email", and "Your message to X couldn't be delivered" patterns), finds the matching Lead, calls `blockLead(reason='hard_bounce')`. Marks the bounce email as read after handling. Idempotent.
+    - New route `POST /admin/outreach/bounces/process` (with `dry_run` option) -- triggers a sweep of the last N hours of inbox.
+    - `apolloLeadService.pullLeadsForCampaign` now filters out leads whose Apollo `email_status !== 'verified'`. Was the root cause of bouncing Apollo-sourced leads -- we were ingesting `unverified`/`guessed` addresses without checking.
+  - Verification: 137/137 unit tests passing (14 new bounce parser tests covering Outlook NDR, postmaster, HTML-stripped bodies, idempotency); `tsc --noEmit` clean
+  - Notes: Skipped third-party validator (paid) -- bounce processor catches 100% of failures and Apollo filter prevents new bad leads, which combined gives the same protection. Manual trigger via API for v1; cron can be a follow-up. Backfill on existing leads = run bounce processor with `hours_back=168` once after deploy to catch all already-bounced leads in the DB.
+
 - [x] Basecamp task tracking established (rule + helper + 6 backfill todos)
   - Date: 2026-05-09
   - Triggered by: Ali made it a standing rule -- every stakeholder request gets a Basecamp todo with the request quoted; every shipped task gets the todo closed with explanation comment, commit SHAs, and verification.

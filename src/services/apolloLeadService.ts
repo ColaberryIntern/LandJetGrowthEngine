@@ -144,7 +144,7 @@ export async function getApolloCreditUsage(): Promise<{ used: number; limit: num
 export async function pullLeadsForCampaign(
   campaignId: string,
   targetCount: number = 50,
-): Promise<{ created: number; credits_used: number; errors: number; duplicates: number; details: string[] }> {
+): Promise<{ created: number; credits_used: number; errors: number; duplicates: number; unverified?: number; details: string[] }> {
   if (!APOLLO_KEY) throw new Error('APOLLO_API_KEY is not configured');
 
   const campaign = await Campaign.findByPk(campaignId);
@@ -160,7 +160,7 @@ export async function pullLeadsForCampaign(
   const allLeads = await Lead.findAll({ attributes: ['email'] });
   allLeads.forEach((l: any) => { if (l.email) existing.add(l.email.toLowerCase().trim()); });
 
-  const stats = { created: 0, credits_used: 0, errors: 0, duplicates: 0, details: [] as string[] };
+  const stats = { created: 0, credits_used: 0, errors: 0, duplicates: 0, unverified: 0, details: [] as string[] };
 
   // Distribute target count across markets evenly (with slight rounding)
   const totalWeight = config.markets.reduce((sum, m) => sum + (m.weight || 1), 0);
@@ -190,6 +190,17 @@ export async function pullLeadsForCampaign(
         const email = enriched?.email;
         if (!email || existing.has(email.toLowerCase().trim())) {
           stats.duplicates++;
+          continue;
+        }
+
+        // Apollo email_status filter: skip anything that isn't 'verified'.
+        // Reason: Ryan flagged 3 hard bounces in 34 minutes on 2026-05-11.
+        // Apollo emits status of 'verified' / 'unverified' / 'guessed' / 'unavailable'.
+        // Only verified is safe to send -- the others are why we were burning the domain.
+        const emailStatus = (enriched.email_status || '').toLowerCase();
+        if (emailStatus && emailStatus !== 'verified') {
+          stats.unverified += 1;
+          stats.details.push(`- skipped unverified (${emailStatus}): ${enriched.first_name} ${enriched.last_name} | ${email}`);
           continue;
         }
         existing.add(email.toLowerCase().trim());
