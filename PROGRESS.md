@@ -141,6 +141,18 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `docker ps` shows landjet-backend + landjet-frontend recreated and Up; backend `/api/health` returns 200; `POST /api/admin/outreach/0/remove` returns 401 (route exists, auth gate working).
   - Notes: Production was stale by ~3 weeks of work. From here, deploy cadence should match merge-to-main cadence so production doesn't drift.
 
+- [x] LinkedIn 300-char cap + channel-aware rewrite endpoint
+  - Date: 2026-05-14
+  - Triggered by: Ryan, screenshot 2026-05-14: a Don Reese (Investor Outreach) connection request was 500+ chars (over LinkedIn's 300 limit), and clicking "Shorter" returned "AI rewrite failed".
+  - Root cause:
+    - LinkedIn message generation in `/today` and `/swap-lead` told the AI "max 280 chars" in the prompt but never enforced the limit on output. When the AI failed silently (no logger.warn), the fallback used the raw template prompt which was ~500 chars.
+    - The `/rewrite-draft` endpoint was hardcoded for emails -- it asked the AI to "rewrite this email, return JSON with subject + body, sign off as Ryan." For a LinkedIn message with no subject, the AI produced unparseable output and returned a 5xx, surfaced to the UI as "AI rewrite failed".
+  - What changed:
+    - `/today` + `/swap-lead`: `maxChars` hoisted out of the inner try so it's in scope after the fallback; LinkedIn AI failures now `logger.warn` instead of silent catch; **hard slice to maxChars on output** regardless of source. Connect requests now bumped from 280 to 300 (LinkedIn's actual limit).
+    - `/rewrite-draft`: now accepts a `channel` param. Uses two distinct prompt templates -- email-style (subject + body + sign-off, JSON) and LinkedIn-style (raw text, no JSON, hard char cap). Better error reporting (returns upstream HTTP status when OpenAI fails).
+    - Frontend `rewriteDraft()` API client now accepts and passes `channel`. Outreach page reads `contact.channel` and forwards it to the rewrite call.
+  - Verification: backend + frontend `tsc --noEmit` clean.
+
 - [x] Ryan usage attribution: comm logs + activity widget + per-user auth
   - Date: 2026-05-14
   - Triggered by: Ali asked "how much is Ryan using the system" -- audit_logs couldn't tell us because frontend auto-logged everyone in as admin@landjet.com.

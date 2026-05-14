@@ -171,7 +171,8 @@ export default function OutreachPage() {
       if (!originalDrafts[contactId]) {
         setOriginalDrafts(prev => ({ ...prev, [contactId]: { subject: contact.draft.subject, body: contact.draft.body } }));
       }
-      const result = await rewriteDraft(String(contactId), tone, draft.subject, draft.body);
+      const channel = (contact as any).channel || 'email';
+      const result = await rewriteDraft(String(contactId), tone, draft.subject, draft.body, channel);
       setDraftEdits(prev => ({ ...prev, [contactId]: { subject: result.subject, body: result.body } }));
     } catch (e) { setError((e as Error).message); }
     finally { setRewriting(null); }

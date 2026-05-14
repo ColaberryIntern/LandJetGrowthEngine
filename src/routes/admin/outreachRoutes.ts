@@ -711,9 +711,9 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
         const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
         // Use AI to generate the actual clean message
         const apiKey = process.env.OPENAI_API_KEY;
+        const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
         if (apiKey) {
           try {
-            const maxChars = channel === 'linkedin_connect' ? 280 : 500;
             const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -741,12 +741,27 @@ CRITICAL RULES:
               const aiData = (await aiResp.json()) as any;
               const msg = (aiData.choices?.[0]?.message?.content || '').trim();
               if (msg) linkedinMessage = msg;
+            } else {
+              const errBody = await aiResp.text().catch(() => '');
+              logger.warn('LinkedIn AI generation failed (will fall back to template)', {
+                channel, status: aiResp.status, error: errBody.slice(0, 200),
+              });
             }
-          } catch {}
+          } catch (e) {
+            logger.warn('LinkedIn AI generation threw (will fall back to template)', {
+              channel, error: (e as Error).message,
+            });
+          }
         }
         // Fallback: use interpolated prompt stripped of instruction text
         if (!linkedinMessage) {
           linkedinMessage = interpolatedPrompt;
+        }
+        // Hard-cap: LinkedIn enforces 300 chars on connection request notes.
+        // Slice regardless of source so long templates / AI overruns don't
+        // produce messages LinkedIn will reject.
+        if (linkedinMessage.length > maxChars) {
+          linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
         }
       }
 
@@ -814,9 +829,9 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
     if (channel.startsWith('linkedin') && stepInfo?.prompt) {
       const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
       const apiKey = process.env.OPENAI_API_KEY;
+      const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
       if (apiKey) {
         try {
-          const maxChars = channel === 'linkedin_connect' ? 280 : 500;
           const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -834,10 +849,24 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
             const aiData = (await aiResp.json()) as any;
             const msg = (aiData.choices?.[0]?.message?.content || '').trim();
             if (msg) linkedinMessage = msg;
+          } else {
+            const errBody = await aiResp.text().catch(() => '');
+            logger.warn('LinkedIn AI generation failed in /swap-lead (will fall back)', {
+              channel, status: aiResp.status, error: errBody.slice(0, 200),
+            });
           }
-        } catch {}
+        } catch (e) {
+          logger.warn('LinkedIn AI generation threw in /swap-lead (will fall back)', {
+            channel, error: (e as Error).message,
+          });
+        }
       }
       if (!linkedinMessage) linkedinMessage = interpolatedPrompt;
+      // Hard-cap to LinkedIn's per-channel limit so long templates / AI overruns
+      // don't slip through. Connection requests = 300 chars per LinkedIn.
+      if (linkedinMessage.length > maxChars) {
+        linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
+      }
     }
 
     const draft = channel === 'email'
@@ -874,7 +903,7 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
 
 router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { lead_id, tone, current_subject, current_body } = req.body;
+    const { lead_id, tone, current_subject, current_body, channel: rawChannel } = req.body;
     if (!lead_id) return res.status(400).json({ error: 'lead_id is required' });
     if (!tone || !['shorter', 'personal', 'direct'].includes(tone)) {
       return res.status(400).json({ error: 'tone must be shorter, personal, or direct' });
@@ -883,17 +912,25 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
     const lead = await Lead.findByPk(lead_id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const toneInstructions: Record<string, string> = {
-      shorter: 'Rewrite this email to be significantly shorter and more concise. Cut it to 3-4 sentences max. Keep the core ask but remove all filler.',
-      personal: 'Rewrite this email with a warmer, more personal tone. Reference a genuine connection or shared interest. Make it feel like a personal note, not a business email.',
-      direct: 'Rewrite this email to be more direct and action-oriented. Lead with the value proposition. End with a specific, clear call-to-action with a suggested time.',
-    };
-
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'OpenAI API key not configured' });
 
     const settings = await getOutreachSettings();
     const senderFirst = settings.sender_name.split(' ')[0];
+    const channel: string = typeof rawChannel === 'string' ? rawChannel : 'email';
+    const isLinkedIn = channel.startsWith('linkedin');
+    const linkedInMaxChars = channel === 'linkedin_connect' ? 300 : 1500;
+
+    // Channel-aware prompt: emails get subject + body + sign-off; LinkedIn
+    // messages have NO subject, NO sign-off line, and a hard char cap so the
+    // rewrite respects LinkedIn's 300-char connection-note limit.
+    const systemPrompt = isLinkedIn
+      ? `You are rewriting a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'message'} as ${settings.sender_name}, ${settings.sender_role}. ${LINKEDIN_TONE_INSTRUCTIONS[tone]} Return ONLY the rewritten message text -- no JSON, no labels, no quotation marks, no greeting/sign-off boilerplate beyond what's natural in a LinkedIn note. The message MUST be under ${linkedInMaxChars} characters. The recipient is ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}.`
+      : `You are rewriting an outreach email as ${settings.sender_name}, ${settings.sender_role}. ${EMAIL_TONE_INSTRUCTIONS[tone]} Return JSON with "subject" and "body" fields only. Sign off as ${senderFirst}. Plain text, no HTML.`;
+
+    const userPrompt = isLinkedIn
+      ? `Current message:\n${current_body || ''}`
+      : `Current subject: ${current_subject || 'Quick note'}\n\nCurrent body:\n${current_body || ''}\n\nRecipient: ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}`;
 
     const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -901,26 +938,39 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
       body: JSON.stringify({
         model: process.env.AI_MODEL || 'gpt-4o',
         messages: [
-          { role: 'system', content: `You are rewriting an outreach email as ${settings.sender_name}, ${settings.sender_role}. ${toneInstructions[tone]} Return JSON with "subject" and "body" fields only. Sign off as ${senderFirst}. Plain text, no HTML.` },
-          { role: 'user', content: `Current subject: ${current_subject || 'Quick note'}\n\nCurrent body:\n${current_body || ''}\n\nRecipient: ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}` },
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 512,
+        max_tokens: isLinkedIn ? 256 : 512,
       }),
     });
 
-    if (!aiResp.ok) return res.status(500).json({ error: 'AI rewrite failed' });
+    if (!aiResp.ok) {
+      const errBody = await aiResp.text().catch(() => '');
+      logger.error('AI rewrite upstream failure', { tone, channel, status: aiResp.status, error: errBody.slice(0, 200) });
+      return res.status(502).json({ error: `AI rewrite failed (upstream ${aiResp.status})` });
+    }
 
     const data = (await aiResp.json()) as any;
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
+    if (isLinkedIn) {
+      // LinkedIn rewrites return raw text (no JSON). Slice to channel cap so
+      // any AI overrun gets enforced.
+      let body = cleaned;
+      if (body.length > linkedInMaxChars) body = body.slice(0, linkedInMaxChars).trim();
+      recordAgentRun('draft_rewriter', { tone, channel }).catch(() => {});
+      return res.json({ subject: current_subject || '', body, source: 'ai' });
+    }
+
     try {
       const parsed = JSON.parse(cleaned);
-      recordAgentRun('draft_rewriter', { tone }).catch(() => {});
+      recordAgentRun('draft_rewriter', { tone, channel }).catch(() => {});
       res.json({ subject: parsed.subject || current_subject, body: parsed.body || current_body, source: 'ai' });
     } catch {
-      recordAgentRun('draft_rewriter', { tone }).catch(() => {});
+      recordAgentRun('draft_rewriter', { tone, channel }).catch(() => {});
       res.json({ subject: current_subject, body: cleaned, source: 'ai' });
     }
   } catch (error) {
@@ -928,6 +978,18 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
     next(error);
   }
 });
+
+const EMAIL_TONE_INSTRUCTIONS: Record<string, string> = {
+  shorter: 'Rewrite this email to be significantly shorter and more concise. Cut it to 3-4 sentences max. Keep the core ask but remove all filler.',
+  personal: 'Rewrite this email with a warmer, more personal tone. Reference a genuine connection or shared interest. Make it feel like a personal note, not a business email.',
+  direct: 'Rewrite this email to be more direct and action-oriented. Lead with the value proposition. End with a specific, clear call-to-action with a suggested time.',
+};
+
+const LINKEDIN_TONE_INSTRUCTIONS: Record<string, string> = {
+  shorter: 'Rewrite this LinkedIn note to be significantly shorter. Cut filler ruthlessly while keeping the hook and the ask. Aim for 1-2 sentences. Do not exceed the character cap.',
+  personal: 'Rewrite this LinkedIn note in a warmer, more personal voice. Reference shared context if obvious from the recipient name/company. Sound like a real person, not a templated pitch.',
+  direct: 'Rewrite this LinkedIn note to be more direct. Lead with what you do and why it matters to them. End with a specific ask.',
+};
 
 // --- Test Mode ---
 

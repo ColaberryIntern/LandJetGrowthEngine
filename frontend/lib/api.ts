@@ -258,10 +258,10 @@ export function swapLead(currentLeadId: string, campaignId: string) {
   });
 }
 
-export function rewriteDraft(leadId: string, tone: 'shorter' | 'personal' | 'direct', currentSubject: string, currentBody: string) {
+export function rewriteDraft(leadId: string, tone: 'shorter' | 'personal' | 'direct', currentSubject: string, currentBody: string, channel?: string) {
   return request<{ subject: string; body: string; source: string }>('/admin/outreach/rewrite-draft', {
     method: 'POST',
-    body: JSON.stringify({ lead_id: leadId, tone, current_subject: currentSubject, current_body: currentBody }),
+    body: JSON.stringify({ lead_id: leadId, tone, current_subject: currentSubject, current_body: currentBody, channel: channel || 'email' }),
   });
 }
 
