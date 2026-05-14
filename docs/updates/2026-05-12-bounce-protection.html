@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandJet Change Log -- Bounce Protection -- May 12, 2026</title>
+</head>
+<body style="margin:0;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;background-color:#f5f7fa;">
+
+<div style="max-width:720px;margin:0 auto;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:28px 32px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">Change Log</div>
+    <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:600;letter-spacing:-0.2px;color:#ffffff;">Bounce Protection is Live</h1>
+    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.85);">LandJet Growth Engine &middot; May 12, 2026</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding:28px 32px;">
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:0 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Why this shipped</h2>
+
+    <div style="border-left:4px solid #e53e3e;background-color:#fff5f5;padding:14px 18px;margin:12px 0 16px 0;border-radius:0 6px 6px 0;">
+      <strong style="color:#9b2c2c;">Three hard bounces in 34 minutes</strong> from the Investor Outreach campaign on Monday, May 11. All three were "address doesn't exist" errors. A burst of hard bounces is the worst signal for domain reputation. The system had no validation in place.
+    </div>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">What changed</h2>
+
+    <table style="width:100%;margin:14px 0;border-collapse:separate;border-spacing:8px 0;">
+      <tr>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#f7fafc;border:1px solid #e2e8f0;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#1a365d;">Apollo verification filter <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#ecfdf5;color:#166534;">Live</span></div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">Apollo lead pulls now skip any address Apollo flags as "guessed" or "unverified." Only verified addresses enter the system. This was the root cause -- guessed emails were what bounced.</div>
+        </td>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#fffbeb;border:1px solid #fde68a;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#1a365d;">Bounce auto-Block <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#ecfdf5;color:#166534;">Live</span></div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">When a bounce notification lands in the inbox, the system reads the recipient and auto-Blocks them. Same action as the manual Block button shipped last week.</div>
+        </td>
+      </tr>
+    </table>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Addresses blocked today</h2>
+
+    <table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">
+      <thead>
+        <tr>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0;background-color:#f7fafc;color:#2d3748;font-weight:600;">Name</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0;background-color:#f7fafc;color:#2d3748;font-weight:600;">Email</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0;background-color:#f7fafc;color:#2d3748;font-weight:600;">Company</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0;background-color:#f7fafc;color:#2d3748;font-weight:600;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Claire Baenen</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#4a5568;">cgb@clarkstoncapital.com</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Clarkston Capital Partners</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#fff1f2;color:#9f1239;">Blocked</span></td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Adam Eveloff</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#4a5568;">aeveloff@nep.com</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Norwest Equity Partners</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#fff1f2;color:#9f1239;">Blocked</span></td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Jack Sullan</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#4a5568;">jsullan@brookhavenpartners.com</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Brookhaven Capital Partners</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#fff1f2;color:#9f1239;">Blocked</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="margin:8px 0 12px 0;font-size:13px;color:#4a5568;">All three are archived and on the do-not-contact list. They will never appear in any campaign queue again.</p>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">How to verify</h2>
+
+    <div style="background-color:#f0fff4;border:1px solid #c6f6d5;border-radius:6px;padding:14px 18px;margin:16px 0;">
+      <ol style="padding-left:22px;margin:0;">
+        <li style="margin-bottom:8px;">Open the Outreach page &mdash; the three names above should not appear in any queue.</li>
+        <li style="margin-bottom:8px;">Pull from Apollo on a cold campaign &mdash; the response will tell you if any were skipped as unverified.</li>
+        <li style="margin-bottom:0;">Check the do-not-contact list on the System page &mdash; those three names will be there.</li>
+      </ol>
+    </div>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Known dependency</h2>
+
+    <p style="margin:0 0 12px 0;">Bounce auto-Block reads NDRs from the rlandry@landjet.com inbox. A 7-day scan returned only 10 messages, suggesting an Outlook rule is hiding bounce notifications. <strong>If you have a rule that touches "Undeliverable" / "Delivery Failure" / "Postmaster" emails, please disable it</strong> so the auto-Block feature can find them. Without that, protection still works the next time you forward me a bounce manually, but it won't be hands-off.</p>
+
+    <!-- Feedback CTA: three explicit options -->
+    <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:24px 28px;margin:32px 0 8px 0;border-radius:8px;text-align:center;">
+      <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:600;color:#ffffff;">Your response</h3>
+      <p style="margin:0 0 18px 0;color:rgba(255,255,255,0.9);font-size:13px;">Pick one. Each opens a pre-filled email.</p>
+      <div>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=ACK%3A%20Bounce%20Protection%20--%20Mark%20Complete&body=Ali%2C%0D%0A%0D%0AReviewed%20and%20accepted.%20Mark%20this%20change%20complete.%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#10003; Mark Complete</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=FEEDBACK%3A%20Bounce%20Protection%20Update&body=Ali%2C%0D%0A%0D%0AFeedback%20on%20the%20bounce%20protection%20update%3A%0D%0A%0D%0A1.%20Does%20this%20fully%20fix%20the%20problem%20for%20you%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A2.%20Can%20you%20disable%20the%20Outlook%20rule%20that%20hides%20bounces%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A3.%20Do%20you%20want%20the%20%22bounces%20caught%20today%22%20widget%20on%20the%20System%20page%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A4.%20Any%20other%20email%2Foutreach%20issues%20to%20flag%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A5.%20Anything%20else%3A%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0AThanks%2C%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9998; Send Feedback</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=CRITIQUE%3A%20Bounce%20Protection%20Update%20--%20Something%27s%20Off&body=Ali%2C%0D%0A%0D%0AThis%20change%20isn%27t%20right%20yet.%20Here%27s%20what%27s%20wrong%3A%0D%0A%0D%0A%5Bdescribe%20what%27s%20broken%20or%20missing%5D%0D%0A%0D%0AExpected%20behavior%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0AActual%20behavior%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:transparent;color:#ffffff;border:1px solid rgba(255,255,255,0.5);text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9888; Critique Changes</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:18px 32px;background-color:#f7fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#718096;">
+    <p style="margin:0 0 4px 0;"><strong>LandJet Growth Engine</strong> &middot; Change Log entry &middot; 2026-05-12</p>
+    <p style="margin:0;">Audit trail: <a href="https://3.basecamp.com/3945211/buckets/46699826/todos/9882122864" style="color:#2b6cb0;text-decoration:none;">Basecamp todo #9882122864</a></p>
+  </div>
+
+</div>
+
+</body>
+</html>
