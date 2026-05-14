@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, getApolloCredits, type LocalePreferences, type ResourceConfig } from '@/lib/api';
+import { getHealth, getLocaleSettings, updateLocaleSettings, getResourceConfig, updateResourceConfig, getApolloCredits, getOutreachUsage, type LocalePreferences, type ResourceConfig, type UsageSummary } from '@/lib/api';
 import { useTranslation, SUPPORTED_LANGUAGES, LANGUAGE_LABELS, type Language } from '@/lib/i18n';
 
 interface HealthData {
@@ -42,6 +42,7 @@ export default function SystemPage() {
   const [resourceForm, setResourceForm] = useState({ max_per_cycle: 40, max_per_campaign: 10, send_window_start: 8, send_window_end: 17, max_daily_calls: 50, api_rate_limit: 100, retry_delay_minutes: 30 });
   const [resourceSaving, setResourceSaving] = useState(false);
   const [apolloCredits, setApolloCredits] = useState<{ used: number; limit: number } | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
 
   async function fetchHealth() {
     try {
@@ -76,6 +77,7 @@ export default function SystemPage() {
   useEffect(() => {
     fetchHealth(); fetchLocale(); fetchResources();
     getApolloCredits().then(setApolloCredits).catch(() => {});
+    getOutreachUsage().then(setUsage).catch(() => {});
   }, []);
 
   async function handleLocaleSave() {
@@ -149,6 +151,77 @@ export default function SystemPage() {
           </span>
         </div>
       </div>
+
+      {/* Outreach Usage Widget */}
+      {usage && (() => {
+        const maxSends = Math.max(1, ...usage.daily.map(d => d.sends));
+        const lastActiveAgo = usage.last_active
+          ? Math.round((Date.now() - new Date(usage.last_active).getTime()) / 3600000)
+          : null;
+        return (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-white p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-900">Outreach Activity</p>
+                <p className="mt-0.5 text-sm text-gray-500">
+                  {lastActiveAgo !== null
+                    ? lastActiveAgo < 24 ? `Last send ${lastActiveAgo}h ago` : `Last send ${Math.round(lastActiveAgo / 24)}d ago`
+                    : 'No sends yet'}
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-6 text-right">
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{usage.sends_last_7d}</p>
+                  <p className="text-xs text-gray-500">last 7d</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{usage.sends_last_30d}</p>
+                  <p className="text-xs text-gray-500">last 30d</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{usage.avg_sends_per_active_day}</p>
+                  <p className="text-xs text-gray-500">avg/active day</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Sparkline (oldest left, newest right) */}
+            {usage.daily.length > 0 && (
+              <div className="mt-4">
+                <div className="flex items-end gap-1 h-20">
+                  {[...usage.daily].reverse().map(d => {
+                    const h = Math.max(2, Math.round((d.sends / maxSends) * 80));
+                    return (
+                      <div key={d.day} className="flex-1 flex flex-col items-center justify-end" title={`${d.day}: ${d.sends} sends`}>
+                        <div className={`w-full rounded-t ${d.sends > 0 ? 'bg-emerald-500' : 'bg-gray-200'}`} style={{ height: `${h}px` }} />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 flex justify-between text-xs text-gray-400">
+                  <span>{usage.daily[usage.daily.length - 1]?.day.slice(5)}</span>
+                  <span>{usage.daily[0]?.day.slice(5)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Top campaigns */}
+            {usage.by_campaign.length > 0 && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Top campaigns (30d)</p>
+                <div className="space-y-1">
+                  {usage.by_campaign.slice(0, 5).map(c => (
+                    <div key={c.campaign_name} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{c.campaign_name}</span>
+                      <span className="text-gray-500 ml-3 whitespace-nowrap">{c.sends_30d}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Apollo Credits Widget */}
       {apolloCredits && (() => {

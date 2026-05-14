@@ -141,6 +141,16 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `docker ps` shows landjet-backend + landjet-frontend recreated and Up; backend `/api/health` returns 200; `POST /api/admin/outreach/0/remove` returns 401 (route exists, auth gate working).
   - Notes: Production was stale by ~3 weeks of work. From here, deploy cadence should match merge-to-main cadence so production doesn't drift.
 
+- [x] Ryan usage attribution: comm logs + activity widget + per-user auth
+  - Date: 2026-05-14
+  - Triggered by: Ali asked "how much is Ryan using the system" -- audit_logs couldn't tell us because frontend auto-logged everyone in as admin@landjet.com.
+  - Three pieces shipped together (BC todo #9892354204):
+    - **Build #1 -- communication_logs write on send.** `sendOutreachEmail()` now persists a row to `communication_logs` for every Microsoft Graph send (success or failure) when `lead_id` is provided. Caller in `outreachRoutes.ts` /:id/advance now passes `lead_id`, `campaign_id`, `delivery_mode='live'|'test'`. Ops emails (briefings, KPI reports) without `lead_id` skip the log. Failures never break the send.
+    - **Build #2 -- usage stats service + System page widget.** New `usageStatsService.ts` aggregates `leads.last_contacted_at` into 7d / 30d totals, daily counts, per-campaign breakdown. `GET /admin/outreach/usage` exposes it. New widget on System page shows numbers + 30-day sparkline (green bars) + top 5 campaigns. Reads truth from `last_contacted_at` until comm_logs accumulates history.
+    - **Build #3 -- kill auto-login.** Removed the 6 duplicated `ensureAuth()` helpers that auto-logged as admin@landjet.com. New `frontend/lib/auth.ts` shared `ensureAuth()` redirects to `/login` if no valid token, with `?next=` for return path. New `/login` page (email + password form, Suspense-wrapped for `useSearchParams`). All 6 pages updated. Audit attribution now follows the actual user.
+  - Verification: backend + frontend `tsc --noEmit` clean.
+  - Notes: Ryan's password needs to be set/communicated post-deploy. After ssh'ing in I'll set rlandry@landjet.com password to a known value and tell Ali so he can pass it to Ryan.
+
 - [x] Email validation + bounce protection (3 hard bounces in 34 min)
   - Date: 2026-05-12
   - Triggered by: Ryan, email forwards 2026-05-11 17:37-18:11 UTC. Three hard bounces from `rlandry@landjet.com` to addresses that don't exist (`cgb@clarkstoncapital.com`, `aeveloff@nep.com`, `jsullan@brookhavenpartners.com`). Ryan: "Don't we have something that validates if the email addresses are accurate to prevent from undeliverables and hurting our domain?"

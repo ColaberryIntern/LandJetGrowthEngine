@@ -435,6 +435,22 @@ export function blockOutreachContact(contactId: string, reason?: string) {
   );
 }
 
+export interface DailySend { day: string; sends: number; }
+export interface CampaignUsage { campaign_name: string; sends_30d: number; last_send: string | null; }
+export interface UsageSummary {
+  sends_last_7d: number;
+  sends_last_30d: number;
+  active_days_last_30d: number;
+  avg_sends_per_active_day: number;
+  last_active: string | null;
+  daily: DailySend[];
+  by_campaign: CampaignUsage[];
+}
+
+export function getOutreachUsage() {
+  return request<UsageSummary>('/admin/outreach/usage');
+}
+
 export function createStrategy(name: string, prompt: string) {
   return request<{ strategy: { id: string; name: string; prompt: string } }>('/admin/outreach/strategies', {
     method: 'POST',

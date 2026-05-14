@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getAgents, getAgentActivity, login, type AiAgentRecord, type AgentRunRecord } from '@/lib/api';
+import { getAgents, getAgentActivity, type AiAgentRecord, type AgentRunRecord } from '@/lib/api';
+import { ensureAuth } from '@/lib/auth';
 import AgentOrgChart from '@/components/AgentOrgChart';
 
 const DEPT_COLORS: Record<string, string> = {
@@ -33,16 +34,9 @@ export default function AgentsPage() {
   const replayDataRef = useRef<AgentRunRecord[]>([]);
 
   async function fetchAll(isInitial = false) {
-    // Ensure auth token exists before fetching
     if (isInitial) {
-      const existing = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      let needsAuth = !existing;
-      if (existing) {
-        try { const p = JSON.parse(atob(existing.split('.')[1])); if (p.exp * 1000 <= Date.now()) needsAuth = true; } catch { needsAuth = true; }
-      }
-      if (needsAuth) {
-        try { const r = await login('admin@landjet.com', 'Admin123!'); localStorage.setItem('token', r.token); } catch {}
-      }
+      const ok = await ensureAuth();
+      if (!ok) return; // redirected to /login
     }
     try {
       const [agentRes, actRes] = await Promise.allSettled([

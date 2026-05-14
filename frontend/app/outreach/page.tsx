@@ -6,19 +6,10 @@ import {
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
   getTestSendCount, resetTestSends,
-  swapLead, rewriteDraft, login,
+  swapLead, rewriteDraft,
   OutreachContact, OutreachSettings,
 } from '@/lib/api';
-
-async function ensureAuth() {
-  if (typeof window === 'undefined') return;
-  const existing = localStorage.getItem('token');
-  if (existing) {
-    try { const p = JSON.parse(atob(existing.split('.')[1])); if (p.exp * 1000 > Date.now()) return; } catch {}
-    localStorage.removeItem('token');
-  }
-  try { const r = await login('admin@landjet.com', 'Admin123!'); localStorage.setItem('token', r.token); } catch {}
-}
+import { ensureAuth } from '@/lib/auth';
 
 interface CampaignOption { id: string; name: string; }
 

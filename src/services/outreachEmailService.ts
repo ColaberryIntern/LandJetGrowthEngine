@@ -9,6 +9,7 @@
  */
 
 import { logger } from '../config/logger';
+import { CommunicationLog } from '../models/CommunicationLog';
 
 interface SendEmailInput {
   to: string;
@@ -17,6 +18,11 @@ interface SendEmailInput {
   from?: string;
   senderName?: string;
   signature?: string;
+  // Optional audit fields -- when provided, a row is written to communication_logs
+  // on send (success or failure) so we have a full audit trail per lead/campaign.
+  lead_id?: number;
+  campaign_id?: string | null;
+  delivery_mode?: 'live' | 'test';
 }
 
 /**
@@ -154,23 +160,66 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
     });
 
     if (graphResponse.status === 202 || graphResponse.status === 200) {
+      const messageId = `graph-${Date.now()}`;
       logger.info('Outreach email sent via Graph API', {
         to: input.to,
         from: fromEmail,
         subject: input.subject,
       });
-      return { success: true, messageId: `graph-${Date.now()}`, from: fromEmail };
+      await writeCommLog(input, fromEmail, 'sent', messageId, null).catch(e =>
+        logger.warn('comm log write failed (sent)', { err: e.message }),
+      );
+      return { success: true, messageId, from: fromEmail };
     }
 
     const errorData = await graphResponse.json().catch(() => ({}));
     const errorMsg = (errorData as any)?.error?.message || `Graph API error: ${graphResponse.status}`;
     logger.error('Graph API email failed', { to: input.to, from: fromEmail, status: graphResponse.status, error: errorMsg });
+    await writeCommLog(input, fromEmail, 'failed', null, { error: errorMsg, http_status: graphResponse.status }).catch(e =>
+      logger.warn('comm log write failed (failed)', { err: e.message }),
+    );
     return { success: false, error: errorMsg, from: fromEmail };
   } catch (error) {
     const msg = (error as Error).message;
     logger.error('Outreach email failed', { to: input.to, from: fromEmail, error: msg });
+    await writeCommLog(input, fromEmail, 'failed', null, { error: msg, exception: true }).catch(e =>
+      logger.warn('comm log write failed (exception)', { err: e.message }),
+    );
     return { success: false, error: msg, from: fromEmail };
   }
+}
+
+/**
+ * Persist a row to communication_logs for every Graph API send attempt.
+ * Skips silently if the caller didn't provide lead_id (e.g., one-off ops emails
+ * like the morning briefing that aren't tied to a specific lead). Failures
+ * never break the send -- they're logged via logger.warn and the email
+ * still returns success.
+ */
+async function writeCommLog(
+  input: SendEmailInput,
+  fromEmail: string,
+  status: 'sent' | 'failed',
+  providerMessageId: string | null,
+  providerResponse: object | null,
+): Promise<void> {
+  if (!input.lead_id) return; // ops emails (briefing, KPI report) skip log
+  await CommunicationLog.create({
+    lead_id: input.lead_id,
+    campaign_id: input.campaign_id || null,
+    channel: 'email',
+    direction: 'outbound',
+    delivery_mode: input.delivery_mode || 'live',
+    status,
+    to_address: input.to,
+    from_address: fromEmail,
+    subject: input.subject,
+    body: input.body,
+    provider: 'microsoft_graph',
+    provider_message_id: providerMessageId,
+    provider_response: providerResponse,
+    metadata: { sender_name: input.senderName || null },
+  } as any);
 }
 
 /**

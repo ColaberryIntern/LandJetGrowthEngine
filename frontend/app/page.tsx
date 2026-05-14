@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getHealth, getCampaigns, getAgents, getAgentActivity, login, type AiAgentRecord, type AgentRunRecord } from '@/lib/api';
+import { getHealth, getCampaigns, getAgents, getAgentActivity, type AiAgentRecord, type AgentRunRecord } from '@/lib/api';
+import { ensureAuth } from '@/lib/auth';
 
 const DEPT_COLORS: Record<string, string> = {
   outreach: '#3B82F6', campaigns: '#10B981', operations: '#F59E0B',
@@ -15,22 +16,6 @@ function timeAgo(d: string) {
   if (m < 1) return 'Just now'; if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
-}
-
-async function ensureAuth() {
-  if (typeof window === 'undefined') return;
-  const existing = localStorage.getItem('token');
-  if (existing) {
-    try {
-      const payload = JSON.parse(atob(existing.split('.')[1]));
-      if (payload.exp * 1000 > Date.now()) return;
-    } catch {}
-    localStorage.removeItem('token');
-  }
-  try {
-    const res = await login('admin@landjet.com', 'Admin123!');
-    localStorage.setItem('token', res.token);
-  } catch {}
 }
 
 export default function Home() {

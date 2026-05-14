@@ -1020,6 +1020,9 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         from: senderEmail,
         senderName,
         signature,
+        lead_id: leadBefore.id,
+        campaign_id: leadBefore.campaign_id || null,
+        delivery_mode: globalSettings.test_mode ? 'test' : 'live',
       });
     }
 
@@ -1085,6 +1088,17 @@ router.post('/:id/block', authorize('campaigns:write'), async (req: Request, res
       dnc_created: result.dncCreated,
     });
   } catch (error) { next(error); }
+});
+
+router.get('/usage', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getUsageSummary } = await import('../../services/usageStatsService');
+    const summary = await getUsageSummary();
+    res.json(summary);
+  } catch (error) {
+    logger.error('GET /usage failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.post('/bounces/process', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
