@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandJet Change Log -- Login + Activity Widget -- May 14, 2026</title>
+</head>
+<body style="margin:0;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;background-color:#f5f7fa;">
+
+<div style="max-width:720px;margin:0 auto;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:28px 32px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">Change Log</div>
+    <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:600;letter-spacing:-0.2px;color:#ffffff;">Login + Activity Tracking</h1>
+    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.85);">LandJet Growth Engine &middot; May 14, 2026</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding:28px 32px;">
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:0 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Why this shipped</h2>
+
+    <p style="margin:0 0 12px 0;">Two related changes. First, real per-user login replaces the auto-login that was logging everyone in as "admin" -- so audit trails will now follow whoever is actually clicking. Second, an activity widget on the System page shows real-time usage at a glance, so we can see the system actually working.</p>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">What changed</h2>
+
+    <table style="width:100%;margin:14px 0;border-collapse:separate;border-spacing:8px 0;">
+      <tr>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#f7fafc;border:1px solid #e2e8f0;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#1a365d;">Per-user login <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#ecfdf5;color:#166534;">Live</span></div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">Real login screen at <strong>/login</strong>. No more silent auto-login as "admin." Every action is now attributed to the actual user. Tokens persist across sessions like normal.</div>
+        </td>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#fffbeb;border:1px solid #fde68a;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#1a365d;">Activity widget <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;background-color:#ecfdf5;color:#166534;">Live</span></div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">On the System page: outreach sends in last 7d / 30d, average per active day, 30-day sparkline, and top 5 most-used campaigns. Auto-refreshes when you open the page.</div>
+        </td>
+      </tr>
+    </table>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">What we&#39;re seeing in your data</h2>
+
+    <div style="background-color:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:14px 18px;margin:16px 0;">
+      <p style="margin:0 0 8px 0;font-size:13px;color:#1a365d;"><strong>Outreach activity, last 7 days (Ryan):</strong></p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tr><td style="padding:4px 0;color:#4a5568;">Total sends:</td><td style="text-align:right;font-weight:600;color:#1a365d;">110</td></tr>
+        <tr><td style="padding:4px 0;color:#4a5568;">Active days:</td><td style="text-align:right;font-weight:600;color:#1a365d;">5 of 7</td></tr>
+        <tr><td style="padding:4px 0;color:#4a5568;">Avg per active day:</td><td style="text-align:right;font-weight:600;color:#1a365d;">~22</td></tr>
+        <tr><td style="padding:4px 0;color:#4a5568;">Top campaign:</td><td style="text-align:right;font-weight:600;color:#1a365d;">Investor Outreach (32 in 30d)</td></tr>
+        <tr><td style="padding:4px 0;color:#4a5568;">Coverage:</td><td style="text-align:right;font-weight:600;color:#1a365d;">8 of 9 campaigns active</td></tr>
+      </table>
+      <p style="margin:8px 0 0 0;font-size:12px;color:#2b6cb0;">You&#39;re tracking toward the 50/day ramp target -- ~40-60% of capacity on active days, with room to grow without burning the domain.</p>
+    </div>
+
+    <!-- Action items per person -->
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Action items</h2>
+
+    <div style="background-color:#fff8f1;border-left:4px solid #ed8936;padding:14px 18px;margin:12px 0;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 8px 0;font-weight:600;color:#9c4221;font-size:14px;">For Ryan</p>
+      <ol style="padding-left:22px;margin:0;font-size:13px;color:#2d3748;">
+        <li style="margin-bottom:8px;"><strong>Log in fresh.</strong> Visit the System page -- you&#39;ll be redirected to the new /login screen. Use email <code style="background:#fff1f2;padding:2px 6px;border-radius:3px;">rlandry@landjet.com</code> and the password Ali sent you separately. Save it in 1Password / your browser.</li>
+        <li style="margin-bottom:8px;"><strong>Check the activity widget.</strong> Open the System page after login -- you should see the "Outreach Activity" panel near the top with your real numbers.</li>
+        <li style="margin-bottom:8px;"><strong>Outlook rule (still pending from last week).</strong> Disable any rule that auto-archives "Undeliverable" / "Delivery Failure" / "Postmaster" emails so the bounce auto-Block can keep working hands-off.</li>
+        <li style="margin-bottom:0;"><strong>Push the daily volume.</strong> You&#39;re at ~22/active day. Target is 50/day. Try a 30-send day this week and let us know if anything feels off.</li>
+      </ol>
+    </div>
+
+    <div style="background-color:#f5f3ff;border-left:4px solid #805ad5;padding:14px 18px;margin:12px 0;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 8px 0;font-weight:600;color:#553c9a;font-size:14px;">For Percy</p>
+      <ol style="padding-left:22px;margin:0;font-size:13px;color:#2d3748;">
+        <li style="margin-bottom:8px;"><strong>Schedule the concierge call.</strong> The Reservations AI engine (BookRides parsing, pricing, FAQ routing, KC forwarding) has been ready for Lorie review since 2026-05-07. Once we walk her through 3-5 sample quote drafts side-by-side, we can flip the switch.</li>
+        <li style="margin-bottom:8px;"><strong>Non-JD round-trip rule.</strong> Master pricing doc says base rate applies to initial leg only on round-trips. JD employees were confirmed to bill both legs. <strong>Does the same apply to standard customers / Lockton / Investor / LJ Member?</strong> Need Lorie&#39;s confirmation.</li>
+        <li style="margin-bottom:0;"><strong>Login access.</strong> Want a login for yourself so you can review the Reservations Inbound page directly? Reply yes and I&#39;ll set you up.</li>
+      </ol>
+    </div>
+
+    <!-- Feedback CTA -->
+    <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:24px 28px;margin:32px 0 8px 0;border-radius:8px;text-align:center;">
+      <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:600;color:#ffffff;">Your response</h3>
+      <p style="margin:0 0 18px 0;color:rgba(255,255,255,0.9);font-size:13px;">Pick one. Each opens a pre-filled email.</p>
+      <div>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com,pkapadia@landjet.com&subject=ACK%3A%20Login%20%2B%20Activity%20Widget%20--%20Mark%20Complete&body=Ali%2C%0D%0A%0D%0AReviewed%20and%20accepted.%20Will%20log%20in%20and%20work%20through%20my%20action%20items.%0D%0A%0D%0A%5Bname%5D" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#10003; Mark Complete</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com,pkapadia@landjet.com&subject=FEEDBACK%3A%20Login%20%2B%20Activity%20Widget&body=Ali%2C%0D%0A%0D%0AFeedback%20on%20the%20update%3A%0D%0A%0D%0A1.%20Login%20worked%20cleanly%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A2.%20Activity%20widget%20-%20useful%2C%20want%20more%20detail%2C%20or%20cut%20it%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A3.%20Action%20items%20%2F%20what%27s%20blocking%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A4.%20Other%20things%20to%20raise%3A%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A%5Bname%5D" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9998; Send Feedback</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com,pkapadia@landjet.com&subject=CRITIQUE%3A%20Login%20%2B%20Activity%20Widget%20--%20Something%27s%20Off&body=Ali%2C%0D%0A%0D%0AThis%20isn%27t%20right%20yet.%20Here%27s%20what%27s%20wrong%3A%0D%0A%0D%0A%5Bdescribe%5D%0D%0A%0D%0AExpected%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0AActual%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0A%5Bname%5D" style="display:inline-block;padding:10px 18px;margin:4px;background-color:transparent;color:#ffffff;border:1px solid rgba(255,255,255,0.5);text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9888; Critique Changes</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:18px 32px;background-color:#f7fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#718096;">
+    <p style="margin:0 0 4px 0;"><strong>LandJet Growth Engine</strong> &middot; Change Log entry &middot; 2026-05-14</p>
+    <p style="margin:0;">Audit trail: <a href="https://3.basecamp.com/3945211/buckets/46699826/todos/9892354204" style="color:#2b6cb0;text-decoration:none;">Basecamp todo #9892354204</a></p>
+  </div>
+
+</div>
+
+</body>
+</html>
