@@ -212,6 +212,10 @@ export interface OutreachContact {
   tier: number | null;
   campaign_id: string | null;
   message_context: string;
+  channel?: string;
+  linkedin_url?: string | null;
+  linkedin_message?: string | null;
+  ai_error?: string | null; // populated when LinkedIn AI gen fails so the UI can warn
   draft: { subject: string; body: string; prompt: string; source: string };
   status: string;
 }

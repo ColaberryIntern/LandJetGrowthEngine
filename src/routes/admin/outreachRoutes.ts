@@ -707,12 +707,14 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
       // For LinkedIn steps, generate a clean message via AI (no variables or instructions visible)
       let linkedinMessage: string | null = null;
       let linkedinUrl: string | null = c.linkedin_url || null;
+      let aiError: string | null = null; // populated if AI fails so the UI can warn the user
       if (channel.startsWith('linkedin') && stepInfo?.prompt) {
         const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
-        // Use AI to generate the actual clean message
         const apiKey = process.env.OPENAI_API_KEY;
         const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
-        if (apiKey) {
+        if (!apiKey) {
+          aiError = 'OPENAI_API_KEY is not configured on the server.';
+        } else {
           try {
             const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
@@ -741,26 +743,28 @@ CRITICAL RULES:
               const aiData = (await aiResp.json()) as any;
               const msg = (aiData.choices?.[0]?.message?.content || '').trim();
               if (msg) linkedinMessage = msg;
+              else aiError = 'AI returned an empty response.';
             } else {
               const errBody = await aiResp.text().catch(() => '');
-              logger.warn('LinkedIn AI generation failed (will fall back to template)', {
+              logger.warn('LinkedIn AI generation failed', {
                 channel, status: aiResp.status, error: errBody.slice(0, 200),
               });
+              aiError = aiResp.status === 429
+                ? 'AI is unavailable: OpenAI quota exceeded. Top up billing at platform.openai.com.'
+                : `AI is unavailable (upstream ${aiResp.status}). Try again in a moment.`;
             }
           } catch (e) {
-            logger.warn('LinkedIn AI generation threw (will fall back to template)', {
+            logger.warn('LinkedIn AI generation threw', {
               channel, error: (e as Error).message,
             });
+            aiError = 'AI is unavailable (network error). Try again in a moment.';
           }
         }
-        // Fallback: use interpolated prompt stripped of instruction text
-        if (!linkedinMessage) {
-          linkedinMessage = interpolatedPrompt;
-        }
-        // Hard-cap: LinkedIn enforces 300 chars on connection request notes.
-        // Slice regardless of source so long templates / AI overruns don't
-        // produce messages LinkedIn will reject.
-        if (linkedinMessage.length > maxChars) {
+        // Hard-cap on AI output (do NOT fall back to the raw prompt -- that
+        // dumped instruction text into the message field, which Ryan saw on
+        // 2026-05-14 when AI was failing silently). When AI is unavailable,
+        // leave the message empty and let the UI show aiError instead.
+        if (linkedinMessage && linkedinMessage.length > maxChars) {
           linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
         }
       }
@@ -782,6 +786,7 @@ CRITICAL RULES:
         channel,
         linkedin_url: linkedinUrl,
         linkedin_message: linkedinMessage,
+        ai_error: aiError,
         draft: channel === 'email' ? await generateDraft(c, campaign?.ai_system_prompt) : { subject: '', body: linkedinMessage || '', prompt: '', source: 'template' as const },
         status: c.outreach_status,
       };
@@ -826,11 +831,14 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
 
     // Generate LinkedIn message if this step is LinkedIn (matches /today endpoint behavior)
     let linkedinMessage: string | null = null;
+    let aiError: string | null = null;
     if (channel.startsWith('linkedin') && stepInfo?.prompt) {
       const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
       const apiKey = process.env.OPENAI_API_KEY;
       const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
-      if (apiKey) {
+      if (!apiKey) {
+        aiError = 'OPENAI_API_KEY is not configured on the server.';
+      } else {
         try {
           const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -849,22 +857,25 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
             const aiData = (await aiResp.json()) as any;
             const msg = (aiData.choices?.[0]?.message?.content || '').trim();
             if (msg) linkedinMessage = msg;
+            else aiError = 'AI returned an empty response.';
           } else {
             const errBody = await aiResp.text().catch(() => '');
-            logger.warn('LinkedIn AI generation failed in /swap-lead (will fall back)', {
+            logger.warn('LinkedIn AI generation failed in /swap-lead', {
               channel, status: aiResp.status, error: errBody.slice(0, 200),
             });
+            aiError = aiResp.status === 429
+              ? 'AI is unavailable: OpenAI quota exceeded. Top up billing at platform.openai.com.'
+              : `AI is unavailable (upstream ${aiResp.status}). Try again in a moment.`;
           }
         } catch (e) {
-          logger.warn('LinkedIn AI generation threw in /swap-lead (will fall back)', {
+          logger.warn('LinkedIn AI generation threw in /swap-lead', {
             channel, error: (e as Error).message,
           });
+          aiError = 'AI is unavailable (network error). Try again in a moment.';
         }
       }
-      if (!linkedinMessage) linkedinMessage = interpolatedPrompt;
-      // Hard-cap to LinkedIn's per-channel limit so long templates / AI overruns
-      // don't slip through. Connection requests = 300 chars per LinkedIn.
-      if (linkedinMessage.length > maxChars) {
+      // Hard-cap on AI output. Do NOT fall back to the raw prompt template.
+      if (linkedinMessage && linkedinMessage.length > maxChars) {
         linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
       }
     }
@@ -890,6 +901,7 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
       channel,
       linkedin_url: newLead.linkedin_url,
       linkedin_message: linkedinMessage,
+      ai_error: aiError,
       draft,
       status: newLead.outreach_status,
     });
