@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandJet -- Two Decisions Needed -- May 15, 2026</title>
+</head>
+<body style="margin:0;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;background-color:#f5f7fa;">
+
+<div style="max-width:720px;margin:0 auto;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:28px 32px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">Decisions Needed</div>
+    <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:600;letter-spacing:-0.2px;color:#ffffff;">Switching to your AI account + picking a URL</h1>
+    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.85);">LandJet Growth Engine &middot; May 15, 2026</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding:28px 32px;">
+
+    <p style="margin:0 0 12px 0;">Two operational decisions for you. Both are short to handle and unblock things going forward. Take 10 minutes when you have it.</p>
+
+    <!-- Decision 1: OpenAI -->
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">1. Create your OpenAI account</h2>
+
+    <p style="margin:0 0 12px 0;"><strong>Why now:</strong> the AI behind the message generation, inbound classifier, and quote drafter has been running on my personal OpenAI account. It works fine, but the bill should be on LandJet, and you should own the API key going forward. Yesterday&#39;s "all messages are the same" issue happened because my account ran out of credits -- once you own the account, you control the spend cap and the alerts.</p>
+
+    <div style="background-color:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:14px 18px;margin:16px 0;">
+      <p style="margin:0 0 8px 0;font-weight:600;color:#1a365d;font-size:14px;">5-minute setup:</p>
+      <ol style="padding-left:22px;margin:0;font-size:14px;">
+        <li style="margin-bottom:8px;">Go to <a href="https://platform.openai.com/signup" style="color:#0066cc;text-decoration:none;">platform.openai.com/signup</a> and create an account using <code style="background:#fff;padding:2px 6px;border-radius:3px;">rlandry@landjet.com</code>.</li>
+        <li style="margin-bottom:8px;">Add a payment method: Settings &rarr; Billing &rarr; Payment methods &rarr; Add payment method. Use the LandJet card.</li>
+        <li style="margin-bottom:8px;">Set a monthly spend limit so you never get surprise bills: Settings &rarr; Billing &rarr; Limits &rarr; <strong>Monthly budget: $50</strong> (we&#39;re using under $20/mo right now, $50 gives headroom). Set the email alert at $40.</li>
+        <li style="margin-bottom:8px;">Create the API key: Settings &rarr; API Keys &rarr; <strong>+ Create new secret key</strong>. Name it "LandJet Growth Engine". Copy the key (it starts with <code style="background:#fff;padding:2px 6px;border-radius:3px;">sk-proj-...</code>) -- you only get to see it once.</li>
+        <li style="margin-bottom:0;">Send me the key. <strong>Two options:</strong>
+          <ul style="margin:6px 0 0 0;padding-left:20px;">
+            <li>Reply to this email with the key in the body (Gmail to Gmail is encrypted in transit, fine for this).</li>
+            <li>Or text it to me, whichever you prefer.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <p style="margin:0 0 12px 0;font-size:13px;color:#4a5568;"><em>What I&#39;ll do with it:</em> drop the new key into the production server&#39;s config and rotate. Takes about 60 seconds. The system will start running on your account with no behavior change Ryan-side.</p>
+
+    <!-- Decision 2: URL -->
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">2. Pick a URL for the system</h2>
+
+    <p style="margin:0 0 12px 0;"><strong>Why now:</strong> right now you log in via the IP address (<code style="background:#edf2f7;padding:2px 6px;border-radius:3px;">95.216.199.47:4000</code>), which works but is forgettable and not professional. Picking a real URL means you bookmark something memorable and we can put it on internal docs, training materials for future ops staff, etc.</p>
+
+    <p style="margin:0 0 12px 0;"><strong>Two paths -- pick the one you prefer:</strong></p>
+
+    <table style="width:100%;margin:14px 0;border-collapse:separate;border-spacing:8px 0;">
+      <tr>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#f0fdf4;border:1px solid #bbf7d0;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#15803d;">Path A: Use a subdomain of landjet.com (free, fast)</div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">No new domain to buy. We point a subdomain at the server. Takes Percy 5 minutes in the DNS panel. Some options to choose from:</div>
+          <ul style="font-size:13px;margin:8px 0 0 0;padding-left:18px;color:#1f2937;">
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">growth.landjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">engine.landjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">platform.landjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">ai.landjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">portal.landjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">command.landjet.com</code></li>
+          </ul>
+          <div style="font-size:12px;color:#15803d;margin-top:8px;font-style:italic;">My pick if it were me: <strong>growth.landjet.com</strong>. Says exactly what it does.</div>
+        </td>
+        <td style="width:50%;padding:16px 14px;border-radius:6px;vertical-align:top;background-color:#fefce8;border:1px solid #fef08a;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:#854d0e;">Path B: Buy a brand new domain ($10-12/yr)</div>
+          <div style="font-size:13px;color:#4a5568;line-height:1.5;">Standalone identity, separate from the marketing site. Cheap. Buy on Cloudflare Registrar (no markup) or Namecheap. Some available ideas:</div>
+          <ul style="font-size:13px;margin:8px 0 0 0;padding-left:18px;color:#1f2937;">
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">landjetgrowth.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">landjetengine.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">landjetops.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">mylandjet.com</code></li>
+            <li><code style="background:#fff;padding:1px 5px;border-radius:3px;">landjet.ai</code> (more expensive, ~$70/yr)</li>
+          </ul>
+          <div style="font-size:12px;color:#854d0e;margin-top:8px;font-style:italic;">How to buy: Cloudflare &rarr; Sign up &rarr; Domain Registration &rarr; search the name &rarr; checkout. Forward me the registration confirmation.</div>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:8px 0 12px 0;font-size:13px;color:#4a5568;"><strong>Recommendation:</strong> Path A. Same security profile, free, takes 5 minutes. You can always upgrade to Path B later if you want a separate identity.</p>
+
+    <!-- Feedback CTA -->
+    <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:24px 28px;margin:32px 0 8px 0;border-radius:8px;text-align:center;">
+      <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:600;color:#ffffff;">Your response</h3>
+      <p style="margin:0 0 18px 0;color:rgba(255,255,255,0.9);font-size:13px;">Pick one. Each opens a pre-filled email.</p>
+      <div>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=DECISIONS%3A%20OpenAI%20%2B%20URL&body=Ali%2C%0D%0A%0D%0A1.%20OpenAI%20account%20created%20%2B%20API%20key%3A%0D%0A%20%20%20%5Bpaste%20sk-proj-...%20key%20here%20OR%20say%20I%27ll%20send%20by%20text%5D%0D%0A%0D%0A2.%20URL%20choice%3A%0D%0A%20%20%20%5Be.g.%20growth.landjet.com%20OR%20a%20brand%20new%20domain%20you%20want%5D%0D%0A%0D%0AThanks%2C%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#10003; Send My Decisions</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=QUESTIONS%3A%20OpenAI%20%2B%20URL&body=Ali%2C%0D%0A%0D%0AQuestions%20before%20I%20do%20either%20of%20these%3A%0D%0A%0D%0A1.%20%5Byour%20question%5D%0D%0A%0D%0A2.%20%5Byour%20question%5D%0D%0A%0D%0AThanks%2C%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9998; I Have Questions</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=YOU%20PICK%3A%20OpenAI%20%2B%20URL&body=Ali%2C%0D%0A%0D%0AJust%20pick%20for%20me%20-%20I%27ll%20pay%20for%20whatever%20you%20choose.%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:transparent;color:#ffffff;border:1px solid rgba(255,255,255,0.5);text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9889; You Pick for Me</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:18px 32px;background-color:#f7fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#718096;">
+    <p style="margin:0 0 4px 0;"><strong>LandJet Growth Engine</strong> &middot; Decisions doc &middot; 2026-05-15</p>
+    <p style="margin:0;">Both items are non-blocking but help you own the system end-to-end. Reply when you have a moment.</p>
+  </div>
+
+</div>
+
+</body>
+</html>
