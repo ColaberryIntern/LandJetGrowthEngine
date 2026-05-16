@@ -711,7 +711,11 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
       if (channel.startsWith('linkedin') && stepInfo?.prompt) {
         const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
         const apiKey = process.env.OPENAI_API_KEY;
-        const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
+        // LinkedIn DMs technically allow more, but real follow-up DMs that get
+        // read are short and conversational, not email-shaped. 400 chars is
+        // the cap (~2-3 sentences). Connection request notes cap at 300 per
+        // LinkedIn's hard limit.
+        const maxChars = channel === 'linkedin_connect' ? 300 : 400;
         if (!apiKey) {
           aiError = 'OPENAI_API_KEY is not configured on the server.';
         } else {
@@ -722,7 +726,7 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
               body: JSON.stringify({
                 model: process.env.AI_MODEL || 'gpt-4o',
                 messages: [
-                  { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'message'} FROM the SENDER (${vars.sender_name || vars.sender_first_name || 'the sender'}) TO the RECIPIENT (${c.first_name} ${c.last_name || ''}, ${c.title || ''} at ${c.company || ''}).
+                  { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up direct message'} FROM the SENDER (${vars.sender_name || vars.sender_first_name || 'the sender'}) TO the RECIPIENT (${c.first_name} ${c.last_name || ''}, ${c.title || ''} at ${c.company || ''}).
 
 CRITICAL RULES:
 - The message is written FROM the sender's perspective TO the recipient
@@ -732,7 +736,12 @@ CRITICAL RULES:
 - DO NOT greet the sender by name
 - DO NOT ask the sender for their services -- the SENDER is offering services
 - Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly.
-- Max ${maxChars} characters.` },
+
+STYLE (very important):
+- This is a LinkedIn message, NOT an email. Keep it short, conversational, casual professional.
+- ${channel === 'linkedin_connect' ? '2 sentences max. Hook + ask. Under 300 chars.' : '2-3 sentences max. Sound like a real person messaging another person, not a marketing pitch. No paragraph blocks. Under 400 chars.'}
+- Do NOT structure it like an email (no "I hope this finds you well", no multi-paragraph sales pitch, no formal closings).
+- Hard cap: ${maxChars} characters total INCLUDING greeting and sign-off.` },
                   { role: 'user', content: interpolatedPrompt },
                 ],
                 temperature: 0.7,
@@ -835,7 +844,10 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
     if (channel.startsWith('linkedin') && stepInfo?.prompt) {
       const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
       const apiKey = process.env.OPENAI_API_KEY;
-      const maxChars = channel === 'linkedin_connect' ? 300 : 1500;
+      const maxChars = channel === 'linkedin_connect' ? 300 : 400;
+      const styleNote = channel === 'linkedin_connect'
+        ? '2 sentences max. Hook + ask. Under 300 chars.'
+        : '2-3 sentences max. Sound like a real person messaging another person, not a marketing pitch. No paragraph blocks. No "I hope this finds you well". Under 400 chars.';
       if (!apiKey) {
         aiError = 'OPENAI_API_KEY is not configured on the server.';
       } else {
@@ -846,7 +858,7 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
             body: JSON.stringify({
               model: process.env.AI_MODEL || 'gpt-4o',
               messages: [
-                { role: 'system', content: `Generate ONLY the final message text. No instructions, no labels, no quotation marks. The message must be ready to copy and paste directly. Max ${maxChars} characters.` },
+                { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up direct message'}. This is LinkedIn, NOT an email. ${styleNote} Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly. Hard cap: ${maxChars} characters total.` },
                 { role: 'user', content: interpolatedPrompt },
               ],
               temperature: 0.7,
