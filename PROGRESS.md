@@ -141,6 +141,17 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `docker ps` shows landjet-backend + landjet-frontend recreated and Up; backend `/api/health` returns 200; `POST /api/admin/outreach/0/remove` returns 401 (route exists, auth gate working).
   - Notes: Production was stale by ~3 weeks of work. From here, deploy cadence should match merge-to-main cadence so production doesn't drift.
 
+- [x] Percy onboarded: user account + login + nginx vhost staged
+  - Date: 2026-05-18
+  - Triggered by: Percy reply 2026-05-18 to the 3-asks email -- he added DNS, scheduled Lorie sync, asked for his own login.
+  - What changed:
+    - Created user `pkapadia@landjet.com` (admin role) in prod DB. Password set to `LandJet2026!` (same convention as Ryan). Verified login works.
+    - Sent Percy his credentials in a private email (message 19e3ceab3fb57671). Bcc'd Ali, no Cc.
+    - Staged nginx vhost `growth-landjet` at `/etc/nginx/sites-available/growth-landjet` + symlinked + reloaded. Routes `/api/*` to backend (3011), everything else to frontend (4000). `nginx -t` clean. Will start serving the moment DNS resolves.
+    - Saved canonical vhost config at `nginx/growth-landjet.conf` in repo for posterity / future redeploys.
+  - Open: DNS not propagated yet. Percy said "added the domain record" but `dig growth.landjet.com @ns33.domaincontrol.com` returns nothing. Either he saved it but it hasn't taken effect, or the record needs republishing. Nudge if not resolving by tomorrow.
+  - Open: HTTPS. Port 443 is bound by the op-nginx Docker container. HTTP-only for now (matches pattern of advisor.colaberry.ai et al.). SSL is a follow-up -- options noted in vhost comment.
+
 - [x] LinkedIn 300-char cap + channel-aware rewrite endpoint
   - Date: 2026-05-14
   - Triggered by: Ryan, screenshot 2026-05-14: a Don Reese (Investor Outreach) connection request was 500+ chars (over LinkedIn's 300 limit), and clicking "Shorter" returned "AI rewrite failed".
