@@ -25,9 +25,9 @@
       You flagged in the call that some prospects (the Dallas Theological Seminary example, education leadership coming through Sports &amp; Events) end up in the wrong campaign and need to be moved without losing them. Two pieces shipped this afternoon to handle it.
     </div>
 
-    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Change 1 of 2: Campaign dropdown now MOVES the person</h2>
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Change 1 of 2: Campaign dropdown now asks what you want</h2>
 
-    <p style="margin:0 0 12px 0;">The dropdown next to Skip on each outreach card used to just swap you to a different lead. Now it actually moves the same person to whichever campaign you pick, and rewrites the message in that campaign&#39;s voice.</p>
+    <p style="margin:0 0 12px 0;">When you pick a different campaign from the dropdown next to Skip, a panel pops up asking what to do. Both behaviors live, you choose per case.</p>
 
     <!-- Mock 1: Outreach card with the dropdown highlighted -->
     <div style="margin:18px 0 8px 0;padding:18px;background-color:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;">
@@ -55,16 +55,29 @@
       <p style="margin:12px 0 0 0;font-size:12px;color:#4a5568;font-style:italic;">The dropdown highlighted in red is the one. Same control as before, completely different behavior now.</p>
     </div>
 
-    <h3 style="font-size:14px;font-weight:600;color:#2d3748;margin:20px 0 6px 0;">Before vs after</h3>
+    <h3 style="font-size:14px;font-weight:600;color:#2d3748;margin:20px 0 6px 0;">The choice panel appears after you pick</h3>
+
+    <!-- Mock choice panel -->
+    <div style="margin:6px 0 14px 0;padding:14px;background:#eef2ff;border:2px solid #818cf8;border-radius:6px;">
+      <p style="margin:0 0 8px 0;font-size:13px;color:#3730a3;font-weight:600;">You picked <span style="font-weight:700;">Cold Outreach - Education</span>. What do you want to do?</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+        <span style="background:#4f46e5;color:#fff;padding:6px 12px;border-radius:4px;font-size:12px;font-weight:600;">Move Don Reese to this campaign</span>
+        <span style="background:#fff;border:1px solid #c7d2fe;color:#3730a3;padding:6px 12px;border-radius:4px;font-size:12px;font-weight:600;">Show me the next person in Cold Outreach - Education</span>
+        <span style="background:#fff;border:1px solid #d1d5db;color:#6b7280;padding:6px 12px;border-radius:4px;font-size:12px;font-weight:600;">Cancel</span>
+      </div>
+      <p style="margin:8px 0 0 0;font-size:11px;color:#3730a3;"><strong>Move</strong> = re-bucket this person. <strong>Show next</strong> = leave this person where they are and jump to a different lead from that campaign.</p>
+    </div>
+
+    <h3 style="font-size:14px;font-weight:600;color:#2d3748;margin:20px 0 6px 0;">When to use which</h3>
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 16px 0;">
       <tr>
-        <td style="padding:8px 12px;background:#fafafa;border:1px solid #e2e8f0;width:50%;vertical-align:top;">
-          <div style="font-weight:600;color:#9b2c2c;margin-bottom:4px;">Before</div>
-          Picking a different campaign swapped you to a <strong>different lead</strong> from that campaign. The person you actually wanted to re-bucket stayed stuck.
+        <td style="padding:10px 12px;background:#f0fff4;border:1px solid #c6f6d5;width:50%;vertical-align:top;">
+          <div style="font-weight:600;color:#22543d;margin-bottom:4px;">Move {name} to this campaign</div>
+          The person you&#39;re looking at belongs in a different bucket. The AI message rewrites in the new campaign&#39;s voice. Sequence resets to step 1. Example: DTS.edu in Sports &amp; Events &rarr; Education.
         </td>
-        <td style="padding:8px 12px;background:#f0fff4;border:1px solid #c6f6d5;width:50%;vertical-align:top;">
-          <div style="font-weight:600;color:#22543d;margin-bottom:4px;">Now</div>
-          Picking a different campaign <strong>moves this same person</strong> to the new campaign and rewrites their AI message in the new campaign&#39;s voice. Sequence resets to step 1.
+        <td style="padding:10px 12px;background:#ebf8ff;border:1px solid #bee3f8;width:50%;vertical-align:top;">
+          <div style="font-weight:600;color:#1a365d;margin-bottom:4px;">Show me the next person in {campaign}</div>
+          You&#39;re done with this person but want to keep working a different campaign. This person stays where they are. You jump to the next available lead in the campaign you picked.
         </td>
       </tr>
     </table>
