@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandJet Change Log -- Move to Campaign + New Buckets -- May 19, 2026</title>
+</head>
+<body style="margin:0;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;background-color:#f5f7fa;">
+
+<div style="max-width:760px;margin:0 auto;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:28px 32px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">Change Log</div>
+    <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:600;letter-spacing:-0.2px;color:#ffffff;">Move People Between Campaigns + Two New Buckets</h1>
+    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.85);">LandJet Growth Engine &middot; May 19, 2026 &middot; From our 2pm call</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding:28px 32px;">
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:0 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Why this shipped</h2>
+
+    <div style="border-left:4px solid #2b6cb0;background-color:#ebf8ff;padding:14px 18px;margin:12px 0 16px 0;border-radius:0 6px 6px 0;">
+      You flagged in the call that some prospects (the Dallas Theological Seminary example, education leadership coming through Sports &amp; Events) end up in the wrong campaign and need to be moved without losing them. Two pieces shipped this afternoon to handle it.
+    </div>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Change 1 of 2: Campaign dropdown now MOVES the person</h2>
+
+    <p style="margin:0 0 12px 0;">The dropdown next to Skip on each outreach card used to just swap you to a different lead. Now it actually moves the same person to whichever campaign you pick, and rewrites the message in that campaign&#39;s voice.</p>
+
+    <!-- Mock 1: Outreach card with the dropdown highlighted -->
+    <div style="margin:18px 0 8px 0;padding:18px;background-color:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;">
+      <div style="font-size:11px;font-weight:600;color:#718096;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">What the outreach card looks like now</div>
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:14px 18px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="min-width:160px;">
+            <div style="font-weight:600;color:#1a202c;">Don Reese</div>
+            <div style="font-size:12px;color:#718096;">don.reese@fep-us.com &middot; INVESTOR</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:relative;">
+            <!-- Red rectangle highlight around dropdown -->
+            <div style="position:relative;display:inline-block;">
+              <div style="display:inline-block;padding:6px 10px;background:#ffffff;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;color:#4a5568;">Investor Outreach &nbsp;&#9662;</div>
+              <div style="position:absolute;inset:-8px;border:3px solid #e53e3e;border-radius:8px;pointer-events:none;"></div>
+              <div style="position:absolute;top:-26px;left:50%;transform:translateX(-50%);background:#e53e3e;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;">CHANGED</div>
+            </div>
+            <div style="display:inline-block;padding:6px 10px;background:#fff;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;color:#4a5568;">Skip</div>
+            <div style="display:inline-block;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;font-size:12px;color:#92400e;">Remove</div>
+            <div style="display:inline-block;padding:6px 10px;background:#fff1f2;border:1px solid #fecdd3;border-radius:4px;font-size:12px;color:#9f1239;">Block</div>
+            <div style="display:inline-block;padding:6px 12px;background:#1a202c;border-radius:4px;font-size:12px;color:#fff;">Mark Done</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin:12px 0 0 0;font-size:12px;color:#4a5568;font-style:italic;">The dropdown highlighted in red is the one. Same control as before, completely different behavior now.</p>
+    </div>
+
+    <h3 style="font-size:14px;font-weight:600;color:#2d3748;margin:20px 0 6px 0;">Before vs after</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 16px 0;">
+      <tr>
+        <td style="padding:8px 12px;background:#fafafa;border:1px solid #e2e8f0;width:50%;vertical-align:top;">
+          <div style="font-weight:600;color:#9b2c2c;margin-bottom:4px;">Before</div>
+          Picking a different campaign swapped you to a <strong>different lead</strong> from that campaign. The person you actually wanted to re-bucket stayed stuck.
+        </td>
+        <td style="padding:8px 12px;background:#f0fff4;border:1px solid #c6f6d5;width:50%;vertical-align:top;">
+          <div style="font-weight:600;color:#22543d;margin-bottom:4px;">Now</div>
+          Picking a different campaign <strong>moves this same person</strong> to the new campaign and rewrites their AI message in the new campaign&#39;s voice. Sequence resets to step 1.
+        </td>
+      </tr>
+    </table>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Change 2 of 2: Two new buckets for identity-crisis prospects</h2>
+
+    <p style="margin:0 0 12px 0;">Per your call note about education leaders and broad business services prospects ending up in the wrong place. Two new cold campaigns live now, both built with the same 5-step LinkedIn/email/LinkedIn sequence as your existing cold campaigns but with industry-specific positioning.</p>
+
+    <!-- Mock 2: Dropdown expanded showing campaigns with new ones highlighted -->
+    <div style="margin:18px 0 8px 0;padding:18px;background-color:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;">
+      <div style="font-size:11px;font-weight:600;color:#718096;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">When you open the dropdown, you&#39;ll see these new options</div>
+      <div style="background:#ffffff;border:1px solid #cbd5e0;border-radius:6px;padding:6px 0;font-size:13px;max-width:340px;position:relative;">
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Investor Outreach</div>
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Cold Outreach - Banking &amp; Finance</div>
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Cold Outreach - Construction &amp; Engineering</div>
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Cold Outreach - Healthcare</div>
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Cold Outreach - Manufacturing</div>
+        <!-- Red highlights around new entries -->
+        <div style="padding:6px 14px;color:#1a202c;font-weight:600;background:#fef2f2;border-left:3px solid #e53e3e;border-bottom:1px solid #f1f5f9;">Cold Outreach - Education &nbsp;<span style="background:#e53e3e;color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;vertical-align:middle;">NEW</span></div>
+        <div style="padding:6px 14px;color:#1a202c;font-weight:600;background:#fef2f2;border-left:3px solid #e53e3e;border-bottom:1px solid #f1f5f9;">Cold Outreach - Business Services &nbsp;<span style="background:#e53e3e;color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;vertical-align:middle;">NEW</span></div>
+        <div style="padding:6px 14px;color:#4a5568;border-bottom:1px solid #f1f5f9;">Cold Outreach - Sports &amp; Events</div>
+        <div style="padding:6px 14px;color:#4a5568;">Cold Outreach - Technology &amp; Staffing</div>
+      </div>
+      <p style="margin:12px 0 0 0;font-size:12px;color:#4a5568;font-style:italic;">Each new campaign has industry-tailored variables (positioning, target titles, target profile) so the AI messages sound right for that vertical.</p>
+    </div>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">Your DTS.edu example, verified live</h2>
+
+    <p style="margin:0 0 12px 0;">Robert Riggs at Dallas Theological Seminary (your example) was sitting in Sports &amp; Events. Moved him to the new Education campaign via the same dropdown. The AI regenerated his connect message from scratch for the education context:</p>
+
+    <!-- Mock 3: Before/after card -->
+    <table style="width:100%;border-collapse:separate;border-spacing:10px 0;margin:14px 0 8px 0;">
+      <tr>
+        <td style="vertical-align:top;width:50%;padding:14px;background:#fff8f1;border:1px solid #fed7aa;border-radius:6px;font-size:13px;">
+          <div style="font-size:10px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Before (Sports &amp; Events)</div>
+          <div style="font-weight:600;color:#1a202c;margin-bottom:4px;">Robert Riggs</div>
+          <div style="color:#718096;font-size:11px;margin-bottom:8px;">VP Operations, Dallas Theological Seminary</div>
+          <div style="background:#fff;border:1px solid #fed7aa;border-radius:4px;padding:10px;color:#7c2d12;font-style:italic;">Generic events / sports angle, irrelevant to a seminary.</div>
+        </td>
+        <td style="vertical-align:top;width:50%;padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:13px;">
+          <div style="font-size:10px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">After (Education) <span style="background:#e53e3e;color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;margin-left:6px;">AUTO-REWRITTEN</span></div>
+          <div style="font-weight:600;color:#1a202c;margin-bottom:4px;">Robert Riggs</div>
+          <div style="color:#718096;font-size:11px;margin-bottom:8px;">VP Operations, Dallas Theological Seminary</div>
+          <div style="background:#fff;border:2px solid #e53e3e;border-radius:4px;padding:10px;color:#1a202c;">&quot;Hi Robert, I admire your work at Dallas Theological Seminary. I&#39;d love to connect and discuss how LandJet can enhance productivity for your team during commutes.&quot;</div>
+          <div style="margin-top:6px;font-size:11px;color:#15803d;">161 chars, LinkedIn-appropriate, seminary-specific</div>
+        </td>
+      </tr>
+    </table>
+
+    <h2 style="font-size:17px;font-weight:600;color:#1a365d;margin:28px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">See it yourself</h2>
+
+    <p style="margin:0 0 12px 0;">Live on the system right now. Open the outreach page, find any wrong-bucket prospect, pick the right campaign from the dropdown. The card refreshes in place with the new message.</p>
+
+    <div style="text-align:center;margin:18px 0;">
+      <a href="http://95.216.199.47:4000/outreach" style="display:inline-block;padding:12px 28px;background-color:#1a365d;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:6px;">Open the Outreach page</a>
+      <p style="margin:8px 0 0 0;font-size:11px;color:#718096;font-style:italic;">growth.landjet.com is on its way -- waiting on DNS to propagate. IP link works in the meantime.</p>
+    </div>
+
+    <!-- Feedback CTA: three explicit options -->
+    <div style="background:linear-gradient(135deg,#1a365d 0%,#2b6cb0 100%);color:#ffffff;padding:24px 28px;margin:32px 0 8px 0;border-radius:8px;text-align:center;">
+      <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:600;color:#ffffff;">Your response</h3>
+      <p style="margin:0 0 18px 0;color:rgba(255,255,255,0.9);font-size:13px;">Pick one. Each opens a pre-filled email.</p>
+      <div>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=ACK%3A%20Move%20to%20Campaign%20%2B%20New%20Buckets%20--%20Mark%20Complete&body=Ali%2C%0D%0A%0D%0AReviewed%20and%20tested.%20Moves%20work%2C%20new%20buckets%20look%20good.%20Mark%20this%20change%20complete.%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#10003; Mark Complete</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=FEEDBACK%3A%20Move%20to%20Campaign%20%2B%20New%20Buckets&body=Ali%2C%0D%0A%0D%0AFeedback%20on%20the%20move-to-campaign%20update%3A%0D%0A%0D%0A1.%20Does%20moving%20feel%20right%3F%20Any%20friction%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A2.%20Do%20the%20Education%20%2F%20Business%20Services%20campaigns%20need%20tweaks%20to%20positioning%20or%20titles%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A3.%20Other%20identity-crisis%20verticals%20we%20should%20add%20a%20bucket%20for%3F%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0A4.%20Anything%20else%3A%0D%0A%20%20%20%5Byour%20answer%5D%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:#ffffff;color:#1a365d;text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9998; Send Feedback</a>
+        <a href="mailto:ali@colaberry.com?cc=rlandry@landjet.com&subject=CRITIQUE%3A%20Move%20to%20Campaign%20%2B%20New%20Buckets%20--%20Something%27s%20Off&body=Ali%2C%0D%0A%0D%0AThis%20isn%27t%20right%20yet.%20Here%27s%20what%27s%20wrong%3A%0D%0A%0D%0A%5Bdescribe%5D%0D%0A%0D%0AExpected%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0AActual%3A%0D%0A%5Byour%20answer%5D%0D%0A%0D%0ARyan" style="display:inline-block;padding:10px 18px;margin:4px;background-color:transparent;color:#ffffff;border:1px solid rgba(255,255,255,0.5);text-decoration:none;font-weight:600;font-size:13px;border-radius:6px;">&#9888; Critique</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:18px 32px;background-color:#f7fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#718096;">
+    <p style="margin:0 0 4px 0;"><strong>LandJet Growth Engine</strong> &middot; Change Log entry &middot; 2026-05-19</p>
+    <p style="margin:0;">Audit trail: <a href="https://3.basecamp.com/3945211/buckets/46699826/todos/9908357733" style="color:#2b6cb0;text-decoration:none;">Basecamp todo #9908357733</a></p>
+  </div>
+
+</div>
+
+</body>
+</html>

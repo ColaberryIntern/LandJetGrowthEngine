@@ -28,6 +28,10 @@ export default function OutreachPage() {
   const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
   const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
   const [originalDrafts, setOriginalDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // stores pre-rewrite originals
+  // When the user picks a different campaign from the dropdown, we don't
+  // act immediately -- we show an inline choice panel asking whether they
+  // want to MOVE this person or SWAP to the next person from that campaign.
+  const [pendingCampaignChoice, setPendingCampaignChoice] = useState<Record<string, { campaignId: string; campaignName: string }>>({});
   const [rewriteButtons, setRewriteButtons] = useState<{ tone: string; label: string }[]>([
     { tone: 'shorter', label: 'Shorter' },
     { tone: 'personal', label: 'More Personal' },
@@ -117,22 +121,52 @@ export default function OutreachPage() {
     finally { setActing(null); }
   }
 
-  async function handleCampaignChange(contactId: string, campaignId: string) {
+  // Dropdown picks a campaign -> open the choice panel. We don't act until
+  // the user explicitly picks Move vs Swap. Allows both behaviors instead of
+  // forcing one over the other.
+  function handleCampaignChange(contactId: string, campaignId: string) {
     if (!campaignId) return;
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (!campaign) return;
+    setPendingCampaignChoice(prev => ({ ...prev, [contactId]: { campaignId, campaignName: campaign.name } }));
+  }
+
+  function cancelCampaignChoice(contactId: string) {
+    setPendingCampaignChoice(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+  }
+
+  // Move THIS person to the chosen campaign and regenerate the draft for the
+  // new campaign's voice.
+  async function handleMoveToCampaign(contactId: string, campaignId: string) {
     setActing(contactId);
     try {
-      // MOVE this same contact to the chosen campaign and regenerate the
-      // draft for the new campaign's voice. (Previously this swapped to a
-      // DIFFERENT lead in the new campaign, which wasn't what Ryan wanted
-      // for the identity-crisis prospects he was trying to re-bucket.)
       const updatedContact = await assignContactCampaign(String(contactId), campaignId) as OutreachContact;
-      setContacts(prev => prev.map(c =>
-        c.contact_id === contactId ? updatedContact : c
-      ));
-      // Clear any draft edits since the new campaign produces a fresh draft
+      setContacts(prev => prev.map(c => c.contact_id === contactId ? updatedContact : c));
       setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+      setPendingCampaignChoice(prev => { const n = { ...prev }; delete n[contactId]; return n; });
     } catch (e) {
       setError((e as Error).message);
+    }
+    finally { setActing(null); }
+  }
+
+  // Swap to a different person from the chosen campaign. Leaves the current
+  // person untouched in their original campaign.
+  async function handleSwapToNextInCampaign(contactId: string, campaignId: string) {
+    setActing(contactId);
+    try {
+      const newContact = await swapLead(String(contactId), campaignId);
+      setContacts(prev => prev.map(c => c.contact_id === contactId ? newContact : c));
+      setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+      setPendingCampaignChoice(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('No more leads')) {
+        setError('No more leads available in this campaign');
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError(msg);
+      }
     }
     finally { setActing(null); }
   }
@@ -560,6 +594,46 @@ export default function OutreachPage() {
                 })()}
               </div>
             </div>
+
+            {/* Campaign change choice panel -- shown when user picks a different
+                campaign from the dropdown. Lets them choose between moving
+                THIS person or swapping to the next person in that campaign. */}
+            {pendingCampaignChoice[contact.contact_id] && (() => {
+              const choice = pendingCampaignChoice[contact.contact_id];
+              const isSameCampaign = choice.campaignId === contact.campaign_id;
+              return (
+                <div className="mt-3 rounded-md border-2 border-indigo-300 bg-indigo-50 p-4">
+                  <p className="text-sm font-semibold text-indigo-900 mb-2">
+                    You picked <span className="font-bold">{choice.campaignName}</span>. What do you want to do?
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      onClick={() => handleMoveToCampaign(contact.contact_id, choice.campaignId)}
+                      disabled={acting === contact.contact_id || isSameCampaign}
+                      title={isSameCampaign ? 'Already in this campaign' : `Move ${contact.name} to ${choice.campaignName} and rewrite the message in that campaign's voice`}
+                      className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                      Move {contact.name} to this campaign
+                    </button>
+                    <button
+                      onClick={() => handleSwapToNextInCampaign(contact.contact_id, choice.campaignId)}
+                      disabled={acting === contact.contact_id}
+                      title={`Skip ${contact.name} and show the next person waiting in ${choice.campaignName}. ${contact.name} stays in their current campaign.`}
+                      className="rounded-md border border-indigo-300 bg-white px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+                      Show me the next person in {choice.campaignName}
+                    </button>
+                    <button
+                      onClick={() => cancelCampaignChoice(contact.contact_id)}
+                      disabled={acting === contact.contact_id}
+                      className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-indigo-700">
+                    <strong>Move</strong> = re-bucket this person. <strong>Show next</strong> = leave this person where they are and jump to a different lead from that campaign.
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* LinkedIn Step */}
             {(contact as any).channel?.startsWith('linkedin') ? (
