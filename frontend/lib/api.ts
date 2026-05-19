@@ -404,8 +404,12 @@ export function getOutreachToday() {
   return request<OutreachContact[]>('/admin/outreach/today');
 }
 
+// Move a contact to a different campaign. Returns either:
+//  - { contact_id, campaign_id: null } when unassigning (campaignId === null)
+//  - A full OutreachContact (regenerated draft for the new campaign's voice)
+//    when moving to a campaign
 export function assignContactCampaign(contactId: string, campaignId: string | null) {
-  return request<{ contact_id: string; campaign_id: string | null }>(
+  return request<OutreachContact | { contact_id: string; campaign_id: null }>(
     `/admin/outreach/${contactId}/campaign`,
     { method: 'POST', body: JSON.stringify({ campaign_id: campaignId }) },
   );

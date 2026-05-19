@@ -1045,11 +1045,120 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
     }
 
     const { campaign_id } = req.body;
+    const previousCampaignId = lead.campaign_id;
+    const movingToNewCampaign = campaign_id && campaign_id !== previousCampaignId;
+
     lead.campaign_id = campaign_id || null;
+    // When moving to a different campaign, reset to step 1 so the lead starts
+    // fresh in the new campaign's voice/sequence. Prevents stale draft from the
+    // wrong campaign showing up in the queue.
+    if (movingToNewCampaign) {
+      lead.sequence_stage = 1;
+      lead.next_action_at = null;
+    }
     await lead.save();
 
-    res.json({ contact_id: lead.id, campaign_id: lead.campaign_id });
-  } catch (error) { next(error); }
+    // If they unassigned (campaign_id=null), short-circuit -- nothing to draft
+    if (!campaign_id) {
+      return res.json({ contact_id: lead.id, campaign_id: null });
+    }
+
+    // Re-fetch with campaign relation so we can build the full contact card
+    // with a freshly-generated draft (same shape as /today and /swap-lead).
+    const updated = await Lead.findByPk(lead.id, {
+      include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
+    });
+    if (!updated) {
+      return res.status(404).json({ error: 'Contact not found after move' });
+    }
+
+    const campaign = (updated as any).outreachCampaign;
+    const stepInfo = getStepInfo(updated);
+    const channel = stepInfo?.channel || 'email';
+    const vars = await mergeVariables(updated, campaign);
+
+    let linkedinMessage: string | null = null;
+    let aiError: string | null = null;
+    if (channel.startsWith('linkedin') && stepInfo?.prompt) {
+      const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
+      const apiKey = process.env.OPENAI_API_KEY;
+      const maxChars = channel === 'linkedin_connect' ? 300 : 400;
+      const styleNote = channel === 'linkedin_connect'
+        ? '2 sentences max. Hook + ask. Under 300 chars.'
+        : '2-3 sentences max. Sound like a real person messaging another person, not a marketing pitch. No paragraph blocks. No "I hope this finds you well". Under 400 chars.';
+      if (!apiKey) {
+        aiError = 'OPENAI_API_KEY is not configured on the server.';
+      } else {
+        try {
+          const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: process.env.AI_MODEL || 'gpt-4o',
+              messages: [
+                { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up direct message'}. This is LinkedIn, NOT an email. ${styleNote} Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly. Hard cap: ${maxChars} characters total.` },
+                { role: 'user', content: interpolatedPrompt },
+              ],
+              temperature: 0.7,
+              max_tokens: 256,
+            }),
+          });
+          if (aiResp.ok) {
+            const aiData = (await aiResp.json()) as any;
+            const msg = (aiData.choices?.[0]?.message?.content || '').trim();
+            if (msg) linkedinMessage = msg;
+            else aiError = 'AI returned an empty response.';
+          } else {
+            const errBody = await aiResp.text().catch(() => '');
+            logger.warn('LinkedIn AI generation failed in /:id/campaign', {
+              channel, status: aiResp.status, error: errBody.slice(0, 200),
+            });
+            aiError = aiResp.status === 429
+              ? 'AI is unavailable: OpenAI quota exceeded. Top up billing at platform.openai.com.'
+              : `AI is unavailable (upstream ${aiResp.status}). Try again in a moment.`;
+          }
+        } catch (e) {
+          logger.warn('LinkedIn AI generation threw in /:id/campaign', {
+            channel, error: (e as Error).message,
+          });
+          aiError = 'AI is unavailable (network error). Try again in a moment.';
+        }
+      }
+      if (linkedinMessage && linkedinMessage.length > maxChars) {
+        linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
+      }
+    }
+
+    const draft = channel === 'email'
+      ? await generateDraft(updated, campaign?.ai_system_prompt)
+      : { subject: '', body: linkedinMessage || '', prompt: '', source: 'template' as const };
+
+    res.json({
+      contact_id: updated.id,
+      name: `${updated.first_name} ${updated.last_name}`.trim(),
+      email: updated.email,
+      relationship_type: updated.lead_source || 'past_client',
+      sequence_stage: updated.sequence_stage,
+      suggested_action: channel === 'linkedin_connect' ? 'Send Connection Request' :
+        channel === 'linkedin_message' ? 'Send LinkedIn Message' :
+        (updated.sequence_stage === 1 ? 'Initial Outreach' : 'Follow-up'),
+      priority_score: updated.priority_score,
+      vertical: updated.vertical,
+      tier: updated.tier,
+      campaign_id: updated.campaign_id,
+      message_context: getMessageContext(updated),
+      channel,
+      linkedin_url: updated.linkedin_url,
+      linkedin_message: linkedinMessage,
+      ai_error: aiError,
+      draft,
+      status: updated.outreach_status,
+      moved_from_campaign_id: movingToNewCampaign ? previousCampaignId : null,
+    });
+  } catch (error) {
+    logger.error('POST /:id/campaign failed', { error: (error as Error).message });
+    next(error);
+  }
 });
 
 router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {

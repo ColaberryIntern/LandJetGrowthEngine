@@ -121,21 +121,18 @@ export default function OutreachPage() {
     if (!campaignId) return;
     setActing(contactId);
     try {
-      const newContact = await swapLead(String(contactId), campaignId);
-      // Replace the current contact with the new one from the selected campaign
+      // MOVE this same contact to the chosen campaign and regenerate the
+      // draft for the new campaign's voice. (Previously this swapped to a
+      // DIFFERENT lead in the new campaign, which wasn't what Ryan wanted
+      // for the identity-crisis prospects he was trying to re-bucket.)
+      const updatedContact = await assignContactCampaign(String(contactId), campaignId) as OutreachContact;
       setContacts(prev => prev.map(c =>
-        c.contact_id === contactId ? newContact : c
+        c.contact_id === contactId ? updatedContact : c
       ));
-      // Clear any draft edits for the old contact
+      // Clear any draft edits since the new campaign produces a fresh draft
       setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
     } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes('No more leads')) {
-        setError(`No more leads available in this campaign`);
-        setTimeout(() => setError(null), 3000);
-      } else {
-        setError(msg);
-      }
+      setError((e as Error).message);
     }
     finally { setActing(null); }
   }
