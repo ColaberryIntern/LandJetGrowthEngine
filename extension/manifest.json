@@ -28,8 +28,5 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "LandJet LinkedIn Assistant"
-  },
-  "icons": {
-    "128": "icon-128.png"
   }
 }
