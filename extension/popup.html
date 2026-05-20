@@ -89,6 +89,11 @@
   <label for="api-base">API Base URL</label>
   <input type="text" id="api-base" placeholder="http://95.216.199.47:3011/api" />
 
+  <label style="display:flex;align-items:center;gap:8px;font-weight:normal;text-transform:none;letter-spacing:0;font-size:12px;color:#1a202c;margin-bottom:12px;">
+    <input type="checkbox" id="test-mode" style="width:auto;margin:0;" />
+    <span><strong>Test mode</strong> &mdash; LinkedIn Send click is detected but the lead is NOT actually advanced. Use this to validate the extension flow without touching real data.</span>
+  </label>
+
   <button id="save">Save</button>
   <div class="status" id="status"></div>
 

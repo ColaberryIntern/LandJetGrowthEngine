@@ -6,11 +6,12 @@ const DEFAULT_API_BASE = 'http://95.216.199.47:3011/api';
 const DEFAULT_OUTREACH_PAGE = 'http://95.216.199.47:4000/outreach';
 
 async function getConfig() {
-  const stored = await chrome.storage.local.get(['apiToken', 'apiBase', 'outreachPage']);
+  const stored = await chrome.storage.local.get(['apiToken', 'apiBase', 'outreachPage', 'testMode']);
   return {
     apiToken: stored.apiToken || '',
     apiBase: stored.apiBase || DEFAULT_API_BASE,
     outreachPage: stored.outreachPage || DEFAULT_OUTREACH_PAGE,
+    testMode: !!stored.testMode,
   };
 }
 
@@ -66,6 +67,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const data = await apiFetch(`/admin/outreach/lookup-by-linkedin-url?url=${encodeURIComponent(msg.url)}`);
         sendResponse({ ok: true, data });
       } else if (msg.type === 'ADVANCE_LEAD') {
+        const { testMode } = await getConfig();
+        if (testMode) {
+          // Test mode: log + fake-refresh, but do NOT actually call the API
+          // or advance the lead. Used to validate the UX end-to-end without
+          // touching real data.
+          console.log('[LandJet] TEST MODE: simulated advance for lead', msg.leadId);
+          sendResponse({ ok: true, testMode: true });
+          return;
+        }
         await apiFetch(`/admin/outreach/${msg.leadId}/advance`, { method: 'POST', body: JSON.stringify({}) });
         // Fire-and-forget tab reloads
         reloadOutreachTabs().catch(() => {});

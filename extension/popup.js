@@ -4,10 +4,11 @@
 const $ = (id) => document.getElementById(id);
 
 async function load() {
-  const stored = await chrome.storage.local.get(['apiToken', 'apiBase']);
+  const stored = await chrome.storage.local.get(['apiToken', 'apiBase', 'testMode']);
   if (stored.apiToken) $('api-token').value = stored.apiToken;
   if (stored.apiBase) $('api-base').value = stored.apiBase;
   else $('api-base').value = 'http://95.216.199.47:3011/api';
+  $('test-mode').checked = !!stored.testMode;
 }
 
 function setStatus(text, kind) {
@@ -21,7 +22,8 @@ $('save').addEventListener('click', async () => {
   const apiBase = $('api-base').value.trim();
   if (!apiToken) { setStatus('Token required', 'err'); return; }
   if (!apiBase) { setStatus('API base URL required', 'err'); return; }
-  await chrome.storage.local.set({ apiToken, apiBase });
+  const testMode = $('test-mode').checked;
+  await chrome.storage.local.set({ apiToken, apiBase, testMode });
 
   // Quick health check: call lookup with a known LinkedIn URL pattern and
   // expect either a 404 (token valid, no match) or 200. A 401 means the

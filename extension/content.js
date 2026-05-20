@@ -180,7 +180,10 @@
     const leadId = currentLead.lead_id;
     chrome.runtime.sendMessage({ type: 'ADVANCE_LEAD', leadId }, (resp) => {
       if (resp && resp.ok) {
-        setStatus('Sent! Marked Done in the outreach queue.', 'success');
+        const label = resp.testMode
+          ? 'TEST MODE: Send detected. No advance happened, lead stays in queue.'
+          : 'Sent! Marked Done in the outreach queue.';
+        setStatus(label, 'success');
         currentLead = null;
         setTimeout(() => {
           const panel = document.getElementById(PANEL_ID);
