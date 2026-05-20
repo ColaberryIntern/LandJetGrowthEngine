@@ -1296,6 +1296,118 @@ router.get('/usage', authorize('campaigns:read'), async (_req: Request, res: Res
   }
 });
 
+/**
+ * Look up a lead by their LinkedIn profile URL. Used by the Chrome extension
+ * to figure out which lead Ryan is currently viewing on LinkedIn.
+ *
+ * Matching strategy: normalize the URL by stripping protocol, trailing
+ * slashes, "www.", query params, and lowercasing the path. Then match on
+ * the lead.linkedin_url after the same normalization.
+ *
+ * Returns 200 with { lead_id, name, company, sequence_stage, channel,
+ *   draft_body, ai_error, linkedin_url } when matched (the extension uses
+ *   draft_body to fill the connect note), or 404 when no match.
+ */
+router.get('/lookup-by-linkedin-url', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const raw = (req.query.url as string) || '';
+    if (!raw) return res.status(400).json({ error: 'url query param required' });
+
+    function normalize(u: string): string {
+      try {
+        let s = u.trim().toLowerCase();
+        s = s.replace(/^https?:\/\//, '');
+        s = s.replace(/^www\./, '');
+        s = s.split('?')[0].split('#')[0];
+        s = s.replace(/\/+$/, '');
+        return s;
+      } catch { return u.toLowerCase().trim(); }
+    }
+
+    const target = normalize(raw);
+
+    // Pull all active leads with a linkedin_url. Cheap enough for the current
+    // dataset (~8K rows). Switch to a normalized index column if this grows.
+    const candidates = await Lead.findAll({
+      where: { status: 'active', outreach_status: 'ACTIVE', linkedin_url: { [Op.ne]: null } },
+      attributes: ['id', 'first_name', 'last_name', 'company', 'linkedin_url', 'sequence_stage', 'campaign_id'],
+      include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
+    });
+
+    const match = candidates.find(l => l.linkedin_url && normalize(l.linkedin_url) === target);
+    if (!match) return res.status(404).json({ error: 'No lead matches that LinkedIn URL' });
+
+    const campaign = (match as any).outreachCampaign;
+    const stepInfo = getStepInfo(match);
+    const channel = stepInfo?.channel || 'email';
+    const vars = await mergeVariables(match, campaign);
+
+    // Generate the message for whatever step they're on. For LinkedIn steps
+    // this gives us the actual paste-ready text. For email steps we still
+    // generate a draft so the extension can offer something, even if the
+    // user usually wouldn't paste an email body into LinkedIn.
+    let body = '';
+    let aiError: string | null = null;
+    if (channel.startsWith('linkedin') && stepInfo?.prompt) {
+      const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
+      const apiKey = process.env.OPENAI_API_KEY;
+      const maxChars = channel === 'linkedin_connect' ? 300 : 400;
+      const styleNote = channel === 'linkedin_connect'
+        ? '2 sentences max. Hook + ask. Under 300 chars.'
+        : '2-3 sentences max. Sound like a real person messaging another person. No paragraph blocks. Under 400 chars.';
+      if (!apiKey) {
+        aiError = 'OPENAI_API_KEY not configured.';
+      } else {
+        try {
+          const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: process.env.AI_MODEL || 'gpt-4o',
+              messages: [
+                { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up DM'}. This is LinkedIn, NOT an email. ${styleNote} Generate ONLY the final message text. No instructions, no labels. Hard cap: ${maxChars} chars.` },
+                { role: 'user', content: interpolatedPrompt },
+              ],
+              temperature: 0.7,
+              max_tokens: 256,
+            }),
+          });
+          if (aiResp.ok) {
+            const aiData = (await aiResp.json()) as any;
+            const msg = (aiData.choices?.[0]?.message?.content || '').trim();
+            body = msg.length > maxChars ? msg.slice(0, maxChars).trim() : msg;
+          } else {
+            aiError = `AI unavailable (status ${aiResp.status})`;
+          }
+        } catch (e) {
+          aiError = `AI unavailable: ${(e as Error).message}`;
+        }
+      }
+    } else if (channel === 'email' && campaign) {
+      // For non-LinkedIn steps, return the prompt template so the extension
+      // can show "this lead's next step is email, not LinkedIn -- no message to insert"
+      body = '';
+      aiError = `Next step is ${channel}, not LinkedIn. Nothing to insert here.`;
+    }
+
+    res.json({
+      lead_id: match.id,
+      name: `${match.first_name} ${match.last_name}`.trim(),
+      company: match.company,
+      linkedin_url: match.linkedin_url,
+      sequence_stage: match.sequence_stage,
+      campaign_id: match.campaign_id,
+      campaign_name: campaign?.name || null,
+      channel,
+      draft_body: body,
+      ai_error: aiError,
+    });
+  } catch (error) {
+    logger.error('GET /lookup-by-linkedin-url failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 router.post('/bounces/process', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { processBounces } = await import('../../services/bounceProcessorService');

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>LandJet LinkedIn Assistant</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    width: 320px;
+    margin: 0;
+    padding: 14px;
+    color: #1a202c;
+  }
+  h1 {
+    font-size: 14px;
+    margin: 0 0 6px 0;
+    color: #1a365d;
+  }
+  p {
+    font-size: 12px;
+    color: #4a5568;
+    margin: 0 0 12px 0;
+    line-height: 1.45;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #4a5568;
+    margin-bottom: 4px;
+  }
+  input, select {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    font-size: 12px;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+  input:focus, select:focus {
+    border-color: #2b6cb0;
+    outline: none;
+  }
+  button {
+    width: 100%;
+    padding: 8px;
+    background: #2b6cb0;
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 13px;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button:hover { background: #1a365d; }
+  .status {
+    margin-top: 10px;
+    padding: 7px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    min-height: 12px;
+  }
+  .status:empty { display: none; }
+  .status-ok { background: #f0fff4; color: #22543d; border: 1px solid #c6f6d5; }
+  .status-err { background: #fff5f5; color: #9b2c2c; border: 1px solid #fed7d7; }
+  .help {
+    font-size: 11px;
+    color: #718096;
+    margin-top: 10px;
+    line-height: 1.45;
+  }
+  .help a {
+    color: #2b6cb0;
+  }
+</style>
+</head>
+<body>
+  <h1>LandJet LinkedIn Assistant</h1>
+  <p>Paste your long-lived API token below. You get this from Ali once and don't need to enter it again.</p>
+
+  <label for="api-token">API Token</label>
+  <input type="password" id="api-token" placeholder="lj_..." />
+
+  <label for="api-base">API Base URL</label>
+  <input type="text" id="api-base" placeholder="http://95.216.199.47:3011/api" />
+
+  <button id="save">Save</button>
+  <div class="status" id="status"></div>
+
+  <div class="help">
+    Token storage is local to this Chrome profile. Open a LinkedIn profile page after saving; the assistant panel will appear in the top-right when the lead is in your outreach queue.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

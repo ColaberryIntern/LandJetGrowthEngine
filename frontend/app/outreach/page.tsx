@@ -74,6 +74,19 @@ export default function OutreachPage() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Auto-refresh on tab focus -- catches advances made by the Chrome
+  // extension (or any other out-of-band action) so leads that have been
+  // Marked Done elsewhere drop off without a manual refresh.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   async function handleAdvance(contactId: string) {
     setActing(contactId);
     try {

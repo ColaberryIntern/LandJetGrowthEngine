@@ -10,6 +10,7 @@ export interface UserAttributes {
   status: 'active' | 'inactive' | 'suspended';
   email_verified: boolean;
   verification_token: string | null;
+  api_token: string | null; // long-lived bearer for Chrome extension / scripted clients
   last_login_at: Date | null;
   created_at?: Date;
   updated_at?: Date;
@@ -33,6 +34,7 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare status: 'active' | 'inactive' | 'suspended';
   declare email_verified: boolean;
   declare verification_token: string | null;
+  declare api_token: string | null;
   declare last_login_at: Date | null;
   declare created_at: Date;
   declare updated_at: Date;
@@ -82,6 +84,11 @@ export function initUserModel(sequelize: Sequelize): typeof User {
       verification_token: {
         type: DataTypes.STRING(255),
         allowNull: true,
+      },
+      api_token: {
+        type: DataTypes.STRING(128),
+        allowNull: true,
+        unique: true,
       },
       last_login_at: {
         type: DataTypes.DATE,
