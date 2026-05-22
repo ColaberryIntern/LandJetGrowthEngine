@@ -1,4 +1,4 @@
-import { calculateQuote, detectFlatRateRoute, detectCustomerCategory, isIowaOnlyTrip, isForwardOnlyMarket, type QuoteInput } from '../../services/landjetPricing';
+import { calculateQuote, detectFlatRateRoute, detectCustomerCategory, isIowaOnlyTrip, isForwardOnlyMarket, isGarageCity, checkGarageEnds, type QuoteInput } from '../../services/landjetPricing';
 
 describe('LandJet Pricing Engine', () => {
 
@@ -40,10 +40,26 @@ describe('LandJet Pricing Engine', () => {
       const distLine = q.lines.find(l => l.label.includes('Distance Rate'));
       expect(distLine?.amount).toBe(480);
     });
+
+    // Per Lorie 2026-05-21: when minimum is applied, the customer must SEE
+    // both billed and actual in the line item itself, not buried in a warning.
+    it('shows both billed and actual mileage in the line label when min is applied', () => {
+      const q = calculateQuote({ ...baseInput, passenger_miles: 50 });
+      const distLine = q.lines.find(l => l.label.includes('Distance Rate'));
+      expect(distLine?.label).toContain('200 mi billed');
+      expect(distLine?.label).toContain('50 mi actual');
+    });
+
+    it('does NOT add billed/actual phrasing when no minimum is applied', () => {
+      const q = calculateQuote({ ...baseInput, passenger_miles: 250 });
+      const distLine = q.lines.find(l => l.label.includes('Distance Rate'));
+      expect(distLine?.label).not.toContain('billed');
+      expect(distLine?.label).not.toContain('actual');
+    });
   });
 
-  describe('Round-trip with Dead Leg (default master-doc behavior)', () => {
-    it('applies base rate only to initial leg by default', () => {
+  describe('Round-trip with Dead Leg (Ryan 2026-05-21: one trip fee per booking)', () => {
+    it('applies ONE base rate per booking regardless of round-trip', () => {
       const q = calculateQuote({
         market: 'des_moines',
         service_type: 'round_trip',
@@ -56,18 +72,15 @@ describe('LandJet Pricing Engine', () => {
       expect(baseLines[0].amount).toBe(400);
     });
 
-    it('applies base rate to BOTH legs when override flag set', () => {
+    it('mileage naturally doubles on round-trip because passenger_miles is the full total', () => {
       const q = calculateQuote({
         market: 'des_moines',
         service_type: 'round_trip',
-        passenger_miles: 400,
-        deadleg_miles: 100,
+        passenger_miles: 400, // caller passes round-trip total
         payment: 'credit_card',
-        apply_base_to_return_leg: true,
       });
-      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
-      expect(baseLines).toHaveLength(2);
-      expect(baseLines[0].amount + baseLines[1].amount).toBe(800);
+      const distLine = q.lines.find(l => l.label.includes('Distance Rate'));
+      expect(distLine?.amount).toBe(400 * 2.40); // $960 total distance
     });
   });
 
@@ -118,11 +131,14 @@ describe('LandJet Pricing Engine', () => {
   });
 
   // ===================================================================
-  // JD ROUND-TRIP BASE RATE -- both legs (Percy 2026-05-07)
+  // JD ROUND-TRIP -- ONE base rate per booking (Ryan 2026-05-21)
+  // Correcting earlier interpretation of Percy 2026-05-07: "both legs"
+  // referred to MILEAGE (naturally doubled on round-trips since
+  // passenger_miles is the round-trip total), NOT the trip fee.
   // ===================================================================
 
-  describe('JD round-trip base rate -- both legs by default', () => {
-    it('JD employee round-trip applies $200 base to BOTH legs without explicit flag', () => {
+  describe('JD round-trip: one base rate per booking', () => {
+    it('JD employee round-trip applies ONE $200 base, not two', () => {
       const q = calculateQuote({
         market: 'quad_cities',
         customer_category: 'jd_employee',
@@ -131,11 +147,11 @@ describe('LandJet Pricing Engine', () => {
         payment: 'credit_card',
       });
       const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
-      expect(baseLines).toHaveLength(2);
-      expect(baseLines[0].amount + baseLines[1].amount).toBe(400); // $200 + $200
+      expect(baseLines).toHaveLength(1);
+      expect(baseLines[0].amount).toBe(200);
     });
 
-    it('JD Shuttle round-trip applies $250 base to BOTH legs without explicit flag', () => {
+    it('JD Shuttle round-trip applies ONE $250 base, not two', () => {
       const q = calculateQuote({
         market: 'des_moines',
         customer_category: 'jd_shuttle',
@@ -144,11 +160,11 @@ describe('LandJet Pricing Engine', () => {
         payment: 'credit_card',
       });
       const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
-      expect(baseLines).toHaveLength(2);
-      expect(baseLines[0].amount + baseLines[1].amount).toBe(500); // $250 + $250
+      expect(baseLines).toHaveLength(1);
+      expect(baseLines[0].amount).toBe(250);
     });
 
-    it('standard customer round-trip still applies base to initial leg only', () => {
+    it('standard customer round-trip also applies ONE base rate', () => {
       const q = calculateQuote({
         market: 'des_moines',
         customer_category: 'standard',
@@ -158,21 +174,7 @@ describe('LandJet Pricing Engine', () => {
       });
       const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
       expect(baseLines).toHaveLength(1);
-      expect(baseLines[0].amount).toBe(400); // $400 base, initial leg only
-    });
-
-    it('explicit input flag overrides JD customer default (false wins)', () => {
-      const q = calculateQuote({
-        market: 'quad_cities',
-        customer_category: 'jd_employee',
-        service_type: 'round_trip',
-        passenger_miles: 400,
-        payment: 'credit_card',
-        apply_base_to_return_leg: false, // explicit override
-      });
-      const baseLines = q.lines.filter(l => l.label.startsWith('Base Rate'));
-      expect(baseLines).toHaveLength(1);
-      expect(baseLines[0].amount).toBe(200);
+      expect(baseLines[0].amount).toBe(400);
     });
   });
 
@@ -617,6 +619,156 @@ describe('LandJet Pricing Engine', () => {
         payment: 'credit_card',
       });
       expect(q.warnings.some(w => w.includes('DOT'))).toBe(false);
+    });
+  });
+
+  // ===================================================================
+  // LORIE 2026-05-21 CORRECTIONS
+  // - Flat rates auto-apply 20% gratuity
+  // - Flat rates carry per-route tolls (e.g., $10 QC -> O'Hare)
+  // - QC -> Des Moines is NOT a flat-rate route
+  // - Dead leg only applies when BOTH ends are non-garage cities
+  // ===================================================================
+
+  describe('Lorie 2026-05-21: flat rate auto-gratuity and tolls', () => {
+    it('auto-applies 20% gratuity when no explicit gratuity passed', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 0,
+        payment: 'check',
+        flat_rate_amount: 550,
+        flat_rate_label: "QC -> O'Hare",
+      });
+      const gratLine = q.lines.find(l => l.label.includes('Gratuity (20%)'));
+      expect(gratLine).toBeDefined();
+    });
+
+    it('does NOT auto-apply gratuity when caller passes explicit gratuity_pct', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 0,
+        payment: 'check',
+        flat_rate_amount: 550,
+        gratuity_pct: 0.15, // explicit override
+      });
+      const gratLine = q.lines.find(l => l.label.includes('Gratuity (15%)'));
+      expect(gratLine).toBeDefined();
+      expect(q.lines.find(l => l.label.includes('Gratuity (20%)'))).toBeUndefined();
+    });
+
+    it('adds per-route toll on top of the flat rate', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 0,
+        payment: 'check',
+        flat_rate_amount: 550,
+        flat_rate_toll: 10,
+      });
+      const tollLine = q.lines.find(l => l.label === 'Tolls');
+      expect(tollLine?.amount).toBe(10);
+    });
+
+    it('warns concierge that fuel surcharge is not auto-applied on flat rates', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 0,
+        payment: 'check',
+        flat_rate_amount: 550,
+      });
+      expect(q.warnings.some(w => w.includes('Fuel surcharge not included'))).toBe(true);
+    });
+  });
+
+  describe('Lorie 2026-05-21: QC -> Des Moines no longer a flat route', () => {
+    it('returns null for QC -> Des Moines (now a distance trip)', () => {
+      const r = detectFlatRateRoute('Davenport, IA', 'Des Moines, IA');
+      expect(r).toBeNull();
+    });
+
+    it('still detects QC -> Cedar Rapids as $300 flat', () => {
+      const r = detectFlatRateRoute('Davenport, IA', 'Cedar Rapids, IA');
+      expect(r?.price).toBe(300);
+    });
+
+    it('QC -> O\'Hare flat route includes the $10 toll definition', () => {
+      const r = detectFlatRateRoute('Davenport, IA', "O'Hare International, Chicago");
+      expect(r?.price).toBe(550);
+      expect(r?.toll).toBe(10);
+    });
+  });
+
+  describe('Ryan 2026-05-21: dead-leg garage warning', () => {
+    it('isGarageCity matches LandJet garage cities case-insensitively', () => {
+      expect(isGarageCity('Davenport, IA')).toBe(true);
+      expect(isGarageCity('DALLAS, TX')).toBe(true);
+      expect(isGarageCity('Quad Cities Intl Airport')).toBe(true);
+      expect(isGarageCity('Random Small Town, KS')).toBe(false);
+      expect(isGarageCity(undefined)).toBe(false);
+    });
+
+    it('checkGarageEnds flags when pickup is a garage city', () => {
+      const r = checkGarageEnds({ stops: [
+        { address: 'Davenport, IA', state: 'IA' },
+        { address: 'Random Town, IL', state: 'IL' },
+      ]});
+      expect(r.eitherEndIsGarage).toBe(true);
+      expect(r.garageEnd).toContain('pickup');
+    });
+
+    it('checkGarageEnds returns false when both ends are non-garage', () => {
+      const r = checkGarageEnds({ stops: [
+        { address: 'Tiny Town, IL', state: 'IL' },
+        { address: 'Other Tiny Town, IL', state: 'IL' },
+      ]});
+      expect(r.eitherEndIsGarage).toBe(false);
+    });
+
+    it('warns when dead leg is charged but pickup is a garage city', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 250,
+        deadleg_miles: 50,
+        payment: 'credit_card',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Some Town, IL', state: 'IL' },
+        ],
+      });
+      expect(q.warnings.some(w => w.includes('garage city'))).toBe(true);
+    });
+
+    it('does NOT warn when both ends are non-garage cities (dead leg correctly applied)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 250,
+        deadleg_miles: 50,
+        payment: 'credit_card',
+        stops: [
+          { address: 'Small Town, IL', state: 'IL' },
+          { address: 'Other Small Town, IL', state: 'IL' },
+        ],
+      });
+      expect(q.warnings.some(w => w.includes('garage city'))).toBe(false);
+    });
+
+    it('does NOT warn when no dead leg is charged', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 250,
+        payment: 'credit_card',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Some Town, IL', state: 'IL' },
+        ],
+      });
+      expect(q.warnings.some(w => w.includes('garage city'))).toBe(false);
     });
   });
 });

@@ -1,7 +1,7 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-04-21
+Last updated: 2026-05-14
 
 ---
 
@@ -208,6 +208,33 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
 ---
 
 ## Session Log
+
+### Session: 2026-05-14 -- Pricing engine corrections (Lorie sync + Ryan clarification)
+- [x] Fix #1: Trip fee count -- ONE per booking always
+  - Date: 2026-05-14
+  - What changed: Removed `apply_base_to_return_leg` from `CustomerOverride` and `QuoteInput`; engine pushes single `Base Rate` line regardless of round-trip vs one-way; removed flag from jd_employee and jd_shuttle overrides
+  - Verification: 62/62 tests pass in src/tests/unit/landjetPricing.test.ts; rewrote JD round-trip tests to assert single base rate
+  - Notes: Ryan correction of earlier interpretation of Percy's "both legs" reply -- which referred to MILEAGE (naturally doubled because passenger_miles is round-trip total), not trip fee
+- [x] Fix #2: Remove QC -> Des Moines from flat rates + add per-route toll field
+  - Date: 2026-05-14
+  - What changed: Removed `QC -> Des Moines` from `FLAT_ROUTES` (now priced as distance trip); added `toll?: number` to `FlatRoute`; added `toll: 10` to QC -> O'Hare and QC -> Chicago Midway
+  - Verification: New tests under "QC -> Des Moines no longer a flat route" pass; `detectFlatRateRoute('Davenport', 'Des Moines')` returns null
+- [x] Fix #3: Flat-rate path applies per-route toll, auto 20% gratuity, fuel surcharge warning
+  - Date: 2026-05-14
+  - What changed: `buildFlatRateQuote` sums `flat_rate_toll` + `tolls` into a `Tolls` line; auto-applies `gratuity_pct = 0.20` when no explicit gratuity passed; warns concierge to add fuel surcharge manually. Added `flat_rate_toll`, `flat_rate_label`, `flat_rate_auto_gratuity_pct` to `QuoteInput`
+  - Verification: 4 new tests under "flat rate auto-gratuity and tolls" pass; explicit caller gratuity still wins over auto-20%
+- [x] Fix #4: Surface actual vs billed mileage in line item when min applied
+  - Date: 2026-05-14
+  - What changed: When `billable_miles > passenger_miles`, mileage line label reads "X mi billed, Y mi actual @ $rate/mi" so customer can see why mileage is 200 when route is 170
+  - Verification: 2 new tests in Standard Mileage Quote describe block pass
+- [x] Fix #5: Dead-leg garage warning when either trip end is a garage city
+  - Date: 2026-05-14
+  - What changed: Added `GARAGE_CITIES` constant + exported `isGarageCity()` + `checkGarageEnds()` helpers; engine warns when `deadleg_miles > 0` and either pickup or dropoff is a LandJet garage city. Warning only, charge still applies so concierge can override knowingly
+  - Verification: 5 new tests under "dead-leg garage warning" pass (helper unit tests + integration tests for warning emit/suppress)
+- [x] Tests + memory updated
+  - Date: 2026-05-14
+  - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
+  - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
 ### Session: 2026-04-21 (continued)
 - Completed 10 of 14 demo call action items

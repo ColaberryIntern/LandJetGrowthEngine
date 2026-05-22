@@ -11,12 +11,18 @@
  *   5. THIRD = SECONDARY + (% Gratuity * SECONDARY)
  *   6. GRAND = THIRD + (3% * THIRD) when CC payment
  *
- * Resolved decisions (Percy, 2026-05-06 + 2026-05-07):
- *   - Customer category detection: email-domain match for John Deere only; concierge sets others
- *   - Iowa 7% tax: applied only when pickup AND dropoff AND every intermediate stop are in IA
- *   - Kansas City: AI does NOT quote; inbound is forwarded to holly@kclandjet.com + scott@kclandjet.com
- *   - JD round-trip base rate: applies to BOTH legs for jd_employee and jd_shuttle (master doc rule
- *     "initial leg only" still holds for non-JD categories until Lorie confirms otherwise)
+ * Resolved decisions:
+ *   - Customer category detection (Percy 2026-05-06): email-domain match for John Deere only; concierge sets others
+ *   - Iowa 7% tax (Percy 2026-05-06): applied only when pickup AND dropoff AND every intermediate stop are in IA
+ *   - Kansas City (Percy 2026-05-06): AI does NOT quote; inbound is forwarded to holly@kclandjet.com + scott@kclandjet.com
+ *   - Trip fee (Ryan 2026-05-21, correcting earlier interpretation): ONE per booking always, regardless of
+ *     round-trip vs one-way and regardless of customer category. Percy's "both legs" on 5/7 referred to
+ *     mileage (naturally doubled on round-trips since passenger_miles is the full round-trip total),
+ *     NOT the trip fee. Customer category only changes the AMOUNT of the trip fee, never the count.
+ *   - Flat rates (Lorie 2026-05-21): airport routes only (+ Dormie golf network). Each flat rate
+ *     auto-includes 20% gratuity, plus per-route tolls if applicable, plus fuel surcharge.
+ *   - Dead leg (Ryan 2026-05-21): only applies when BOTH pickup AND dropoff are in cities where
+ *     LandJet has no garage. When either end is a garage city, no dead leg.
  */
 
 import { logger } from '../config/logger';
@@ -69,6 +75,9 @@ export interface QuoteInput {
   payment: Payment;
   // Optional: pre-priced flat-rate route override (when caller already detected one)
   flat_rate_amount?: number;
+  flat_rate_toll?: number;        // tolls baked into the flat-rate route (e.g., $10 for QC -> O'Hare)
+  flat_rate_label?: string;       // human-readable route label for line item
+  flat_rate_auto_gratuity_pct?: number; // override auto-applied gratuity (default 0.20 on flat rates)
   // Gratuity options (concierge picks one)
   gratuity_amount?: number; // flat dollars
   gratuity_pct?: number;    // 0-1 (e.g., 0.15 for 15%)
@@ -80,8 +89,6 @@ export interface QuoteInput {
   hospitality_cost?: number; // pre-markup; engine adds 10%
   additional_stops?: number; // for flat-rate trips, $50/stop
   additional_drivers_hours?: number; // hours of second driver service
-  // Round-trip behavior
-  apply_base_to_return_leg?: boolean; // default false (master doc rule)
   // Customer email (used for auto-category detection if customer_category not provided)
   customer_email?: string;
 }
@@ -209,15 +216,6 @@ interface CustomerOverride {
    * (used for Lockton, Investor, LJ Member where master doc says "$400 discount")
    */
   trip_fee_discount?: number;
-  /**
-   * Round-trip base rate behavior. When true, the base rate is billed on BOTH the
-   * initial AND return leg. When false/unset, master doc default applies (initial leg only).
-   *
-   * Per Percy on 2026-05-07: "It's should be both legs" -- confirmed for John Deere
-   * employees and JD Shuttle (the case the question was asked about). For other
-   * customer categories, master doc rule still applies until Lorie confirms otherwise.
-   */
-  apply_base_to_return_leg?: boolean;
   notes?: string[];
 }
 
@@ -228,16 +226,14 @@ const CUSTOMER_OVERRIDES: Record<CustomerCategory, CustomerOverride> = {
     mileage_rate: 2.20,
     min_mileage: 200,
     default_gratuity_amount: 100, // master doc: "$75 or $100"
-    apply_base_to_return_leg: true, // Percy confirmed 2026-05-07
-    notes: ['John Deere employee pricing applied', 'Base rate billed on both legs of round-trips'],
+    notes: ['John Deere employee pricing applied'],
   },
   jd_shuttle: {
     trip_fee: 250,
     mileage_rate: 1.65,
     min_mileage: 303.03, // master doc value
     default_gratuity_amount: 100,
-    apply_base_to_return_leg: true, // Percy confirmed 2026-05-07
-    notes: ['John Deere shuttle pricing applied', 'Base rate billed on both legs of round-trips'],
+    notes: ['John Deere shuttle pricing applied'],
   },
   lockton_employee: {
     mileage_rate: 2.20,
@@ -268,14 +264,18 @@ interface FlatRoute {
   label: string;
   includes_stops?: number; // default 2; each additional $50
   oneway: boolean;        // true = price is each way, false = price is full round-trip
+  toll?: number;          // optional per-route toll (e.g., $10 for QC -> O'Hare's tollway)
 }
 
 const FLAT_ROUTES: FlatRoute[] = [
   // LJ Connect to Airport
-  { label: 'QC -> O\'Hare', pattern: /(quad cities|davenport|bettendorf|moline|rock island).*?(o'?hare|ord)/i, price: 550, oneway: true },
-  { label: 'QC -> Chicago Midway', pattern: /(quad cities|davenport|bettendorf|moline|rock island).*?midway/i, price: 550, oneway: true },
+  // Tolls on the I-88/I-294 corridor to O'Hare ~$10 each way per Lorie 2026-05-21.
+  { label: 'QC -> O\'Hare', pattern: /(quad cities|davenport|bettendorf|moline|rock island).*?(o'?hare|ord)/i, price: 550, oneway: true, toll: 10 },
+  { label: 'QC -> Chicago Midway', pattern: /(quad cities|davenport|bettendorf|moline|rock island).*?midway/i, price: 550, oneway: true, toll: 10 },
   { label: 'QC -> Rockford', pattern: /(quad cities|davenport|bettendorf).*?rockford/i, price: 550, oneway: true },
-  { label: 'QC -> Des Moines', pattern: /(quad cities|davenport|bettendorf).*?des moines/i, price: 550, oneway: true },
+  // QC -> Des Moines was here at $550. Removed 2026-05-21 per Lorie:
+  // "Our flat rate is for airport pickups, not for Des Moines drop off."
+  // QC -> Des Moines is now priced as a regular distance trip.
   { label: 'QC -> Cedar Rapids', pattern: /(quad cities|davenport|bettendorf).*?cedar rapids/i, price: 300, oneway: true },
   { label: 'QC -> Peoria', pattern: /(quad cities|davenport|bettendorf).*?peoria/i, price: 300, oneway: true },
   { label: 'Dubuque -> O\'Hare', pattern: /dubuque.*?(o'?hare|ord)/i, price: 650, oneway: true },
@@ -340,6 +340,57 @@ export function isIowaOnlyTrip(input: Pick<QuoteInput, 'is_iowa_only' | 'stops'>
     return input.stops.every(s => s.state.trim().toUpperCase() === 'IA');
   }
   return !!input.is_iowa_only;
+}
+
+/**
+ * Cities where LandJet has a garage. Per Ryan 2026-05-21, dead-leg only
+ * applies when BOTH ends of a trip are in NON-garage cities. When either
+ * end is a garage city, no dead leg should be charged. Match is substring
+ * (case-insensitive) against the stop address since callers pass free-form
+ * city/address strings.
+ *
+ * Source: LandJet markets where they own/operate a garage. Keep in sync with
+ * the Market enum and the franchise vs corporate distinction.
+ */
+const GARAGE_CITIES = [
+  'quad cities', 'davenport', 'bettendorf', 'moline', 'rock island',
+  'des moines',
+  'dallas', 'fort worth',
+  'san antonio',
+  'omaha',
+  'austin',
+  'kansas city',
+];
+
+export function isGarageCity(address: string | undefined): boolean {
+  if (!address) return false;
+  const a = address.toLowerCase();
+  return GARAGE_CITIES.some(city => a.includes(city));
+}
+
+/**
+ * Check pickup and dropoff against the LandJet garage city list. Returns
+ * whether either end is a garage city, and which one (for the warning).
+ * Falls back to false when no stops list is provided -- caller assumes
+ * deadleg is legitimate unless we can prove otherwise.
+ */
+export function checkGarageEnds(input: Pick<QuoteInput, 'stops'>): {
+  eitherEndIsGarage: boolean;
+  garageEnd: string;
+} {
+  if (!input.stops || input.stops.length < 2) {
+    return { eitherEndIsGarage: false, garageEnd: '' };
+  }
+  const pickup = input.stops[0];
+  const dropoff = input.stops[input.stops.length - 1];
+  const pickupIsGarage = isGarageCity(pickup.address);
+  const dropoffIsGarage = isGarageCity(dropoff.address);
+  if (pickupIsGarage && dropoffIsGarage) {
+    return { eitherEndIsGarage: true, garageEnd: `both pickup (${pickup.address}) and dropoff (${dropoff.address})` };
+  }
+  if (pickupIsGarage) return { eitherEndIsGarage: true, garageEnd: `pickup (${pickup.address})` };
+  if (dropoffIsGarage) return { eitherEndIsGarage: true, garageEnd: `dropoff (${dropoff.address})` };
+  return { eitherEndIsGarage: false, garageEnd: '' };
 }
 
 // =====================================================================
@@ -411,37 +462,42 @@ export function calculateQuote(input: QuoteInput): QuoteOutput {
   // ------------------------------------------------------------------
   // DISTANCE MODE (default for one-way and round-trip)
   // ------------------------------------------------------------------
-  // Trip Fee (base rate)
-  // Resolution order for round-trip behavior:
-  //   1. Explicit input.apply_base_to_return_leg (caller override)
-  //   2. Customer category default (JD employee + JD Shuttle = both legs, per Percy 2026-05-07)
-  //   3. Master doc default (initial leg only)
-  const applyBaseToReturnLeg =
-    input.apply_base_to_return_leg ?? override.apply_base_to_return_leg ?? false;
+  // Trip Fee (base rate). Per Ryan 2026-05-21: ONE per booking always,
+  // regardless of round-trip vs one-way, regardless of customer category.
+  // The amount changes with the customer category override (JD = $200,
+  // Lockton/Investor/LJ Member = $0 after $400 discount, etc.) but the
+  // count is always one. Mileage naturally doubles on round-trips because
+  // passenger_miles input is the round-trip total.
   const passenger_miles = input.passenger_miles;
   const deadleg_miles = input.deadleg_miles ?? 0;
 
-  // Trip fee
-  if (input.service_type === 'one_way') {
-    lines.push({ label: 'Base Rate', amount: effective_trip_fee });
-  } else if (input.service_type === 'round_trip') {
-    if (applyBaseToReturnLeg) {
-      lines.push({ label: 'Base Rate (initial leg)', amount: effective_trip_fee });
-      lines.push({ label: 'Base Rate (return leg)', amount: effective_trip_fee });
-    } else {
-      lines.push({ label: 'Base Rate (initial leg only)', amount: effective_trip_fee });
-    }
-  }
+  lines.push({ label: 'Base Rate', amount: effective_trip_fee });
 
-  // Mileage (apply min)
+  // Mileage (apply min). Per Lorie 2026-05-21: surface actual vs billed in the
+  // line label itself so the customer can see WHY the mileage is 200 when the
+  // route is 170. Previously this was only in a warning, which is too easy to miss.
   const billable_miles = Math.max(passenger_miles, effective_min_mileage);
-  if (billable_miles > passenger_miles) {
+  const min_applied = billable_miles > passenger_miles;
+  if (min_applied) {
     warnings.push(`Mileage minimum ${effective_min_mileage} mi applied (actual ${passenger_miles} mi)`);
   }
-  lines.push({ label: `Distance Rate (${billable_miles} mi @ $${effective_mileage_rate.toFixed(2)}/mi)`, amount: billable_miles * effective_mileage_rate });
+  const mileageLabel = min_applied
+    ? `Distance Rate (${billable_miles} mi billed, ${passenger_miles} mi actual @ $${effective_mileage_rate.toFixed(2)}/mi)`
+    : `Distance Rate (${billable_miles} mi @ $${effective_mileage_rate.toFixed(2)}/mi)`;
+  lines.push({ label: mileageLabel, amount: billable_miles * effective_mileage_rate });
 
-  // Deadleg
+  // Deadleg. Per Ryan 2026-05-21: dead leg only applies when BOTH pickup AND
+  // dropoff are in non-garage cities. If either end is a LandJet garage city,
+  // dead leg should NOT be charged. Warn the concierge if this looks misapplied.
   if (deadleg_miles > 0) {
+    const garageCheck = checkGarageEnds(input);
+    if (garageCheck.eitherEndIsGarage) {
+      warnings.push(
+        `Dead leg charged but ${garageCheck.garageEnd} is a LandJet garage city. ` +
+        `Per Ryan 2026-05-21 policy, dead leg only applies when BOTH ends are non-garage cities. ` +
+        `Verify before quoting.`
+      );
+    }
     lines.push({ label: `Dead Leg (${deadleg_miles} mi @ $${rates.deadleg_per_mi.toFixed(2)}/mi)`, amount: deadleg_miles * rates.deadleg_per_mi });
   }
 
@@ -506,18 +562,36 @@ function buildFlatRateQuote(
   approvals_needed: string[],
 ): QuoteOutput {
   const rates = MARKET_RATES[market];
-  lines.push({ label: 'Flat Rate', amount: input.flat_rate_amount! });
+  const label = input.flat_rate_label ? `Flat Rate (${input.flat_rate_label})` : 'Flat Rate';
+  lines.push({ label, amount: input.flat_rate_amount! });
 
   // Additional stops past the 2 included
   if (input.additional_stops && input.additional_stops > 0) {
     lines.push({ label: `Additional Stops (${input.additional_stops} @ $50)`, amount: input.additional_stops * 50 });
   }
 
-  if (input.tolls) lines.push({ label: 'Tolls', amount: input.tolls });
+  // Route-specific toll baked into the flat rate (e.g., $10 for QC -> O'Hare's tollway).
+  // Per Lorie 2026-05-21: tolls are added on top of the flat rate, not bundled.
+  const toll = (input.tolls ?? 0) + (input.flat_rate_toll ?? 0);
+  if (toll > 0) lines.push({ label: 'Tolls', amount: toll });
+
+  // Auto-apply 20% gratuity on flat rates per Lorie 2026-05-21:
+  // "we automatically in the flat rates include 20% gratuity"
+  // Only auto-apply if caller didn't pass an explicit gratuity. Pass-through if they did.
+  const finalInput: QuoteInput = { ...input };
+  if (finalInput.gratuity_pct == null && finalInput.gratuity_amount == null) {
+    finalInput.gratuity_pct = input.flat_rate_auto_gratuity_pct ?? 0.20;
+  }
+
+  // Fuel surcharge isn't auto-applied on flat rates because we don't have the
+  // route mileage available here. Flag for concierge attention.
+  warnings.push('Fuel surcharge not included on flat-rate quotes (route miles not tracked). Concierge: add ' +
+    (typeof rates.fuel_surcharge_per_mi === 'number' ? `$${rates.fuel_surcharge_per_mi.toFixed(2)}/mi` : 'the per-mile surcharge') +
+    ' if applicable.');
 
   return finalizeQuote({
     market, customer_category, service_type: input.service_type,
-    pricing_mode: 'flat_rate', lines, input, rates, warnings, approvals_needed,
+    pricing_mode: 'flat_rate', lines, input: finalInput, rates, warnings, approvals_needed,
     suppress_trip_fee: true, suppress_mileage: true, suppress_fuel_surcharge: true,
   });
 }
