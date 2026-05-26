@@ -1,7 +1,7 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-05-14
+Last updated: 2026-05-26
 
 ---
 
@@ -208,6 +208,22 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
 ---
 
 ## Session Log
+
+### Session: 2026-05-26 -- Chrome extension in-app download + auto-detect
+- [x] Extension v1.0.2: marker.js + manifest content_scripts for growth.landjet.com
+  - Date: 2026-05-26
+  - What changed: Added `extension/marker.js` (sets `window.__LANDJET_EXT__` + dispatches `landjet-ext-ready` on growth.landjet.com / IP / localhost); extended manifest content_scripts; bumped version to 1.0.2; rebuilt `docs/extension-v1.0.2.zip` (11.2 KB)
+  - Verification: manifest validates; marker script wraps in try/catch and never throws into the host page
+- [x] Backend: `/api/extension/version` + `/api/extension/latest` public routes
+  - Date: 2026-05-26
+  - What changed: `src/routes/extension.ts` reads docs/ for `extension-vX.Y.Z.zip`, returns metadata or streams the latest zip. No auth (zip contains no secrets; users still need an API token to actually use the extension)
+  - Verification: `npx tsc --noEmit` clean; route mounted at `app.use('/api/extension', extensionRoutes)`
+- [x] Frontend: `useExtensionInstalled` hook + `ExtensionInstallButton` component on Outreach page
+  - Date: 2026-05-26
+  - What changed: Hook listens for `landjet-ext-ready` event + checks `window.__LANDJET_EXT__` + `<html data-landjet-ext-version>` fallback + fetches latest available version; button hides when installed AND current, shows amber "Update" when installed-but-outdated, shows blue "Download" when not installed; click triggers zip download + opens 4-step install modal
+  - Verification: `npx tsc --noEmit` clean on frontend
+- [ ] Deploy: update Dockerfile.backend to COPY docs/, rebuild, push to prod
+  - Notes: Dockerfile.backend currently lives only on VPS as untracked file; will modify in place during deploy and bring into the repo in a follow-up
 
 ### Session: 2026-05-14 -- Pricing engine corrections (Lorie sync + Ryan clarification)
 - [x] Fix #1: Trip fee count -- ONE per booking always

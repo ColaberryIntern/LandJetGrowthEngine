@@ -1,5 +1,18 @@
 const BASE_URL = '/api';
 
+// Extension (Chrome / LinkedIn Assistant) -- public endpoints, no auth.
+export interface ExtensionVersion {
+  version: string;
+  filename: string;
+  sizeBytes: number;
+  downloadUrl: string;
+}
+export async function getExtensionVersion(): Promise<ExtensionVersion> {
+  const res = await fetch(`${BASE_URL}/extension/version`);
+  if (!res.ok) throw new Error(`Failed to fetch extension version: ${res.status}`);
+  return res.json();
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
 

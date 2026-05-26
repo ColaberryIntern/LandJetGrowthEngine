@@ -10,6 +10,7 @@ import {
   OutreachContact, OutreachSettings,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
+import { ExtensionInstallButton } from '@/components/ExtensionInstallButton';
 
 interface CampaignOption { id: string; name: string; }
 
@@ -272,6 +273,7 @@ export default function OutreachPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ExtensionInstallButton />
           <button onClick={() => setShowSettings(!showSettings)}
             className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">
             Settings
