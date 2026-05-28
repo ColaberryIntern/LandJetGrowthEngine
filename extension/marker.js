@@ -1,32 +1,27 @@
 // LandJet extension presence marker.
 //
 // Runs on growth.landjet.com (and the local/IP dev URLs) at document_start.
-// Drops a marker into the page that the admin app can detect, so the "Download
-// Chrome Extension" button can hide itself when the extension is already
-// installed. No data is read from the page; no requests are made.
+// Tells the admin app the extension is installed so the "Download" button
+// can hide itself. No data is read from the page; no requests are made.
 //
-// The script injects an inline <script> to set window.__LANDJET_EXT__ because
-// content scripts live in an isolated world and can't directly set window
-// variables on the page. We also dispatch a CustomEvent that React can listen
-// for, which solves the race where the page mounts before the marker runs.
+// We CANNOT inject an inline <script> here because the admin app is Next.js
+// and its Content-Security-Policy blocks inline scripts. Instead we use two
+// CSP-safe signals that the React hook listens for:
+//   1. A data attribute on <html data-landjet-ext-version="X.Y.Z">. Setting
+//      an attribute on an existing element does not trip CSP.
+//   2. A CustomEvent dispatched on window. Events dispatched from a content
+//      script DO fire on listeners registered by the page (the DOM is shared
+//      across worlds; only the JS contexts are isolated).
+//
+// The event carries no `detail` payload because cross-world structured-clone
+// of detail objects has historically been quirky -- the hook reads the
+// version from the data attribute when the event fires.
 
 (function () {
   try {
     const VERSION = chrome.runtime.getManifest().version;
-    const ID = chrome.runtime.id || '';
-
-    // 1. Set the window variable via injected <script> so the page's JS sees it.
-    const s = document.createElement('script');
-    s.textContent =
-      'window.__LANDJET_EXT__ = { installed: true, version: ' + JSON.stringify(VERSION) +
-      ', id: ' + JSON.stringify(ID) + ' };' +
-      'window.dispatchEvent(new CustomEvent("landjet-ext-ready", { detail: window.__LANDJET_EXT__ }));';
-    (document.head || document.documentElement).appendChild(s);
-    s.remove();
-
-    // 2. Also set a data attribute on <html> as a fallback that does NOT
-    //    require the page to listen for the event.
     document.documentElement.setAttribute('data-landjet-ext-version', VERSION);
+    window.dispatchEvent(new CustomEvent('landjet-ext-ready'));
   } catch (e) {
     // Never throw out of a content script; the page must keep working.
   }
