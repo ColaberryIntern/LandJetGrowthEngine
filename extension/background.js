@@ -3,36 +3,29 @@
 // after a successful advance.
 //
 // Config resolution order (per call):
-//   1. config.js baked into the zip at download time (window.LANDJET_CONFIG)
+//   1. config.js baked into the zip at download time (self.LANDJET_CONFIG)
 //   2. chrome.storage.local (legacy manual paste, kept for back-compat)
 //   3. hard-coded fallbacks below
 //
 // When the backend injects config.js, the user never sees a token field.
 
+// IMPORTANT (Chrome MV3): importScripts() can ONLY be called at the top level
+// of the service worker, BEFORE the SW finishes installing. Calling it later
+// (e.g., on first message) throws "importScripts() of new scripts after
+// service worker installation is not allowed." So we load config.js here,
+// synchronously, at startup.
+try {
+  importScripts('config.js');
+} catch (e) {
+  // config.js missing -- non-personalized build. Fall back to chrome.storage.
+  self.LANDJET_CONFIG = null;
+}
+
 const DEFAULT_API_BASE = 'http://95.216.199.47:3011/api';
 const DEFAULT_OUTREACH_PAGE = 'http://95.216.199.47:4000/outreach';
 
-let bakedConfigPromise = null;
-function loadBakedConfig() {
-  if (bakedConfigPromise) return bakedConfigPromise;
-  // Service workers don't have window. We import config.js via importScripts,
-  // which runs the script in this worker's global scope. config.js assigns
-  // to `self.LANDJET_CONFIG` (`window` is aliased to `self` in workers).
-  bakedConfigPromise = new Promise((resolve) => {
-    try {
-      // chrome.runtime.getURL gives an absolute URL within the extension
-      importScripts(chrome.runtime.getURL('config.js'));
-      resolve(self.LANDJET_CONFIG || null);
-    } catch (e) {
-      // config.js not present in this build (e.g., loaded from a non-personalized zip)
-      resolve(null);
-    }
-  });
-  return bakedConfigPromise;
-}
-
 async function getConfig() {
-  const baked = await loadBakedConfig();
+  const baked = self.LANDJET_CONFIG || null;
   const stored = await chrome.storage.local.get(['apiToken', 'apiBase', 'outreachPage', 'testMode']);
   return {
     apiToken: (baked && baked.apiToken) || stored.apiToken || '',
