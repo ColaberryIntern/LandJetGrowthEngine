@@ -1289,7 +1289,7 @@ router.get('/lookup-by-linkedin-url', authorize('campaigns:read'), async (req: R
     // dataset (~8K rows). Switch to a normalized index column if this grows.
     const candidates = await Lead.findAll({
       where: { status: 'active', outreach_status: 'ACTIVE', linkedin_url: { [Op.ne]: null } },
-      attributes: ['id', 'first_name', 'last_name', 'company', 'linkedin_url', 'sequence_stage', 'campaign_id'],
+      attributes: ['id', 'first_name', 'last_name', 'company', 'linkedin_url', 'sequence_stage', 'campaign_id', 'notes'],
       include: [{ model: Campaign, as: 'outreachCampaign', attributes: ['id', 'name', 'ai_system_prompt', 'settings', 'sequence_steps'], required: false }],
     });
 
