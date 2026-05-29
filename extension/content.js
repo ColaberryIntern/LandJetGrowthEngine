@@ -156,14 +156,71 @@
     return null;
   }
 
-  function findVisibleConnectControl() {
-    // Either the direct "Connect" button on the profile header (rare for 3rd-
-    // degree) or a "Connect" item inside the dropdown menu that just opened.
-    const buttons = document.querySelectorAll('button, div[role="button"], [role="menuitem"]');
+  // LinkedIn renders many "Connect" buttons on a single profile page (sidebar:
+  // "More profiles for you", "People similar to..."). We need to specifically
+  // target the one for THIS profile. Two paths:
+  //   (a) A "Connect" button on the profile header itself (2nd-degree shows it
+  //       directly; 3rd-degree hides it behind "...")
+  //   (b) A "Connect" menu item inside the dropdown that opens after "..."
+  // We scope to those two locations and ignore everything else.
+
+  function isInSidebar(el) {
+    // LinkedIn's sidebars sit inside <aside> or sections with these classes.
+    // Walking up the parent chain is the cheapest reliable detector.
+    let p = el;
+    while (p && p !== document.body) {
+      if (p.tagName === 'ASIDE') return true;
+      const cls = (p.getAttribute && p.getAttribute('class')) || '';
+      if (/right-rail|browsemap|pymk|aside|sidebar|similar/i.test(cls)) return true;
+      const aria = (p.getAttribute && p.getAttribute('aria-label')) || '';
+      if (/similar to|more profiles|people you|people also/i.test(aria)) return true;
+      p = p.parentElement;
+    }
+    return false;
+  }
+
+  function matchesConnectLabel(label) {
+    const t = label.trim().toLowerCase();
+    if (!t) return false;
+    if (t === 'connect') return true;
+    // "Connect with Bill Polk", "Invite to connect" -- yes
+    if (/^connect( with|$| to)/.test(t)) return true;
+    if (/^invite .* to connect/.test(t)) return true;
+    return false;
+  }
+
+  function findConnectInOpenDropdown() {
+    // After "..." is clicked LinkedIn renders an artdeco-dropdown menu. Items
+    // are inside a [role="menu"] or .artdeco-dropdown__content container.
+    const menus = document.querySelectorAll('[role="menu"], .artdeco-dropdown__content, [role="menuitem"]');
+    for (const menu of menus) {
+      if (menu.offsetParent === null) continue;
+      const items = menu.querySelectorAll('button, [role="menuitem"], [role="button"], div, span, a');
+      for (const it of items) {
+        if (it.offsetParent === null) continue;
+        const label = (it.getAttribute('aria-label') || '') + ' ' + (it.textContent || '');
+        if (matchesConnectLabel(label)) {
+          // Click the smallest clickable ancestor.
+          return it.closest('button, [role="menuitem"], [role="button"], a') || it;
+        }
+      }
+    }
+    return null;
+  }
+
+  function findConnectOnProfileHeader() {
+    // The main profile action row sits at the top of <main>. Restrict to
+    // buttons within the first ~700px of viewport so sidebar matches are
+    // excluded, and additionally reject anything that lives in a sidebar
+    // container via isInSidebar().
+    const buttons = document.querySelectorAll('main button, header button');
     for (const b of buttons) {
-      if (b.offsetParent === null) continue; // not visible
-      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).trim().toLowerCase();
-      if (/(^|\s)connect(\s|$|,)/.test(label) && !label.includes('connection')) {
+      if (b.offsetParent === null) continue;
+      if (isInSidebar(b)) continue;
+      const rect = b.getBoundingClientRect();
+      if (rect.top > 700 || rect.top < 0) continue;
+      const label = (b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '');
+      if (matchesConnectLabel(label) && !label.toLowerCase().includes('connection')) {
         return b;
       }
     }
@@ -213,13 +270,15 @@
     }
 
     // STEP 3: full flow -- need to click Connect first.
-    let connect = findVisibleConnectControl();
+    // First try the profile header (2nd-degree shows Connect directly there).
+    // Otherwise click "..." and look for Connect inside that dropdown only.
+    let connect = findConnectOnProfileHeader();
     if (!connect) {
       const more = findMoreActionsButton();
       if (!more) throw new Error('Could not find LinkedIn\'s Connect button or "..." menu. The profile may not be connectable.');
       more.click();
       try {
-        connect = await waitFor(findVisibleConnectControl, { timeout: 3000 });
+        connect = await waitFor(findConnectInOpenDropdown, { timeout: 3000 });
       } catch {
         throw new Error('Opened the "..." menu but no Connect option appeared. The lead may already be a 1st-degree connection (try Message instead).');
       }
