@@ -130,22 +130,50 @@
   margin: 2px 0 6px 0;
 }
 
-.landjet-insert {
+.landjet-auto {
   display: block;
   width: 100%;
-  padding: 9px 12px;
+  padding: 11px 12px;
   background: #2b6cb0;
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
   border: 0;
   border-radius: 6px;
   cursor: pointer;
-  margin: 4px 0 8px 0;
+  margin: 6px 0 6px 0;
+}
+
+.landjet-auto:hover {
+  background: #1a365d;
+}
+
+.landjet-auto:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.landjet-insert {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: #ffffff;
+  color: #2b6cb0;
+  font-weight: 600;
+  font-size: 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0 0 8px 0;
+}
+
+.landjet-insert-secondary {
+  background: #ffffff;
+  color: #4a5568;
 }
 
 .landjet-insert:hover {
-  background: #1a365d;
+  background: #edf2f7;
 }
 
 .landjet-insert:disabled {

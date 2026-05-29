@@ -82,8 +82,9 @@
         ${isLinkedInStep ? `
           <textarea class="landjet-msg" rows="5">${escapeHtml(messageBody)}</textarea>
           <div class="landjet-char-count">${messageBody.length} chars</div>
-          <button class="landjet-insert">Insert into Connect Note</button>
-          <p class="landjet-hint">Open LinkedIn's "Connect &raquo; Add a note" dialog first, then click above to paste. After you click LinkedIn's Send button, the lead will be marked Done automatically.</p>
+          <button class="landjet-auto">&#9889; Open Connect &amp; Paste</button>
+          <button class="landjet-insert landjet-insert-secondary">Paste only (dialog already open)</button>
+          <p class="landjet-hint">Click the lightning button -- it opens LinkedIn's Connect &raquo; Add a note dialog and pastes the message for you. Then just click LinkedIn's Send to mark Done.</p>
         ` : `
           <div class="landjet-warning">Next step for this lead is <strong>${escapeHtml(channel)}</strong>, not LinkedIn. Open the outreach page to handle.</div>
         `}
@@ -108,6 +109,132 @@
         }
       });
     }
+
+    const autoBtn = panel.querySelector('.landjet-auto');
+    if (autoBtn) {
+      autoBtn.addEventListener('click', async () => {
+        const textarea = panel.querySelector('.landjet-msg');
+        const text = textarea.value;
+        autoBtn.disabled = true;
+        autoBtn.textContent = 'Opening...';
+        try {
+          await openConnectAndPaste(text);
+          autoBtn.textContent = '⚡ Open Connect & Paste';
+        } catch (e) {
+          setStatus(e.message || 'Could not auto-open the Connect dialog.', 'error');
+        } finally {
+          autoBtn.disabled = false;
+          autoBtn.textContent = '⚡ Open Connect & Paste';
+        }
+      });
+    }
+  }
+
+  // ----- Auto flow: click LinkedIn's Connect -> Add a note -> paste -----
+
+  function waitFor(checkFn, { timeout = 4000, interval = 100 } = {}) {
+    return new Promise((resolve, reject) => {
+      const t0 = Date.now();
+      const tick = () => {
+        const result = checkFn();
+        if (result) return resolve(result);
+        if (Date.now() - t0 > timeout) return reject(new Error('waitFor timeout'));
+        setTimeout(tick, interval);
+      };
+      tick();
+    });
+  }
+
+  function findMoreActionsButton() {
+    // The "..." overflow button on the profile header. Multiple aria-labels
+    // across LinkedIn versions: "More actions", "More", "More profile actions".
+    const candidates = document.querySelectorAll('main button[aria-label], header button[aria-label]');
+    for (const b of candidates) {
+      const label = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (label.includes('more') && b.offsetParent !== null) return b;
+    }
+    return null;
+  }
+
+  function findVisibleConnectControl() {
+    // Either the direct "Connect" button on the profile header (rare for 3rd-
+    // degree) or a "Connect" item inside the dropdown menu that just opened.
+    const buttons = document.querySelectorAll('button, div[role="button"], [role="menuitem"]');
+    for (const b of buttons) {
+      if (b.offsetParent === null) continue; // not visible
+      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).trim().toLowerCase();
+      if (/(^|\s)connect(\s|$|,)/.test(label) && !label.includes('connection')) {
+        return b;
+      }
+    }
+    return null;
+  }
+
+  function findAddNoteButton() {
+    // In the post-Connect modal LinkedIn shows two buttons: "Send without a note"
+    // and "Add a note". Pick the latter.
+    const dialog = document.querySelector('[role="dialog"]');
+    if (!dialog) return null;
+    const buttons = dialog.querySelectorAll('button');
+    for (const b of buttons) {
+      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).toLowerCase();
+      if (label.includes('add a note')) return b;
+    }
+    return null;
+  }
+
+  // Orchestrator: progressively click through Connect -> Add a note, then paste.
+  async function openConnectAndPaste(text) {
+    setStatus('Opening Connect...', 'info');
+
+    // 1. If a connect dialog is already open with a note textarea, just paste.
+    if (findConnectNoteTextarea()) {
+      const ok = insertIntoConnectNote(text);
+      if (!ok) throw new Error('Found the dialog but could not write to the note field.');
+      setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
+      return;
+    }
+
+    // 2. Try to find a directly-visible Connect button first.
+    let connect = findVisibleConnectControl();
+
+    // 3. Otherwise open the "..." menu and look for Connect inside it.
+    if (!connect) {
+      const more = findMoreActionsButton();
+      if (!more) throw new Error('Could not find LinkedIn\'s Connect button or "..." menu. The profile may not be connectable.');
+      more.click();
+      try {
+        connect = await waitFor(findVisibleConnectControl, { timeout: 2000 });
+      } catch {
+        throw new Error('Opened the "..." menu but no Connect option appeared. The lead may already be a 1st-degree connection (try Message instead).');
+      }
+    }
+
+    connect.click();
+
+    // 4. Wait for the "Add a note" button in the dialog.
+    setStatus('Choosing "Add a note"...', 'info');
+    let addNote;
+    try {
+      addNote = await waitFor(findAddNoteButton, { timeout: 3500 });
+    } catch {
+      throw new Error('Clicked Connect but LinkedIn did not show the "Add a note" option. Try clicking Connect manually, then use "Paste only" below.');
+    }
+    addNote.click();
+
+    // 5. Wait for the textarea and paste.
+    let textarea;
+    try {
+      textarea = await waitFor(findConnectNoteTextarea, { timeout: 3000 });
+    } catch {
+      throw new Error('The note field did not appear. LinkedIn may have rate-limited you.');
+    }
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    nativeSetter.call(textarea, text);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.focus();
+
+    setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
   }
 
   function setStatus(text, kind = 'info') {
