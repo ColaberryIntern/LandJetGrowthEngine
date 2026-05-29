@@ -625,3 +625,149 @@ export async function getTestSendCount(): Promise<number> {
   const sends = await getTestSends();
   return sends.length;
 }
+
+// --- Cached LinkedIn Draft ---
+//
+// Both the /today and /lookup-by-linkedin-url endpoints used to generate AI
+// messages independently. Since OpenAI is called with temperature 0.7 each
+// time, the two endpoints returned different messages for the same lead --
+// confusing because the Outreach page and the Chrome extension overlay both
+// claim to show "today's outreach message" but they didn't agree.
+//
+// Fix: cache the generated body on the lead itself, keyed by sequence_stage.
+// Both endpoints share this helper. Cache invalidates naturally when the
+// lead advances to a new stage. The /rewrite-draft endpoint overwrites the
+// cache so user-requested tone changes propagate to the extension too.
+//
+// Storage layout (lead.notes JSONB):
+//   notes.linkedin_draft = { stage: number, body: string, at: ISO, source: 'ai' | 'rewrite' }
+
+export interface CachedLinkedInDraft {
+  stage: number;
+  body: string;
+  at: string;
+  source: 'ai' | 'rewrite';
+}
+
+export function readCachedLinkedInDraft(lead: Lead): CachedLinkedInDraft | null {
+  const notes = (lead.notes as Record<string, unknown>) || {};
+  const cached = notes.linkedin_draft as CachedLinkedInDraft | undefined;
+  if (!cached || typeof cached !== 'object') return null;
+  if (cached.stage !== lead.sequence_stage) return null; // stale (lead advanced)
+  if (!cached.body || typeof cached.body !== 'string') return null;
+  return cached;
+}
+
+export async function writeCachedLinkedInDraft(
+  leadId: number,
+  draft: CachedLinkedInDraft,
+): Promise<void> {
+  const lead = await Lead.findByPk(leadId);
+  if (!lead) return;
+  const notes = { ...((lead.notes as Record<string, unknown>) || {}) };
+  notes.linkedin_draft = draft;
+  await lead.update({ notes });
+}
+
+/**
+ * Generate (or return the cached) AI LinkedIn message for a lead.
+ *
+ * Cache hits return immediately without an OpenAI call. Cache misses
+ * generate via OpenAI, persist to lead.notes, and return.
+ *
+ * Returns { body, error, source }. On error, body may be '' and the caller
+ * should surface `error` to the user instead of falling back to raw prompt
+ * text.
+ */
+export async function getOrGenerateLinkedInDraft(args: {
+  lead: Lead;
+  campaign: any;
+  channel: string; // 'linkedin_connect' | 'linkedin_message'
+  stepPrompt: string;
+  vars: Record<string, string>;
+  senderName: string;
+  senderFirstName: string;
+}): Promise<{ body: string; error: string | null; source: 'cache' | 'ai' }> {
+  const { lead, channel, stepPrompt, vars, senderName, senderFirstName } = args;
+
+  // 1. Cache check
+  const cached = readCachedLinkedInDraft(lead);
+  if (cached) {
+    return { body: cached.body, error: null, source: 'cache' };
+  }
+
+  // 2. Generate via AI
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return { body: '', error: 'OPENAI_API_KEY is not configured on the server.', source: 'ai' };
+  }
+
+  const maxChars = channel === 'linkedin_connect' ? 300 : 400;
+  const interpolatedPrompt = interpolateVariables(stepPrompt, vars);
+  const recipientFirst = lead.first_name || '';
+  const recipientLast = lead.last_name || '';
+  const recipientTitle = (lead as any).title || '';
+  const recipientCompany = lead.company || '';
+
+  const systemPrompt = `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up direct message'} FROM the SENDER (${senderName}) TO the RECIPIENT (${recipientFirst} ${recipientLast}, ${recipientTitle} at ${recipientCompany}).
+
+CRITICAL RULES:
+- The message is written FROM the sender's perspective TO the recipient
+- Greet the RECIPIENT by their first name: "Hi ${recipientFirst}"
+- Sign off as the SENDER: ${senderFirstName}
+- DO NOT write as if you are the recipient
+- DO NOT greet the sender by name
+- DO NOT ask the sender for their services -- the SENDER is offering services
+- Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly.
+
+STYLE (very important):
+- This is a LinkedIn message, NOT an email. Keep it short, conversational, casual professional.
+- ${channel === 'linkedin_connect' ? '2 sentences max. Hook + ask. Under 300 chars.' : '2-3 sentences max. Sound like a real person messaging another person, not a marketing pitch. No paragraph blocks. Under 400 chars.'}
+- Do NOT structure it like an email (no "I hope this finds you well", no multi-paragraph sales pitch, no formal closings).
+- Hard cap: ${maxChars} characters total INCLUDING greeting and sign-off.`;
+
+  try {
+    const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: interpolatedPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 256,
+      }),
+    });
+
+    if (!aiResp.ok) {
+      const errBody = await aiResp.text().catch(() => '');
+      logger.warn('LinkedIn AI generation failed', {
+        channel, status: aiResp.status, error: errBody.slice(0, 200),
+      });
+      const error = aiResp.status === 429
+        ? 'AI is unavailable: OpenAI quota exceeded. Top up billing at platform.openai.com.'
+        : `AI is unavailable (upstream ${aiResp.status}). Try again in a moment.`;
+      return { body: '', error, source: 'ai' };
+    }
+
+    const aiData = (await aiResp.json()) as any;
+    let body = (aiData.choices?.[0]?.message?.content || '').trim();
+    if (body.length > maxChars) body = body.slice(0, maxChars).trim();
+    if (!body) return { body: '', error: 'AI returned an empty response.', source: 'ai' };
+
+    // 3. Persist to cache
+    await writeCachedLinkedInDraft(lead.id, {
+      stage: lead.sequence_stage,
+      body,
+      at: new Date().toISOString(),
+      source: 'ai',
+    });
+
+    return { body, error: null, source: 'ai' };
+  } catch (e) {
+    logger.warn('LinkedIn AI generation threw', { channel, error: (e as Error).message });
+    return { body: '', error: 'AI is unavailable (network error). Try again in a moment.', source: 'ai' };
+  }
+}

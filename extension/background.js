@@ -114,3 +114,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true; // keep channel open for async response
 });
+
+// On install or update, reload any open outreach tabs so the React app
+// re-runs and picks up the marker (which hides the Download button) and
+// pulls fresh drafts. Without this the user has to manually refresh.
+chrome.runtime.onInstalled.addListener(() => {
+  reloadOutreachTabs().catch(() => {});
+});

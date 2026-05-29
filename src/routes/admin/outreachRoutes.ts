@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, removeLeadFromCampaign, blockLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount } from '../../services/outreachQueryService';
+import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, removeLeadFromCampaign, blockLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount, getOrGenerateLinkedInDraft, writeCachedLinkedInDraft } from '../../services/outreachQueryService';
 import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
@@ -698,86 +698,37 @@ router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Res
   try {
     const leads = await getLeadsForToday();
 
+    // Look up sender details once so both this and the lookup endpoint use
+    // the same value for the AI prompt (and so any name change propagates).
+    const todaySettings = await getOutreachSettings();
+    const todaySenderName = todaySettings.sender_name;
+    const todaySenderFirst = todaySenderName.split(' ')[0];
+
     const result = await Promise.all(leads.map(async c => {
       const stepInfo = getStepInfo(c);
       const channel = stepInfo?.channel || 'email';
       const campaign = c.campaign || (c as any).outreachCampaign;
       const vars = await mergeVariables(c, campaign);
 
-      // For LinkedIn steps, generate a clean message via AI (no variables or instructions visible)
+      // For LinkedIn steps, use the shared cache helper so /today and
+      // /lookup-by-linkedin-url return identical text. Cache hits avoid the
+      // OpenAI call entirely.
       let linkedinMessage: string | null = null;
       let linkedinUrl: string | null = c.linkedin_url || null;
-      let aiError: string | null = null; // populated if AI fails so the UI can warn the user
+      let aiError: string | null = null;
       if (channel.startsWith('linkedin') && stepInfo?.prompt) {
-        const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
-        const apiKey = process.env.OPENAI_API_KEY;
-        // LinkedIn DMs technically allow more, but real follow-up DMs that get
-        // read are short and conversational, not email-shaped. 400 chars is
-        // the cap (~2-3 sentences). Connection request notes cap at 300 per
-        // LinkedIn's hard limit.
-        const maxChars = channel === 'linkedin_connect' ? 300 : 400;
-        if (!apiKey) {
-          aiError = 'OPENAI_API_KEY is not configured on the server.';
-        } else {
-          try {
-            const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-              body: JSON.stringify({
-                model: process.env.AI_MODEL || 'gpt-4o',
-                messages: [
-                  { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up direct message'} FROM the SENDER (${vars.sender_name || vars.sender_first_name || 'the sender'}) TO the RECIPIENT (${c.first_name} ${c.last_name || ''}, ${c.title || ''} at ${c.company || ''}).
-
-CRITICAL RULES:
-- The message is written FROM the sender's perspective TO the recipient
-- Greet the RECIPIENT by their first name: "Hi ${c.first_name}"
-- Sign off as the SENDER: ${vars.sender_first_name || vars.sender_name || 'the sender'}
-- DO NOT write as if you are the recipient
-- DO NOT greet the sender by name
-- DO NOT ask the sender for their services -- the SENDER is offering services
-- Generate ONLY the final message text. No instructions, no labels, no quotation marks. Ready to copy and paste directly.
-
-STYLE (very important):
-- This is a LinkedIn message, NOT an email. Keep it short, conversational, casual professional.
-- ${channel === 'linkedin_connect' ? '2 sentences max. Hook + ask. Under 300 chars.' : '2-3 sentences max. Sound like a real person messaging another person, not a marketing pitch. No paragraph blocks. Under 400 chars.'}
-- Do NOT structure it like an email (no "I hope this finds you well", no multi-paragraph sales pitch, no formal closings).
-- Hard cap: ${maxChars} characters total INCLUDING greeting and sign-off.` },
-                  { role: 'user', content: interpolatedPrompt },
-                ],
-                temperature: 0.7,
-                max_tokens: 256,
-              }),
-            });
-            if (aiResp.ok) {
-              const aiData = (await aiResp.json()) as any;
-              const msg = (aiData.choices?.[0]?.message?.content || '').trim();
-              if (msg) linkedinMessage = msg;
-              else aiError = 'AI returned an empty response.';
-            } else {
-              const errBody = await aiResp.text().catch(() => '');
-              logger.warn('LinkedIn AI generation failed', {
-                channel, status: aiResp.status, error: errBody.slice(0, 200),
-              });
-              aiError = aiResp.status === 429
-                ? 'AI is unavailable: OpenAI quota exceeded. Top up billing at platform.openai.com.'
-                : `AI is unavailable (upstream ${aiResp.status}). Try again in a moment.`;
-            }
-          } catch (e) {
-            logger.warn('LinkedIn AI generation threw', {
-              channel, error: (e as Error).message,
-            });
-            aiError = 'AI is unavailable (network error). Try again in a moment.';
-          }
-        }
-        // Hard-cap on AI output (do NOT fall back to the raw prompt -- that
-        // dumped instruction text into the message field, which Ryan saw on
-        // 2026-05-14 when AI was failing silently). When AI is unavailable,
-        // leave the message empty and let the UI show aiError instead.
-        if (linkedinMessage && linkedinMessage.length > maxChars) {
-          linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
-        }
+        const draft = await getOrGenerateLinkedInDraft({
+          lead: c,
+          campaign,
+          channel,
+          stepPrompt: stepInfo.prompt,
+          vars,
+          senderName: todaySenderName,
+          senderFirstName: todaySenderFirst,
+        });
+        if (draft.body) linkedinMessage = draft.body;
+        if (draft.error) aiError = draft.error;
       }
-
       return {
         contact_id: c.id,
         name: `${c.first_name} ${c.last_name}`.trim(),
@@ -985,6 +936,14 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
       // any AI overrun gets enforced.
       let body = cleaned;
       if (body.length > linkedInMaxChars) body = body.slice(0, linkedInMaxChars).trim();
+      // Persist the rewritten message to the lead's draft cache so the Chrome
+      // extension (which reads the cache) reflects the tone change too.
+      await writeCachedLinkedInDraft(lead.id, {
+        stage: lead.sequence_stage,
+        body,
+        at: new Date().toISOString(),
+        source: 'rewrite',
+      });
       recordAgentRun('draft_rewriter', { tone, channel }).catch(() => {});
       return res.json({ subject: current_subject || '', body, source: 'ai' });
     }
@@ -1342,51 +1301,25 @@ router.get('/lookup-by-linkedin-url', authorize('campaigns:read'), async (req: R
     const channel = stepInfo?.channel || 'email';
     const vars = await mergeVariables(match, campaign);
 
-    // Generate the message for whatever step they're on. For LinkedIn steps
-    // this gives us the actual paste-ready text. For email steps we still
-    // generate a draft so the extension can offer something, even if the
-    // user usually wouldn't paste an email body into LinkedIn.
+    // Use the shared cache helper so this endpoint returns identical text to
+    // /today. Cache hits avoid the OpenAI call entirely.
     let body = '';
     let aiError: string | null = null;
     if (channel.startsWith('linkedin') && stepInfo?.prompt) {
-      const interpolatedPrompt = interpolateVariables(stepInfo.prompt, vars);
-      const apiKey = process.env.OPENAI_API_KEY;
-      const maxChars = channel === 'linkedin_connect' ? 300 : 400;
-      const styleNote = channel === 'linkedin_connect'
-        ? '2 sentences max. Hook + ask. Under 300 chars.'
-        : '2-3 sentences max. Sound like a real person messaging another person. No paragraph blocks. Under 400 chars.';
-      if (!apiKey) {
-        aiError = 'OPENAI_API_KEY not configured.';
-      } else {
-        try {
-          const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: process.env.AI_MODEL || 'gpt-4o',
-              messages: [
-                { role: 'system', content: `You are writing a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'follow-up DM'}. This is LinkedIn, NOT an email. ${styleNote} Generate ONLY the final message text. No instructions, no labels. Hard cap: ${maxChars} chars.` },
-                { role: 'user', content: interpolatedPrompt },
-              ],
-              temperature: 0.7,
-              max_tokens: 256,
-            }),
-          });
-          if (aiResp.ok) {
-            const aiData = (await aiResp.json()) as any;
-            const msg = (aiData.choices?.[0]?.message?.content || '').trim();
-            body = msg.length > maxChars ? msg.slice(0, maxChars).trim() : msg;
-          } else {
-            aiError = `AI unavailable (status ${aiResp.status})`;
-          }
-        } catch (e) {
-          aiError = `AI unavailable: ${(e as Error).message}`;
-        }
-      }
+      const lookupSettings = await getOutreachSettings();
+      const senderName = lookupSettings.sender_name;
+      const draft = await getOrGenerateLinkedInDraft({
+        lead: match,
+        campaign,
+        channel,
+        stepPrompt: stepInfo.prompt,
+        vars,
+        senderName,
+        senderFirstName: senderName.split(' ')[0],
+      });
+      body = draft.body;
+      aiError = draft.error;
     } else if (channel === 'email' && campaign) {
-      // For non-LinkedIn steps, return the prompt template so the extension
-      // can show "this lead's next step is email, not LinkedIn -- no message to insert"
-      body = '';
       aiError = `Next step is ${channel}, not LinkedIn. Nothing to insert here.`;
     }
 
