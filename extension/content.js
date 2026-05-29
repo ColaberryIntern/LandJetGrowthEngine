@@ -172,69 +172,86 @@
 
   function findAddNoteButton() {
     // In the post-Connect modal LinkedIn shows two buttons: "Send without a note"
-    // and "Add a note". Pick the latter.
-    const dialog = document.querySelector('[role="dialog"]');
-    if (!dialog) return null;
-    const buttons = dialog.querySelectorAll('button');
+    // and "Add a note". Pick the latter. LinkedIn's modal uses `artdeco-modal`
+    // classes and a mix of role="dialog", role="alertdialog", or sometimes no
+    // role at all. Easiest: scan ALL visible buttons on the page for the label
+    // and pick the first visible match.
+    const buttons = document.querySelectorAll('button, [role="button"]');
     for (const b of buttons) {
-      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).toLowerCase();
-      if (label.includes('add a note')) return b;
+      if (b.offsetParent === null) continue;
+      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).toLowerCase().trim();
+      // Match "Add a note", "add note", but NOT "Send without a note".
+      if (/add a note|add note/.test(label) && !/without/.test(label)) {
+        return b;
+      }
     }
     return null;
   }
 
   // Orchestrator: progressively click through Connect -> Add a note, then paste.
+  // Resilient to LinkedIn modal timing -- each step uses a 6s waitFor and the
+  // flow can resume mid-state (e.g. if the "Add a note" modal is already open
+  // when user clicks our button, we skip the earlier steps).
   async function openConnectAndPaste(text) {
     setStatus('Opening Connect...', 'info');
 
-    // 1. If a connect dialog is already open with a note textarea, just paste.
+    // STEP 1: already at the final state? (note textarea visible)
     if (findConnectNoteTextarea()) {
-      const ok = insertIntoConnectNote(text);
-      if (!ok) throw new Error('Found the dialog but could not write to the note field.');
+      pasteIntoTextarea(findConnectNoteTextarea(), text);
       setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
       return;
     }
 
-    // 2. Try to find a directly-visible Connect button first.
-    let connect = findVisibleConnectControl();
+    // STEP 2: at the "Add a note?" modal? Just click Add a note + paste.
+    let addNote = findAddNoteButton();
+    if (addNote) {
+      addNote.click();
+      const textarea = await waitFor(findConnectNoteTextarea, { timeout: 6000 });
+      pasteIntoTextarea(textarea, text);
+      setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
+      return;
+    }
 
-    // 3. Otherwise open the "..." menu and look for Connect inside it.
+    // STEP 3: full flow -- need to click Connect first.
+    let connect = findVisibleConnectControl();
     if (!connect) {
       const more = findMoreActionsButton();
       if (!more) throw new Error('Could not find LinkedIn\'s Connect button or "..." menu. The profile may not be connectable.');
       more.click();
       try {
-        connect = await waitFor(findVisibleConnectControl, { timeout: 2000 });
+        connect = await waitFor(findVisibleConnectControl, { timeout: 3000 });
       } catch {
         throw new Error('Opened the "..." menu but no Connect option appeared. The lead may already be a 1st-degree connection (try Message instead).');
       }
     }
-
     connect.click();
 
-    // 4. Wait for the "Add a note" button in the dialog.
+    // STEP 4: wait for the "Add a note" button -- modal can take 1-2s to render.
     setStatus('Choosing "Add a note"...', 'info');
-    let addNote;
     try {
-      addNote = await waitFor(findAddNoteButton, { timeout: 3500 });
+      addNote = await waitFor(findAddNoteButton, { timeout: 6000 });
     } catch {
-      throw new Error('Clicked Connect but LinkedIn did not show the "Add a note" option. Try clicking Connect manually, then use "Paste only" below.');
+      throw new Error('Clicked Connect but the "Add a note" button did not appear in 6s. Click it yourself, then hit ⚡ again or use "Paste only".');
     }
     addNote.click();
 
-    // 5. Wait for the textarea and paste.
+    // STEP 5: wait for textarea and paste.
     let textarea;
     try {
-      textarea = await waitFor(findConnectNoteTextarea, { timeout: 3000 });
+      textarea = await waitFor(findConnectNoteTextarea, { timeout: 6000 });
     } catch {
-      throw new Error('The note field did not appear. LinkedIn may have rate-limited you.');
+      throw new Error('The note field did not appear within 6s. LinkedIn may have rate-limited you.');
     }
+    pasteIntoTextarea(textarea, text);
+
+    setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
+  }
+
+  function pasteIntoTextarea(textarea, text) {
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
     nativeSetter.call(textarea, text);
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     textarea.focus();
-
-    setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
   }
 
   function setStatus(text, kind = 'info') {
