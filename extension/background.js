@@ -1,17 +1,46 @@
 // LandJet LinkedIn Assistant -- background service worker.
 // Holds the API token, makes backend calls, and refreshes outreach tabs
 // after a successful advance.
+//
+// Config resolution order (per call):
+//   1. config.js baked into the zip at download time (window.LANDJET_CONFIG)
+//   2. chrome.storage.local (legacy manual paste, kept for back-compat)
+//   3. hard-coded fallbacks below
+//
+// When the backend injects config.js, the user never sees a token field.
 
 const DEFAULT_API_BASE = 'http://95.216.199.47:3011/api';
 const DEFAULT_OUTREACH_PAGE = 'http://95.216.199.47:4000/outreach';
 
+let bakedConfigPromise = null;
+function loadBakedConfig() {
+  if (bakedConfigPromise) return bakedConfigPromise;
+  // Service workers don't have window. We import config.js via importScripts,
+  // which runs the script in this worker's global scope. config.js assigns
+  // to `self.LANDJET_CONFIG` (`window` is aliased to `self` in workers).
+  bakedConfigPromise = new Promise((resolve) => {
+    try {
+      // chrome.runtime.getURL gives an absolute URL within the extension
+      importScripts(chrome.runtime.getURL('config.js'));
+      resolve(self.LANDJET_CONFIG || null);
+    } catch (e) {
+      // config.js not present in this build (e.g., loaded from a non-personalized zip)
+      resolve(null);
+    }
+  });
+  return bakedConfigPromise;
+}
+
 async function getConfig() {
+  const baked = await loadBakedConfig();
   const stored = await chrome.storage.local.get(['apiToken', 'apiBase', 'outreachPage', 'testMode']);
   return {
-    apiToken: stored.apiToken || '',
-    apiBase: stored.apiBase || DEFAULT_API_BASE,
+    apiToken: (baked && baked.apiToken) || stored.apiToken || '',
+    apiBase: (baked && baked.apiBase) || stored.apiBase || DEFAULT_API_BASE,
     outreachPage: stored.outreachPage || DEFAULT_OUTREACH_PAGE,
     testMode: !!stored.testMode,
+    bakedIn: !!(baked && baked.apiToken), // true => popup hides the token UI
+    bakedEmail: (baked && baked.userEmail) || '',
   };
 }
 
@@ -81,8 +110,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         reloadOutreachTabs().catch(() => {});
         sendResponse({ ok: true });
       } else if (msg.type === 'PING') {
-        const { apiToken, apiBase } = await getConfig();
-        sendResponse({ ok: true, hasToken: !!apiToken, apiBase });
+        const { apiToken, apiBase, bakedIn, bakedEmail } = await getConfig();
+        sendResponse({ ok: true, hasToken: !!apiToken, apiBase, bakedIn, bakedEmail });
       } else {
         sendResponse({ ok: false, error: 'Unknown message type' });
       }

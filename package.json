@@ -26,6 +26,8 @@
   "license": "ISC",
   "description": "AI-driven automated engagement platform for CEOs managing high-value contacts",
   "dependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.17",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

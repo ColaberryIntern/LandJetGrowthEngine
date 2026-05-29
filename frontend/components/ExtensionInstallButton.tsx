@@ -14,6 +14,8 @@ import { useExtensionInstalled } from '@/lib/useExtensionInstalled';
 export function ExtensionInstallButton() {
   const { loading, installed, installedVersion, latest, needsUpdate } = useExtensionInstalled();
   const [showModal, setShowModal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (loading) return null;
   if (installed && !needsUpdate) return null;
@@ -21,38 +23,70 @@ export function ExtensionInstallButton() {
   const downloadUrl = latest?.downloadUrl || '/api/extension/latest';
   const labelVersion = latest?.version || '';
 
-  function handleDownload() {
-    setShowModal(true);
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  // The download endpoint requires authentication so the backend can bake the
+  // user's api_token into the zip's config.js. We fetch with the JWT, convert
+  // the response to a blob, then trigger a download. (A plain <a href download>
+  // cannot send Authorization headers.)
+  async function handleDownload() {
+    setError(null);
+    setDownloading(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const res = await fetch(downloadUrl, {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        throw new Error(res.status === 401 ? 'Please log in again to download.' : `Download failed: ${res.status}`);
+      }
+      const blob = await res.blob();
+      // Try to read the personalized filename out of Content-Disposition.
+      const cd = res.headers.get('content-disposition') || '';
+      const m = cd.match(/filename="([^"]+)"/);
+      const filename = m ? m[1] : `landjet-extension-v${labelVersion || 'latest'}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setShowModal(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
     <>
-      {needsUpdate ? (
-        <button
-          type="button"
-          onClick={handleDownload}
-          className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600"
-          title={`You have v${installedVersion}, v${labelVersion} is available`}
-        >
-          <span aria-hidden>↑</span>
-          Update Extension {labelVersion ? `(v${labelVersion})` : ''}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={handleDownload}
-          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          <span aria-hidden>⬇</span>
-          Download Chrome Extension {labelVersion ? `(v${labelVersion})` : ''}
-        </button>
-      )}
+      <div className="flex flex-col items-end gap-1">
+        {needsUpdate ? (
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-60"
+            title={`You have v${installedVersion}, v${labelVersion} is available`}
+          >
+            <span aria-hidden>↑</span>
+            {downloading ? 'Preparing...' : `Update Extension ${labelVersion ? `(v${labelVersion})` : ''}`}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            <span aria-hidden>⬇</span>
+            {downloading ? 'Preparing...' : `Download Chrome Extension ${labelVersion ? `(v${labelVersion})` : ''}`}
+          </button>
+        )}
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
 
       {showModal && (
         <div
@@ -106,9 +140,9 @@ export function ExtensionInstallButton() {
                   Click <strong>Load unpacked</strong> and select the folder you unzipped in step 1.
                 </li>
               </ol>
-              <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                After loading, click the extension icon in the Chrome toolbar and paste your API token.
-                Your admin can generate one from the User Management page.
+              <div className="mb-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                <strong>&#10003; No token needed.</strong> Your zip is already personalized with your account.
+                After loading, the extension is ready to use &mdash; just open a LinkedIn profile.
               </div>
               {needsUpdate && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -123,13 +157,14 @@ export function ExtensionInstallButton() {
               )}
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-3">
-              <a
-                href={downloadUrl}
-                download
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={downloading}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
               >
-                Download again
-              </a>
+                {downloading ? 'Preparing...' : 'Download again'}
+              </button>
               <button
                 type="button"
                 onClick={() => setShowModal(false)}

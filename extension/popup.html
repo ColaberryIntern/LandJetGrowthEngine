@@ -77,28 +77,51 @@
   .help a {
     color: #2b6cb0;
   }
+  .baked-banner {
+    background: #ebf8ff;
+    border: 1px solid #bee3f8;
+    color: #1a365d;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .baked-banner strong { color: #22543d; }
+  .baked-banner .email { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 11px; color: #4a5568; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
   <h1>LandJet LinkedIn Assistant</h1>
-  <p>Paste your long-lived API token below. You get this from Ali once and don't need to enter it again.</p>
 
-  <label for="api-token">API Token</label>
-  <input type="password" id="api-token" placeholder="lj_..." />
+  <!-- Shown when the zip was downloaded via the in-app button (auto-configured) -->
+  <div id="baked-section" class="baked-banner hidden">
+    <strong>&#10003; Connected</strong> &mdash; pre-configured at download.<br>
+    <span class="email" id="baked-email"></span>
+  </div>
 
-  <label for="api-base">API Base URL</label>
-  <input type="text" id="api-base" placeholder="http://95.216.199.47:3011/api" />
+  <!-- Shown only when no baked config exists (legacy manual install) -->
+  <div id="manual-section">
+    <p>Paste your long-lived API token below. You get this from Ali once and don't need to enter it again.</p>
+
+    <label for="api-token">API Token</label>
+    <input type="password" id="api-token" placeholder="lj_..." />
+
+    <label for="api-base">API Base URL</label>
+    <input type="text" id="api-base" placeholder="http://95.216.199.47:3011/api" />
+  </div>
 
   <label style="display:flex;align-items:center;gap:8px;font-weight:normal;text-transform:none;letter-spacing:0;font-size:12px;color:#1a202c;margin-bottom:12px;">
     <input type="checkbox" id="test-mode" style="width:auto;margin:0;" />
-    <span><strong>Test mode</strong> &mdash; LinkedIn Send click is detected but the lead is NOT actually advanced. Use this to validate the extension flow without touching real data.</span>
+    <span><strong>Test mode</strong> &mdash; LinkedIn Send click is detected but the lead is NOT actually advanced.</span>
   </label>
 
   <button id="save">Save</button>
   <div class="status" id="status"></div>
 
   <div class="help">
-    Token storage is local to this Chrome profile. Open a LinkedIn profile page after saving; the assistant panel will appear in the top-right when the lead is in your outreach queue.
+    Open a LinkedIn profile page after saving; the assistant panel will appear in the top-right when the lead is in your outreach queue.
   </div>
 
   <script src="popup.js"></script>
