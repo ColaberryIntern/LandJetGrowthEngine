@@ -4,4 +4,4 @@
 // If you see this content in your installed extension, it means the zip wasn't
 // personalized -- use the in-app Download button (which authenticates and
 // personalizes) instead of pulling files manually.
-self.LANDJET_CONFIG = null;
+globalThis.LANDJET_CONFIG = null;

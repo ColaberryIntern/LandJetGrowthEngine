@@ -100,9 +100,12 @@ router.get('/latest', authenticate, async (req: Request, res: Response, next: Ne
 
     // Patch the zip in memory: write extension/config.js with the user's token.
     const zip = new AdmZip(latest.fullPath);
+    // Use globalThis so the assignment works in BOTH contexts that may load
+    // this file: the popup HTML page (window === globalThis) and the service
+    // worker (self === globalThis). `window` is undefined in a service worker.
     const configJs =
       '// Auto-generated at download time. Do not commit.\n' +
-      'window.LANDJET_CONFIG = ' + JSON.stringify({
+      'globalThis.LANDJET_CONFIG = ' + JSON.stringify({
         apiToken: user.api_token,
         apiBase,
         userEmail: user.email,
