@@ -121,7 +121,13 @@
           await openConnectAndPaste(text);
           autoBtn.textContent = '⚡ Open Connect & Paste';
         } catch (e) {
-          setStatus(e.message || 'Could not auto-open the Connect dialog.', 'error');
+          // Surface the error + a clear next-step hint that ALWAYS works:
+          // hit Paste only once you've manually opened the note dialog.
+          const msg = (e && e.message) || 'Could not auto-open the Connect dialog.';
+          setStatus(
+            msg + ' Manual fallback: click LinkedIn\'s "..." -> Connect -> Add a note, then hit the "Paste only" button below.',
+            'error',
+          );
         } finally {
           autoBtn.disabled = false;
           autoBtn.textContent = '⚡ Open Connect & Paste';
@@ -245,6 +251,32 @@
     return null;
   }
 
+  // LinkedIn's React handlers don't always respond to plain element.click().
+  // Many React-based apps require a real pointer/mouse event sequence. This
+  // dispatches the full sequence (pointerdown -> mousedown -> pointerup ->
+  // mouseup -> click) at the element's center, which works on virtually all
+  // React event listeners.
+  function aggressiveClick(el) {
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    const rect = el.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    const opts = {
+      bubbles: true, cancelable: true, composed: true,
+      view: window, detail: 1, button: 0, buttons: 1,
+      clientX: x, clientY: y, screenX: x, screenY: y,
+    };
+    try { el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    try { el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+    // Also call native click() as a last resort -- harmless if the sequence
+    // already triggered the handler.
+    try { el.click(); } catch {}
+  }
+
   // Orchestrator: progressively click through Connect -> Add a note, then paste.
   // Resilient to LinkedIn modal timing -- each step uses a 6s waitFor and the
   // flow can resume mid-state (e.g. if the "Add a note" modal is already open
@@ -262,7 +294,7 @@
     // STEP 2: at the "Add a note?" modal? Just click Add a note + paste.
     let addNote = findAddNoteButton();
     if (addNote) {
-      addNote.click();
+      aggressiveClick(addNote);
       const textarea = await waitFor(findConnectNoteTextarea, { timeout: 6000 });
       pasteIntoTextarea(textarea, text);
       setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
@@ -276,23 +308,27 @@
     if (!connect) {
       const more = findMoreActionsButton();
       if (!more) throw new Error('Could not find LinkedIn\'s Connect button or "..." menu. The profile may not be connectable.');
-      more.click();
+      aggressiveClick(more);
+      // LinkedIn's dropdown animates in over ~300ms. Give it room.
+      await new Promise(r => setTimeout(r, 500));
       try {
         connect = await waitFor(findConnectInOpenDropdown, { timeout: 3000 });
       } catch {
         throw new Error('Opened the "..." menu but no Connect option appeared. The lead may already be a 1st-degree connection (try Message instead).');
       }
     }
-    connect.click();
+    aggressiveClick(connect);
 
     // STEP 4: wait for the "Add a note" button -- modal can take 1-2s to render.
+    // Give the modal animation 300ms head start before polling.
     setStatus('Choosing "Add a note"...', 'info');
+    await new Promise(r => setTimeout(r, 300));
     try {
-      addNote = await waitFor(findAddNoteButton, { timeout: 6000 });
+      addNote = await waitFor(findAddNoteButton, { timeout: 7000 });
     } catch {
-      throw new Error('Clicked Connect but the "Add a note" button did not appear in 6s. Click it yourself, then hit ⚡ again or use "Paste only".');
+      throw new Error('Clicked Connect but the "Add a note" button did not appear in 7s. Click it yourself, then hit ⚡ again or use "Paste only".');
     }
-    addNote.click();
+    aggressiveClick(addNote);
 
     // STEP 5: wait for textarea and paste.
     let textarea;
