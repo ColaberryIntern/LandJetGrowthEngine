@@ -311,8 +311,15 @@
   }
 
   function findConnectInOpenDropdown() {
-    // After "..." is clicked LinkedIn renders an artdeco-dropdown menu. Items
-    // are inside a [role="menu"] or .artdeco-dropdown__content container.
+    // Strategy 1 (most precise -- confirmed against Bill Polk DOM 2026-06-01):
+    // LinkedIn's overflow dropdown's Connect item is an <a role="menuitem">
+    // with href "/preload/custom-invite/?vanityName=...". The href is unique
+    // to that exact link -- no sidebar Connect button or other action has it.
+    const direct = document.querySelector('a[role="menuitem"][href*="custom-invite"]');
+    if (direct && direct.offsetParent !== null) return direct;
+
+    // Strategy 2 (fallback for DOM shifts): scan visible elements inside any
+    // visible menu container for "Connect" label, walk up to the clickable.
     const menus = document.querySelectorAll('[role="menu"], .artdeco-dropdown__content, [role="menuitem"]');
     for (const menu of menus) {
       if (menu.offsetParent === null) continue;
@@ -321,8 +328,7 @@
         if (it.offsetParent === null) continue;
         const label = (it.getAttribute('aria-label') || '') + ' ' + (it.textContent || '');
         if (matchesConnectLabel(label)) {
-          // Click the smallest clickable ancestor.
-          return it.closest('button, [role="menuitem"], [role="button"], a') || it;
+          return it.closest('a[role="menuitem"], button, [role="menuitem"], [role="button"], a') || it;
         }
       }
     }
@@ -396,16 +402,59 @@
     return null;
   }
 
-  // LinkedIn's React handlers don't always respond to plain element.click().
-  // Modern React apps -- especially accessible menu components -- often only
-  // wire keyboard Enter handlers to role="menuitem" elements; mouse events on
-  // the inner DOM go unhandled. So we do BOTH: full pointer/mouse sequence
-  // AND a keyboard Enter sequence on the focused element.
+  // LinkedIn's React handlers are gated against synthetic clicks -- isTrusted
+  // is false on any event dispatched from a content script, and React's
+  // accessible menu components check that. Mouse, pointer, and keyboard event
+  // sequences all silently no-op against the gated handlers.
+  //
+  // The reliable workaround: walk the React fiber (stored on the DOM node
+  // under a `__reactProps$xxx` key) and call onClick directly. Bypasses the
+  // event system entirely. Proven to work on the Connect menuitem 2026-06-01.
+  //
+  // Falls back to the mouse/keyboard sequence if no React props are present
+  // (so non-React buttons like LinkedIn's textarea actions still work).
+  function findReactProps(el) {
+    if (!el) return null;
+    const key = Object.keys(el).find(k => k.startsWith('__reactProps$'));
+    return key ? el[key] : null;
+  }
+
+  function tryReactOnClick(el) {
+    const props = findReactProps(el);
+    if (!props || typeof props.onClick !== 'function') return false;
+    try {
+      props.onClick({
+        preventDefault() {},
+        stopPropagation() {},
+        currentTarget: el,
+        target: el,
+        type: 'click',
+        isTrusted: true,
+        nativeEvent: { type: 'click' },
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function aggressiveClick(el) {
     if (!el) return;
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     try { el.focus(); } catch {}
 
+    // STRATEGY 1 (preferred): React fiber direct onClick call. Works on
+    // every gated React handler we have encountered on LinkedIn so far.
+    if (tryReactOnClick(el)) return;
+
+    // STRATEGY 2: walk up to the nearest ancestor that has React props
+    // (sometimes the onClick is on a parent like a wrapper button/div).
+    let p = el.parentElement;
+    for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
+      if (tryReactOnClick(p)) return;
+    }
+
+    // STRATEGY 3 (fallback for non-React targets): full event sequence.
     const rect = el.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
@@ -420,8 +469,6 @@
     el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
     el.dispatchEvent(new MouseEvent('click', mouseOpts));
 
-    // Keyboard Enter -- accessible menus/buttons fire on this even when mouse
-    // events don't propagate to the React handler.
     const keyOpts = {
       bubbles: true, cancelable: true, composed: true,
       key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
@@ -430,7 +477,6 @@
     el.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
     el.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
 
-    // Native click() last -- harmless if anything above already fired.
     try { el.click(); } catch {}
   }
 
