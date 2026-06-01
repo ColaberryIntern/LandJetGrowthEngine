@@ -130,27 +130,80 @@
   margin: 2px 0 6px 0;
 }
 
-.landjet-auto {
-  display: block;
+/* --- Stepwise UI (v1.0.14): three numbered buttons, each does ONE LinkedIn
+   click. The state watcher highlights the currently-active step in blue.
+   Completed steps appear muted green. Inactive future steps are gray. --- */
+.landjet-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 8px 0;
+}
+
+.landjet-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 11px 12px;
-  background: #2b6cb0;
-  color: #ffffff;
-  font-weight: 700;
+  padding: 9px 12px;
+  background: #ffffff;
+  color: #4a5568;
+  font-weight: 600;
   font-size: 13px;
-  border: 0;
+  border: 1px solid #cbd5e0;
   border-radius: 6px;
   cursor: pointer;
-  margin: 6px 0 6px 0;
+  text-align: left;
 }
 
-.landjet-auto:hover {
+.landjet-step:hover {
+  background: #edf2f7;
+}
+
+.landjet-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #cbd5e0;
+  color: #4a5568;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.landjet-step-label {
+  flex: 1;
+}
+
+/* The currently-active step gets the blue treatment so the user always
+   knows what to click next. */
+.landjet-step-active {
+  background: #2b6cb0;
+  color: #ffffff;
+  border-color: #2b6cb0;
+}
+.landjet-step-active:hover {
   background: #1a365d;
 }
+.landjet-step-active .landjet-step-num {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
 
-.landjet-auto:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+/* Completed steps: muted green background + dark green text. The number
+   in the circle stays visible (no DOM swap to checkmark) so the layout
+   doesn't jitter when state changes. */
+.landjet-step-done {
+  background: #f0fff4;
+  color: #22543d;
+  border-color: #c6f6d5;
+}
+.landjet-step-done .landjet-step-num {
+  background: #38a169;
+  color: #ffffff;
 }
 
 .landjet-insert {

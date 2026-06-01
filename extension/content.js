@@ -82,9 +82,21 @@
         ${isLinkedInStep ? `
           <textarea class="landjet-msg" rows="5">${escapeHtml(messageBody)}</textarea>
           <div class="landjet-char-count">${messageBody.length} chars</div>
-          <button class="landjet-auto">&#9889; Open Connect &amp; Paste</button>
-          <button class="landjet-insert landjet-insert-secondary">Paste only (dialog already open)</button>
-          <p class="landjet-hint">Click the lightning button -- it opens LinkedIn's Connect &raquo; Add a note dialog and pastes the message for you. Then just click LinkedIn's Send to mark Done.</p>
+          <div class="landjet-steps">
+            <button class="landjet-step landjet-step-1" data-step="1">
+              <span class="landjet-step-num">1</span>
+              <span class="landjet-step-label">Open Connect dialog</span>
+            </button>
+            <button class="landjet-step landjet-step-2" data-step="2">
+              <span class="landjet-step-num">2</span>
+              <span class="landjet-step-label">Click Add a note</span>
+            </button>
+            <button class="landjet-step landjet-step-3" data-step="3">
+              <span class="landjet-step-num">3</span>
+              <span class="landjet-step-label">Paste message</span>
+            </button>
+          </div>
+          <p class="landjet-hint">Click each step. After step 3, click LinkedIn's <strong>Send</strong> to mark Done. If a step does nothing, do it manually on LinkedIn and the next step will light up.</p>
         ` : `
           <div class="landjet-warning">Next step for this lead is <strong>${escapeHtml(channel)}</strong>, not LinkedIn. Open the outreach page to handle.</div>
         `}
@@ -96,44 +108,147 @@
       panel.remove();
     });
 
-    const insertBtn = panel.querySelector('.landjet-insert');
-    if (insertBtn) {
-      insertBtn.addEventListener('click', () => {
+    // Wire up the 3-step stepwise UI. Each step does exactly ONE LinkedIn
+    // action. If a step's auto-click silently fails (LinkedIn's React handler
+    // rejected our synthetic event), the user can do that ONE click on
+    // LinkedIn manually, and the state detector advances the active step.
+    const stepBtns = panel.querySelectorAll('.landjet-step');
+    stepBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const step = parseInt(btn.getAttribute('data-step'), 10);
         const textarea = panel.querySelector('.landjet-msg');
-        const text = textarea.value;
-        const inserted = insertIntoConnectNote(text);
-        if (inserted) {
-          setStatus('Inserted. Click LinkedIn Send to mark Done.', 'success');
-        } else {
-          setStatus('Could not find the LinkedIn note field. Open "Connect" then "Add a note" first.', 'error');
-        }
+        const text = textarea ? textarea.value : '';
+        await runStep(step, text);
+        // Re-detect state after the action and update step highlighting.
+        updateStepHighlight();
       });
+    });
+
+    // Initial highlight + start auto-detect of state transitions so the
+    // active step lights up as soon as the user manually moves LinkedIn
+    // forward.
+    updateStepHighlight();
+    startStateWatcher();
+  }
+
+  // ----- Step state machine -----
+
+  function detectFlowState() {
+    if (findConnectNoteTextarea()) return 'TEXTAREA_OPEN';   // step 3 active
+    if (findAddNoteButton()) return 'MODAL_OPEN';            // step 2 active
+    if (findConnectInOpenDropdown()) return 'DROPDOWN_OPEN'; // step 1.5 active (Connect visible in menu)
+    if (findConnectOnProfileHeader()) return 'CONNECT_VISIBLE'; // step 1.5 active (2nd-degree direct)
+    return 'INITIAL';                                         // step 1 active
+  }
+
+  function activeStepFromState(state) {
+    if (state === 'TEXTAREA_OPEN') return 3;
+    if (state === 'MODAL_OPEN') return 2;
+    return 1; // INITIAL, DROPDOWN_OPEN, CONNECT_VISIBLE -- still on step 1
+  }
+
+  function updateStepHighlight() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+    const active = activeStepFromState(detectFlowState());
+    panel.querySelectorAll('.landjet-step').forEach(btn => {
+      const n = parseInt(btn.getAttribute('data-step'), 10);
+      btn.classList.toggle('landjet-step-active', n === active);
+      btn.classList.toggle('landjet-step-done', n < active);
+    });
+  }
+
+  let _watcher = null;
+  function startStateWatcher() {
+    if (_watcher) _watcher.disconnect();
+    _watcher = new MutationObserver(() => updateStepHighlight());
+    _watcher.observe(document.body, { childList: true, subtree: true, attributes: false });
+  }
+
+  async function runStep(step, text) {
+    if (step === 1) return runStepOpenConnect();
+    if (step === 2) return runStepClickAddANote();
+    if (step === 3) return runStepPaste(text);
+  }
+
+  // Step 1: get LinkedIn into a state where the "Add a note?" modal is open.
+  // Tries: (a) click an already-visible Connect on the header, or (b) click
+  // "..." and then click Connect inside the dropdown. If our clicks don't
+  // fire LinkedIn's React handlers, the user does it manually -- the state
+  // watcher will advance the highlight to step 2.
+  async function runStepOpenConnect() {
+    setStatus('Step 1: opening Connect...', 'info');
+
+    // Already past this step?
+    const state = detectFlowState();
+    if (state === 'MODAL_OPEN' || state === 'TEXTAREA_OPEN') {
+      setStatus('Step 1 already done. Move to step 2.', 'success');
+      return;
     }
 
-    const autoBtn = panel.querySelector('.landjet-auto');
-    if (autoBtn) {
-      autoBtn.addEventListener('click', async () => {
-        const textarea = panel.querySelector('.landjet-msg');
-        const text = textarea.value;
-        autoBtn.disabled = true;
-        autoBtn.textContent = 'Opening...';
-        try {
-          await openConnectAndPaste(text);
-          autoBtn.textContent = '⚡ Open Connect & Paste';
-        } catch (e) {
-          // Surface the error + a clear next-step hint that ALWAYS works:
-          // hit Paste only once you've manually opened the note dialog.
-          const msg = (e && e.message) || 'Could not auto-open the Connect dialog.';
-          setStatus(
-            msg + ' Manual fallback: click LinkedIn\'s "..." -> Connect -> Add a note, then hit the "Paste only" button below.',
-            'error',
-          );
-        } finally {
-          autoBtn.disabled = false;
-          autoBtn.textContent = '⚡ Open Connect & Paste';
-        }
-      });
+    let connect = findConnectOnProfileHeader();
+    if (!connect) {
+      const more = findMoreActionsButton();
+      if (!more) {
+        setStatus('Could not find "..." menu. Click Connect on LinkedIn yourself, then hit step 2.', 'error');
+        return;
+      }
+      aggressiveClick(more);
+      // Give the menu time to render + animate in.
+      await new Promise(r => setTimeout(r, 600));
+      try {
+        connect = await waitFor(findConnectInOpenDropdown, { timeout: 3000 });
+      } catch {
+        setStatus('Menu opened but Connect did not appear. Click Connect manually on LinkedIn, then hit step 2.', 'error');
+        return;
+      }
     }
+    aggressiveClick(connect);
+    await new Promise(r => setTimeout(r, 400));
+
+    // Did the "Add a note?" modal open?
+    if (findAddNoteButton()) {
+      setStatus('Step 1 done. Now click step 2.', 'success');
+    } else {
+      setStatus('Clicked Connect but the modal did not open. If LinkedIn shows the dialog now, click step 2. Otherwise click Connect manually.', 'info');
+    }
+  }
+
+  // Step 2: click "Add a note" in the LinkedIn modal.
+  async function runStepClickAddANote() {
+    setStatus('Step 2: clicking Add a note...', 'info');
+
+    // Already past this step?
+    if (findConnectNoteTextarea()) {
+      setStatus('Step 2 already done. Move to step 3.', 'success');
+      return;
+    }
+
+    const btn = findAddNoteButton();
+    if (!btn) {
+      setStatus('Could not find Add a note button. Make sure LinkedIn\'s "Add a note to your invitation?" dialog is showing, then try again or click Add a note manually.', 'error');
+      return;
+    }
+    aggressiveClick(btn);
+    // Wait briefly for the textarea to render.
+    try {
+      await waitFor(findConnectNoteTextarea, { timeout: 3000 });
+      setStatus('Step 2 done. Now click step 3.', 'success');
+    } catch {
+      setStatus('Clicked Add a note but the textarea did not appear. If you see it now, click step 3. Otherwise click Add a note manually.', 'info');
+    }
+  }
+
+  // Step 3: paste the message into the connect-note textarea.
+  function runStepPaste(text) {
+    setStatus('Step 3: pasting message...', 'info');
+    const textarea = findConnectNoteTextarea();
+    if (!textarea) {
+      setStatus('LinkedIn\'s note textarea is not visible. Make sure step 2 worked or click Add a note manually.', 'error');
+      return;
+    }
+    pasteIntoTextarea(textarea, text);
+    setStatus('Done! Click LinkedIn\'s Send button to mark this lead as completed.', 'success');
   }
 
   // ----- Auto flow: click LinkedIn's Connect -> Add a note -> paste -----
