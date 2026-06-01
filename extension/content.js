@@ -233,21 +233,51 @@
     return null;
   }
 
+  // Stronger visibility check than offsetParent !== null. LinkedIn modals are
+  // sometimes nested inside aria-hidden / display:none ancestors during their
+  // open animation, which trips offsetParent but the user CAN see + click them.
+  function isActuallyVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    if (rect.bottom < 0 || rect.right < 0) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return true;
+  }
+
   function findAddNoteButton() {
-    // In the post-Connect modal LinkedIn shows two buttons: "Send without a note"
-    // and "Add a note". Pick the latter. LinkedIn's modal uses `artdeco-modal`
-    // classes and a mix of role="dialog", role="alertdialog", or sometimes no
-    // role at all. Easiest: scan ALL visible buttons on the page for the label
-    // and pick the first visible match.
-    const buttons = document.querySelectorAll('button, [role="button"]');
+    // 3 progressive strategies. First match wins.
+
+    // Strategy 1: any button / role=button with matching label or text, using
+    // the stronger visibility check (not just offsetParent).
+    const buttons = document.querySelectorAll('button, [role="button"], a[role="button"]');
     for (const b of buttons) {
-      if (b.offsetParent === null) continue;
-      const label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).toLowerCase().trim();
-      // Match "Add a note", "add note", but NOT "Send without a note".
-      if (/add a note|add note/.test(label) && !/without/.test(label)) {
-        return b;
-      }
+      if (!isActuallyVisible(b)) continue;
+      const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+      const text = (b.textContent || '').trim().toLowerCase();
+      // Match exact "Add a note" OR text that starts with "add a note" (some
+      // builds add helper text). Exclude anything containing "without".
+      if (/without/.test(aria) || /without/.test(text)) continue;
+      if (aria === 'add a note' || text === 'add a note') return b;
+      if (/^add a note(\b|$)/.test(text)) return b;
+      if (/^add a note(\b|$)/.test(aria)) return b;
     }
+
+    // Strategy 2: walk text nodes for the exact phrase "Add a note", then
+    // find the smallest clickable ancestor. Catches cases where LinkedIn
+    // wraps the text in nested spans or uses non-standard markup.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const t = (node.textContent || '').trim();
+      if (t !== 'Add a note' && !/^add a note$/i.test(t)) continue;
+      const el = node.parentElement;
+      if (!el || !isActuallyVisible(el)) continue;
+      const clickable = el.closest('button, [role="button"], a, [role="menuitem"]');
+      if (clickable && isActuallyVisible(clickable)) return clickable;
+    }
+
     return null;
   }
 
