@@ -282,28 +282,40 @@
   }
 
   // LinkedIn's React handlers don't always respond to plain element.click().
-  // Many React-based apps require a real pointer/mouse event sequence. This
-  // dispatches the full sequence (pointerdown -> mousedown -> pointerup ->
-  // mouseup -> click) at the element's center, which works on virtually all
-  // React event listeners.
+  // Modern React apps -- especially accessible menu components -- often only
+  // wire keyboard Enter handlers to role="menuitem" elements; mouse events on
+  // the inner DOM go unhandled. So we do BOTH: full pointer/mouse sequence
+  // AND a keyboard Enter sequence on the focused element.
   function aggressiveClick(el) {
     if (!el) return;
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    try { el.focus(); } catch {}
+
     const rect = el.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
-    const opts = {
+    const mouseOpts = {
       bubbles: true, cancelable: true, composed: true,
       view: window, detail: 1, button: 0, buttons: 1,
       clientX: x, clientY: y, screenX: x, screenY: y,
     };
-    try { el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
-    el.dispatchEvent(new MouseEvent('mousedown', opts));
-    try { el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
-    el.dispatchEvent(new MouseEvent('mouseup', opts));
-    el.dispatchEvent(new MouseEvent('click', opts));
-    // Also call native click() as a last resort -- harmless if the sequence
-    // already triggered the handler.
+    try { el.dispatchEvent(new PointerEvent('pointerdown', { ...mouseOpts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
+    el.dispatchEvent(new MouseEvent('mousedown', mouseOpts));
+    try { el.dispatchEvent(new PointerEvent('pointerup', { ...mouseOpts, pointerType: 'mouse', pointerId: 1, isPrimary: true })); } catch {}
+    el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
+    el.dispatchEvent(new MouseEvent('click', mouseOpts));
+
+    // Keyboard Enter -- accessible menus/buttons fire on this even when mouse
+    // events don't propagate to the React handler.
+    const keyOpts = {
+      bubbles: true, cancelable: true, composed: true,
+      key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+    };
+    el.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
+    el.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
+    el.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
+
+    // Native click() last -- harmless if anything above already fired.
     try { el.click(); } catch {}
   }
 
