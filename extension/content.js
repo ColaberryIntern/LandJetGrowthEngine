@@ -368,26 +368,28 @@
   }
 
   function findAddNoteButton() {
-    // 3 progressive strategies. First match wins.
+    // Multiple strategies. v1.0.15's "must be a button/role=button" was too
+    // restrictive -- LinkedIn's "Add a note?" modal sometimes renders the
+    // option as a span / div / link wrapper with the React onClick on a
+    // parent. v1.0.16: accept any visible element whose textContent or
+    // aria-label is "Add a note" (excluding "without"), let aggressiveClick
+    // walk up to find the React handler.
 
-    // Strategy 1: any button / role=button with matching label or text, using
-    // the stronger visibility check (not just offsetParent).
-    const buttons = document.querySelectorAll('button, [role="button"], a[role="button"]');
-    for (const b of buttons) {
-      if (!isActuallyVisible(b)) continue;
-      const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
-      const text = (b.textContent || '').trim().toLowerCase();
-      // Match exact "Add a note" OR text that starts with "add a note" (some
-      // builds add helper text). Exclude anything containing "without".
+    // Strategy 1: scan ALL element types (not just buttons) for visible
+    // elements with matching text or label.
+    const all = document.querySelectorAll('button, [role="button"], a, span, div, li, [role="menuitem"]');
+    for (const el of all) {
+      if (!isActuallyVisible(el)) continue;
+      const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+      const text = (el.textContent || '').trim().toLowerCase();
       if (/without/.test(aria) || /without/.test(text)) continue;
-      if (aria === 'add a note' || text === 'add a note') return b;
-      if (/^add a note(\b|$)/.test(text)) return b;
-      if (/^add a note(\b|$)/.test(aria)) return b;
+      // Exact match wins -- most specific. Excludes the modal title which is
+      // "add a note to your invitation?" (longer).
+      if (text === 'add a note' || aria === 'add a note') return el;
     }
 
-    // Strategy 2: walk text nodes for the exact phrase "Add a note", then
-    // find the smallest clickable ancestor. Catches cases where LinkedIn
-    // wraps the text in nested spans or uses non-standard markup.
+    // Strategy 2: walk text nodes for the exact phrase "Add a note", return
+    // the parent (let aggressiveClick walk up via React fiber ancestor scan).
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
@@ -395,8 +397,7 @@
       if (t !== 'Add a note' && !/^add a note$/i.test(t)) continue;
       const el = node.parentElement;
       if (!el || !isActuallyVisible(el)) continue;
-      const clickable = el.closest('button, [role="button"], a, [role="menuitem"]');
-      if (clickable && isActuallyVisible(clickable)) return clickable;
+      return el;
     }
 
     return null;
