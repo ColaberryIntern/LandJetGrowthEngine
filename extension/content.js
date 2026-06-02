@@ -226,7 +226,18 @@
 
     const btn = findAddNoteButton();
     if (!btn) {
-      setStatus('Could not find Add a note button. Make sure LinkedIn\'s "Add a note to your invitation?" dialog is showing, then try again or click Add a note manually.', 'error');
+      setStatus('Click LinkedIn\'s "Add a note" button yourself -- the textarea will appear, step 3 lights up automatically.', 'info');
+      // Start polling for the textarea to appear so step 3 advances on its own.
+      const start = Date.now();
+      const poll = setInterval(() => {
+        if (findConnectNoteTextarea()) {
+          clearInterval(poll);
+          updateStepHighlight();
+          setStatus('Got it. Now click step 3 to paste.', 'success');
+        } else if (Date.now() - start > 30000) {
+          clearInterval(poll);
+        }
+      }, 400);
       return;
     }
     aggressiveClick(btn);
@@ -367,11 +378,45 @@
     return true;
   }
 
+  // v1.0.18: bulletproof direct-text finder. Walks every element and checks
+  // its IMMEDIATE child text (not descendants). If "Add a note" is the exact
+  // direct text of any visible element, returns it. Because direct-text
+  // excludes nested screen-reader spans, this is immune to LinkedIn's
+  // aria-hidden / sr-only wrapper text that polluted textContent matches.
+  function _directText(el) {
+    let s = '';
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) s += node.textContent;
+    }
+    return s.trim();
+  }
+
   function findAddNoteButton() {
-    // v1.0.17 strategy: target buttons INSIDE the "Add a note?" modal
-    // dialog. LinkedIn's modal contains exactly two buttons: "Add a note"
-    // (outline) and "Send without a note" (filled). The Add-a-note one
-    // is whichever button does NOT contain "without" in its label or text.
+    // STRATEGY 0 (bulletproof, v1.0.18): direct-text exact match anywhere
+    // on the page. Walk up to the nearest button/link/role=button so the
+    // React fiber click has something solid to grab.
+    for (const el of document.querySelectorAll('*')) {
+      if (!isActuallyVisible(el)) continue;
+      const direct = _directText(el).toLowerCase();
+      if (direct !== 'add a note') continue;
+      // Walk up to a clickable ancestor (button, a, role=button) -- the
+      // React onClick handler usually lives there, not on the inner span.
+      let p = el;
+      for (let i = 0; i < 6 && p && p !== document.body; i++) {
+        const tag = p.tagName;
+        const role = p.getAttribute && p.getAttribute('role');
+        if (tag === 'BUTTON' || tag === 'A' || role === 'button' || role === 'menuitem') {
+          return p;
+        }
+        p = p.parentElement;
+      }
+      // No clickable ancestor found -- return the inner element. The React
+      // fiber walk in aggressiveClick will scan up to 4 ancestors anyway.
+      return el;
+    }
+
+    // v1.0.17 strategy retained as a fallback in case LinkedIn changes the
+    // button text wording slightly.
     //
     // This is dramatically simpler than trying to text-match across the
     // whole document and bypasses any screen-reader-only text wrappers
