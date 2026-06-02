@@ -233,16 +233,61 @@ function computeMargin(input: QuoteInput, output: QuoteOutput, costs: CostInputs
 }
 
 // ---------------------------------------------------------------------------
+// Google Maps helpers -- Distance Matrix + Embed Directions
+// ---------------------------------------------------------------------------
+
+function buildEmbedUrl(origin: string, destination: string, roundTrip: boolean): string | null {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key || !origin || !destination) return null;
+  // For round trip, route A -> B -> A via waypoint so the map shows the loop.
+  const params = new URLSearchParams({ key, mode: 'driving' });
+  if (roundTrip) {
+    params.set('origin', origin);
+    params.set('destination', origin);
+    params.set('waypoints', destination);
+  } else {
+    params.set('origin', origin);
+    params.set('destination', destination);
+  }
+  return `https://www.google.com/maps/embed/v1/directions?${params.toString()}`;
+}
+
+async function fetchDistanceMatrix(origin: string, destination: string): Promise<{ miles: number; duration_min: number } | { error: string }> {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return { error: 'GOOGLE_MAPS_API_KEY is not configured on the server. Add it to the backend .env to enable auto-mileage.' };
+  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&units=imperial&key=${key}`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const r = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!r.ok) return { error: `Google Distance Matrix returned HTTP ${r.status}.` };
+    const data: any = await r.json();
+    if (data.status !== 'OK') return { error: `Google Distance Matrix status: ${data.status} ${data.error_message || ''}`.trim() };
+    const el = data.rows?.[0]?.elements?.[0];
+    if (!el || el.status !== 'OK') return { error: `Route not found between those addresses (status: ${el?.status || 'unknown'}).` };
+    const miles = Math.round((el.distance.value / 1609.344) * 10) / 10;
+    const duration_min = Math.round(el.duration.value / 60);
+    return { miles, duration_min };
+  } catch (e) {
+    return { error: `Google Distance Matrix call failed: ${(e as Error).message}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
 router.post('/test', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { method, email_body, quote_input } = req.body || {};
+    const { method, email_body, quote_input, pickup_address, dropoff_address } = req.body || {};
 
     let resolvedInput: QuoteInput;
     let parsedTrip: any = null;
     let parseError: string | null = null;
+    let mapOrigin: string | null = null;
+    let mapDestination: string | null = null;
+    let mapRoundTrip = false;
 
     if (method === 'paste') {
       if (!email_body || typeof email_body !== 'string') {
@@ -276,11 +321,17 @@ router.post('/test', authorize('campaigns:read'), async (req: Request, res: Resp
         payment: 'credit_card',
         customer_email: trip.passenger_email,
       };
+      mapOrigin = trip.pickup_address || null;
+      mapDestination = trip.dropoff_address || null;
+      mapRoundTrip = /round\s*trip/i.test(trip.service_type || '');
     } else if (method === 'manual') {
       if (!quote_input || typeof quote_input !== 'object') {
         return res.status(400).json({ error: 'quote_input is required for manual mode' });
       }
       resolvedInput = quote_input as QuoteInput;
+      mapOrigin = (pickup_address || '').toString().trim() || null;
+      mapDestination = (dropoff_address || '').toString().trim() || null;
+      mapRoundTrip = resolvedInput.service_type === 'round_trip';
     } else {
       return res.status(400).json({ error: 'method must be "paste" or "manual"' });
     }
@@ -290,6 +341,8 @@ router.post('/test', authorize('campaigns:read'), async (req: Request, res: Resp
     const costs = await getCostInputs();
     const margin = computeMargin(resolvedInput, quote, costs);
 
+    const map_embed_url = (mapOrigin && mapDestination) ? buildEmbedUrl(mapOrigin, mapDestination, mapRoundTrip) : null;
+
     res.json({
       method,
       parse_error: parseError,
@@ -298,9 +351,44 @@ router.post('/test', authorize('campaigns:read'), async (req: Request, res: Resp
       quote,
       trail,
       margin,
+      map: {
+        origin: mapOrigin,
+        destination: mapDestination,
+        round_trip: mapRoundTrip,
+        embed_url: map_embed_url,
+        configured: !!process.env.GOOGLE_MAPS_API_KEY,
+      },
     });
   } catch (error) {
     logger.error('POST /admin/quotes/test failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+// Distance lookup -- Google Distance Matrix wrapper. Used to auto-fill
+// passenger_miles in manual mode and to render the embed map.
+router.post('/distance', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { origin, destination, round_trip } = req.body || {};
+    if (!origin || !destination || typeof origin !== 'string' || typeof destination !== 'string') {
+      return res.status(400).json({ error: 'origin and destination are required strings' });
+    }
+    const result = await fetchDistanceMatrix(origin, destination);
+    if ('error' in result) {
+      return res.status(200).json({
+        configured: !!process.env.GOOGLE_MAPS_API_KEY,
+        error: result.error,
+        embed_url: buildEmbedUrl(origin, destination, !!round_trip),
+      });
+    }
+    res.json({
+      configured: true,
+      miles: result.miles,
+      duration_min: result.duration_min,
+      embed_url: buildEmbedUrl(origin, destination, !!round_trip),
+    });
+  } catch (error) {
+    logger.error('POST /admin/quotes/distance failed', { error: (error as Error).message });
     next(error);
   }
 });

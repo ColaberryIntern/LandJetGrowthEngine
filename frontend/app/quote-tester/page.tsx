@@ -41,6 +41,14 @@ interface MarginResult {
   cost_breakdown: { label: string; amount: number }[];
 }
 
+interface MapInfo {
+  origin: string | null;
+  destination: string | null;
+  round_trip: boolean;
+  embed_url: string | null;
+  configured: boolean;
+}
+
 interface TestResponse {
   method: Method;
   parse_error: string | null;
@@ -49,6 +57,13 @@ interface TestResponse {
   quote: QuoteOutput;
   trail: TrailStep[];
   margin: MarginResult;
+  map?: MapInfo;
+}
+
+interface DistanceInfo {
+  miles: number;
+  duration_min: number;
+  embed_url: string | null;
 }
 
 interface Sample { name: string; email_body: string; category?: string; blurb?: string; }
@@ -93,6 +108,46 @@ export default function QuoteTesterPage() {
   const [customerCategory, setCustomerCategory] = useState('standard');
   const [payment, setPayment] = useState('credit_card');
 
+  // Google Maps -- address lookup + distance auto-fill (manual mode only)
+  const [pickup, setPickup] = useState('');
+  const [dropoff, setDropoff] = useState('');
+  const [distanceInfo, setDistanceInfo] = useState<DistanceInfo | null>(null);
+  const [distanceLoading, setDistanceLoading] = useState(false);
+  const [distanceError, setDistanceError] = useState<string | null>(null);
+
+  async function fetchDistance() {
+    if (!pickup.trim() || !dropoff.trim()) return;
+    setDistanceLoading(true);
+    setDistanceError(null);
+    try {
+      const r = await fetch('/api/admin/quotes/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          origin: pickup.trim(),
+          destination: dropoff.trim(),
+          round_trip: serviceType === 'round_trip',
+        }),
+      });
+      const data = await r.json();
+      if (data.error) {
+        setDistanceError(data.error);
+        // Even on error, an embed URL may still be available if the key is set
+        if (data.embed_url) setDistanceInfo({ miles: 0, duration_min: 0, embed_url: data.embed_url });
+        return;
+      }
+      const info: DistanceInfo = { miles: data.miles, duration_min: data.duration_min, embed_url: data.embed_url };
+      setDistanceInfo(info);
+      // Auto-fill passenger miles -- round trip doubles for billing purposes
+      const billedMiles = serviceType === 'round_trip' ? Math.round(info.miles * 2) : Math.round(info.miles);
+      setPassengerMiles(billedMiles);
+    } catch (e) {
+      setDistanceError((e as Error).message);
+    } finally {
+      setDistanceLoading(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       await ensureAuth();
@@ -119,6 +174,8 @@ export default function QuoteTesterPage() {
               customer_category: customerCategory === 'standard' ? undefined : customerCategory,
               payment,
             },
+            pickup_address: pickup.trim() || undefined,
+            dropoff_address: dropoff.trim() || undefined,
           };
       const r = await fetch('/api/admin/quotes/test', {
         method: 'POST',
@@ -179,37 +236,9 @@ export default function QuoteTesterPage() {
             {method === 'paste' ? (
               <>
                 <label className="block text-xs font-medium text-gray-600 mb-1">BookRides email body</label>
-                <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={14}
+                <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={10}
                   placeholder="Paste the full BookRides email body (Office, Service Type, Pickup, Dropoff, Distance, Passengers, Customer)…"
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono focus:border-gray-500 focus:outline-none" />
-                {samples.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-xs text-gray-500 mb-1.5">Try a sample (click to load):</div>
-                    <div className="space-y-1.5">
-                      {samples.map(s => (
-                        <button key={s.name} onClick={() => setEmailBody(s.email_body)}
-                          className="w-full text-left rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 hover:bg-gray-100 hover:border-gray-300 transition-colors">
-                          <div className="flex items-center gap-2">
-                            {s.category && (
-                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                s.category === 'real' ? 'bg-emerald-100 text-emerald-700' :
-                                s.category === 'flat_rate' ? 'bg-blue-100 text-blue-700' :
-                                s.category === 'distance' ? 'bg-gray-200 text-gray-700' :
-                                s.category === 'customer_category' ? 'bg-purple-100 text-purple-700' :
-                                s.category === 'forward_only' ? 'bg-amber-100 text-amber-700' :
-                                s.category === 'surcharge' ? 'bg-orange-100 text-orange-700' :
-                                s.category === 'hourly' ? 'bg-cyan-100 text-cyan-700' :
-                                'bg-gray-100 text-gray-600'
-                              }`}>{s.category.replace('_', ' ')}</span>
-                            )}
-                            <span className="text-xs font-medium text-gray-900">{s.name}</span>
-                          </div>
-                          {s.blurb && <div className="text-[11px] text-gray-500 mt-1 leading-snug">{s.blurb}</div>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </>
             ) : (
               <div className="space-y-3">
@@ -228,6 +257,29 @@ export default function QuoteTesterPage() {
                       <option value="hourly_local">Hourly local</option>
                     </select>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Pickup address</label>
+                    <input type="text" value={pickup} onChange={e => setPickup(e.target.value)}
+                      placeholder="e.g. 123 Main St, Davenport, IA"
+                      className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Dropoff address</label>
+                    <input type="text" value={dropoff} onChange={e => setDropoff(e.target.value)}
+                      placeholder="e.g. O'Hare Airport, Chicago, IL"
+                      className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+                  </div>
+                  <button type="button" onClick={fetchDistance} disabled={!pickup.trim() || !dropoff.trim() || distanceLoading}
+                    className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                    {distanceLoading ? 'Looking up…' : (distanceInfo ? `Auto-filled: ${distanceInfo.miles} mi (${distanceInfo.duration_min} min via Google)` : '↗ Auto-fill mileage from addresses (Google)')}
+                  </button>
+                  {distanceError && (
+                    <div className="text-[11px] text-amber-700 leading-snug">{distanceError}</div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Passenger miles</label>
                     <input type="number" value={passengerMiles} onChange={e => setPassengerMiles(Number(e.target.value))}
@@ -256,6 +308,7 @@ export default function QuoteTesterPage() {
               </div>
             )}
 
+            {/* Generate button + error appear IMMEDIATELY -- no scrolling */}
             <button onClick={runQuote} disabled={loading || (method === 'paste' && !emailBody.trim())}
               className="mt-4 w-full rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? 'Calculating…' : 'Generate quote'}
@@ -263,6 +316,36 @@ export default function QuoteTesterPage() {
 
             {error && (
               <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</div>
+            )}
+
+            {/* Samples list BELOW the button so the Generate button is always above the fold */}
+            {method === 'paste' && samples.length > 0 && (
+              <div className="mt-5 pt-4 border-t border-gray-200">
+                <div className="text-xs text-gray-500 mb-1.5">Try a sample (click to load):</div>
+                <div className="space-y-1.5">
+                  {samples.map(s => (
+                    <button key={s.name} onClick={() => setEmailBody(s.email_body)}
+                      className="w-full text-left rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 hover:bg-gray-100 hover:border-gray-300 transition-colors">
+                      <div className="flex items-center gap-2">
+                        {s.category && (
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                            s.category === 'real' ? 'bg-emerald-100 text-emerald-700' :
+                            s.category === 'flat_rate' ? 'bg-blue-100 text-blue-700' :
+                            s.category === 'distance' ? 'bg-gray-200 text-gray-700' :
+                            s.category === 'customer_category' ? 'bg-purple-100 text-purple-700' :
+                            s.category === 'forward_only' ? 'bg-amber-100 text-amber-700' :
+                            s.category === 'surcharge' ? 'bg-orange-100 text-orange-700' :
+                            s.category === 'hourly' ? 'bg-cyan-100 text-cyan-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{s.category.replace('_', ' ')}</span>
+                        )}
+                        <span className="text-xs font-medium text-gray-900">{s.name}</span>
+                      </div>
+                      {s.blurb && <div className="text-[11px] text-gray-500 mt-1 leading-snug">{s.blurb}</div>}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -303,6 +386,36 @@ export default function QuoteTesterPage() {
                   )}
                 </div>
               </div>
+
+              {/* ROUTE MAP -- Google Embed Directions, auto-fits both endpoints */}
+              {result.map?.embed_url && (
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-gray-700">Route</div>
+                      <div className="mt-0.5 text-xs text-gray-500">
+                        {result.map.origin} <span className="text-gray-400">→</span> {result.map.destination}
+                        {result.map.round_trip && <span className="text-gray-400"> → {result.map.origin} <span className="ml-1 rounded bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[10px] font-medium border border-blue-200">round trip</span></span>}
+                      </div>
+                    </div>
+                  </div>
+                  <iframe
+                    src={result.map.embed_url}
+                    title="Route map"
+                    width="100%"
+                    height="320"
+                    style={{ border: 0, display: 'block' }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    allowFullScreen
+                  />
+                </div>
+              )}
+              {result.map && !result.map.embed_url && result.map.origin && result.map.destination && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  Map unavailable — {result.map.configured ? 'addresses could not be embedded.' : 'GOOGLE_MAPS_API_KEY is not configured on the server.'}
+                </div>
+              )}
 
               {/* WARNINGS */}
               {result.quote.warnings.length > 0 && (

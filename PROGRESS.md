@@ -252,6 +252,19 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
   - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
+### Session: 2026-06-02 -- Quote Tester Google Maps integration
+
+- [x] Quote Tester: address-based mileage auto-fill + route map
+  - Date: 2026-06-02
+  - What changed: Added `POST /api/admin/quotes/distance` (Google Distance Matrix wrapper, 10s timeout, typed errors). `/test` response now returns `map: { origin, destination, round_trip, embed_url, configured }`. Frontend `quote-tester/page.tsx` got `pickup`/`dropoff` state + `fetchDistance()` that auto-fills `passengerMiles` (doubled for round-trip) and renders a Google Embed Directions iframe on the result panel. Round-trip routes embed as A->B->A via waypoint so the map shows the loop; Embed Directions API auto-fits both endpoints (max zoom that still shows the route).
+  - Verification: `npx tsc --noEmit` clean on both backend and frontend. Backend gracefully falls back when `GOOGLE_MAPS_API_KEY` is unset (returns typed error + null embed_url; UI shows an amber "key not configured" banner instead of crashing).
+  - Notes: Google Maps key must be provisioned in `/opt/landjet-growth-engine/.env` for the map + auto-mileage to function. Until then, manual mileage entry works unchanged.
+
+- [x] Quote Tester: Generate button moved above samples
+  - Date: 2026-06-02
+  - What changed: Reordered `quote-tester/page.tsx` so the Generate Quote button + error region appear immediately after the input fields. Sample list moved below with a divider; Ali no longer has to scroll past 8 samples to hit Generate.
+  - Verification: TypeScript clean; deploy verified visually after frontend rebuild.
+
 ### Session: 2026-04-21 (continued)
 - Completed 10 of 14 demo call action items
 - Fixed auto-login race condition on all pages (root cause of "empty data" issue)
