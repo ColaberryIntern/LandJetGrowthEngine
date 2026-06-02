@@ -653,17 +653,27 @@
   // ----- LinkedIn DOM integration -----
 
   function findConnectNoteTextarea() {
-    // LinkedIn's connect-note dialog uses one of these patterns. List multiple
-    // fallbacks because the DOM shifts every few months.
-    const candidates = [
+    // Try precise selectors first (older LinkedIn variants).
+    const precise = [
       'textarea[name="message"]',
       'textarea#custom-message',
       '[role="dialog"] textarea',
       'div[aria-labelledby*="add-a-note"] textarea',
+      'textarea[placeholder*="know each other" i]',
+      'textarea[placeholder*="note" i]',
     ];
-    for (const sel of candidates) {
-      const el = document.querySelector(sel);
-      if (el && el.offsetParent !== null) return el; // visible
+    for (const sel of precise) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && isActuallyVisible(el)) return el;
+      } catch {}
+    }
+
+    // BULLETPROOF FALLBACK (v1.0.19): any visible textarea on the page.
+    // When the connect-note modal is open this is reliably the right one --
+    // LinkedIn profile pages do not have other visible textareas.
+    for (const t of document.querySelectorAll('textarea')) {
+      if (isActuallyVisible(t)) return t;
     }
     return null;
   }
