@@ -333,20 +333,60 @@ router.put('/cost-inputs', authorize('campaigns:write'), async (req: Request, re
   } catch (error) { next(error); }
 });
 
-// Sample BookRides emails -- for the UI to offer quick "try one of these"
+// Sample BookRides emails -- for the UI to offer quick "try one of these".
+// Format matches the real notifications LandJet receives from bookridesonline.com
+// (verified against a real email pulled from the LJ Austin inbox 2026-03-03).
+// Each sample exercises a specific engine path so the team can validate the
+// 2026-05-21 Lorie corrections in one click each.
 router.get('/samples', authorize('campaigns:read'), async (_req: Request, res: Response) => {
   res.json([
     {
-      name: 'QC -> ORD flat rate',
-      email_body: `Office: Quad Cities\nService Type: One Way\nPickup: 123 Main St, Davenport, IA\nDropoff: O'Hare International Airport, Chicago, IL\nDistance: 175\nPassengers: 2\nCustomer: john@example.com\n`,
+      name: 'Real: Blake Wilson IL -> IA round trip',
+      category: 'real',
+      blurb: 'Actual BookRides email from 2026-03-03. Schaumburg IL pickup, Des Moines IA dropoff, round trip. Tests cross-state routing (no Iowa tax should apply).',
+      email_body: `LandJet Austin\n8830 Business Park Drive, Suite 100, Austin, TX 78759\n8665263538\nLJAustin@landjet.com\n\nQuote Request\n\nTrip Details\n\nPassenger Info\n\nBlake Wilson\nPhone: 6054600604\nEmail: Blakewilson1188@gmail.com\n\nReservation Info\n\nDate Of Service: 04/07/2026\nService Type: Round Trip\nStart Time: 8:27 AM\nReservation #: 3341491\nPassengers: 2\nLuggage: 1\nVehicle: Conference Room\n\nPickup\n\n1551 Thoreau Dr N, Schaumburg, IL 60173, USA\n\nDropoff\n\n3000 E Grand Ave, Des Moines, IA 50317, USA\n`,
+    },
+    {
+      name: "QC -> O'Hare flat rate",
+      category: 'flat_rate',
+      blurb: 'Davenport to O\'Hare. Triggers the $550 QC->ORD flat rate with the $10 toll and auto-20% gratuity (per Lorie 2026-05-21).',
+      email_body: `LandJet Quad Cities\nLJQuadCities@landjet.com\n\nQuote Request\n\nPassenger Info\n\nMatt Tuft\nPhone: 3094567890\nEmail: matt.tuft@insightassetmgmt.com\n\nReservation Info\n\nDate Of Service: 06/15/2026\nService Type: One Way\nStart Time: 5:30 AM\nReservation #: 3341492\nPassengers: 1\nLuggage: 1\nVehicle: Executive Sedan\n\nPickup\n\n2950 Eastern Ave, Davenport, IA 52803, USA\n\nDropoff\n\n10000 W O'Hare Ave, Chicago, IL 60666, USA\n`,
     },
     {
       name: 'QC -> Des Moines distance',
-      email_body: `Office: Quad Cities\nService Type: One Way\nPickup: 456 Oak Ave, Bettendorf, IA\nDropoff: 789 State St, Des Moines, IA\nDistance: 165\nPassengers: 4\n`,
+      category: 'distance',
+      blurb: 'Confirms the 2026-05-21 fix: QC->DSM is NOT a flat rate. Should price as distance ($400 base + $2.40/mi + Iowa 7% tax since all-IA).',
+      email_body: `LandJet Quad Cities\nLJQuadCities@landjet.com\n\nQuote Request\n\nPassenger Info\n\nJane Doe\nPhone: 5631234567\nEmail: jane.doe@example.com\n\nReservation Info\n\nDate Of Service: 06/20/2026\nService Type: One Way\nStart Time: 2:00 PM\nReservation #: 3341493\nPassengers: 3\nLuggage: 2\nVehicle: Executive Sedan\n\nPickup\n\n123 Main St, Davenport, IA 52801, USA\n\nDropoff\n\n555 Walnut St, Des Moines, IA 50309, USA\n`,
     },
     {
       name: 'JD employee round-trip',
-      email_body: `Office: Quad Cities\nService Type: Round Trip\nPickup: John Deere World HQ, Moline, IL\nDropoff: Des Moines, IA\nDistance: 350\nPassengers: 2\nCustomer: jane@johndeere.com\n`,
+      category: 'customer_category',
+      blurb: 'John Deere domain email triggers JD rate card: $200 trip fee, $2.20/mi, $100 default gratuity. Trip fee is ONE per booking per Ryan 2026-05-21.',
+      email_body: `LandJet Quad Cities\nLJQuadCities@landjet.com\n\nQuote Request\n\nPassenger Info\n\nPraful Kolte\nPhone: 3098001234\nEmail: KoltePrafulA@JohnDeere.com\n\nReservation Info\n\nDate Of Service: 06/12/2026\nService Type: Round Trip\nStart Time: 7:00 AM\nReservation #: 3341494\nPassengers: 2\nLuggage: 0\nVehicle: Conference Room\n\nPickup\n\n1 John Deere Pl, Moline, IL 61265, USA\n\nDropoff\n\nJohn Deere Des Moines Works, Ankeny, IA 50021, USA\n`,
+    },
+    {
+      name: 'Kansas City forward-only',
+      category: 'forward_only',
+      blurb: 'Per Percy 2026-05-06: AI does NOT quote KC. Should return pricing_mode=forward_only with holly@ + scott@ kclandjet.com recipients.',
+      email_body: `LandJet Kansas City\nLJKansasCity@landjet.com\n\nQuote Request\n\nPassenger Info\n\nTom Harris\nPhone: 8161234567\nEmail: tom@example.com\n\nReservation Info\n\nDate Of Service: 06/22/2026\nService Type: One Way\nStart Time: 11:00 AM\nReservation #: 3341495\nPassengers: 1\nLuggage: 1\nVehicle: Executive Sedan\n\nPickup\n\n1 Arrowhead Dr, Kansas City, MO 64129, USA\n\nDropoff\n\nKansas City International Airport, MO 64153, USA\n`,
+    },
+    {
+      name: 'After-hours pickup (3am)',
+      category: 'surcharge',
+      blurb: 'Pickup between 11pm and 5am triggers the $200 after-hours surcharge added to driver gratuity.',
+      email_body: `LandJet Dallas\nLJDallas@landjet.com\n\nQuote Request\n\nPassenger Info\n\nSarah Mitchell\nPhone: 2141234567\nEmail: sarah.mitchell@example.com\n\nReservation Info\n\nDate Of Service: 06/18/2026\nService Type: One Way\nStart Time: 3:00 AM\nReservation #: 3341496\nPassengers: 2\nLuggage: 3\nVehicle: Executive Sedan\n\nPickup\n\n2500 Victory Ave, Dallas, TX 75219, USA\n\nDropoff\n\nDFW International Airport, Grapevine, TX 76051, USA\n`,
+    },
+    {
+      name: 'Austin hourly local',
+      category: 'hourly',
+      blurb: 'Hourly local trip in Austin. 4-hour minimum @ $175/hr applies. No mileage charge.',
+      email_body: `LandJet Austin\nLJAustin@landjet.com\n\nQuote Request\n\nPassenger Info\n\nDavid Chen\nPhone: 5121234567\nEmail: dchen@techcorp.io\n\nReservation Info\n\nDate Of Service: 06/14/2026\nService Type: Hourly\nStart Time: 9:00 AM\nReservation #: 3341497\nPassengers: 4\nLuggage: 0\nVehicle: Executive SUV\n\nPickup\n\n200 W 6th St, Austin, TX 78701, USA\n\nDropoff\n\n200 W 6th St, Austin, TX 78701, USA\n`,
+    },
+    {
+      name: 'Investor outreach trip',
+      category: 'customer_category',
+      blurb: 'Investor category: $400 trip fee discount applied. Useful for testing the discount path on a corporate market.',
+      email_body: `LandJet Dallas\nLJDallas@landjet.com\n\nQuote Request\n\nPassenger Info\n\nMichael Rodriguez\nPhone: 2143335555\nEmail: mrod@growthequity.com\n\nReservation Info\n\nDate Of Service: 06/25/2026\nService Type: Round Trip\nStart Time: 10:00 AM\nReservation #: 3341498\nPassengers: 2\nLuggage: 2\nVehicle: Conference Room\n\nPickup\n\nDFW International Airport, Grapevine, TX 76051, USA\n\nDropoff\n\n400 W 15th St, Austin, TX 78701, USA\n`,
     },
   ]);
 });
