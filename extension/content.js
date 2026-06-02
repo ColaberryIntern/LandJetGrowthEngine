@@ -368,36 +368,77 @@
   }
 
   function findAddNoteButton() {
-    // Multiple strategies. v1.0.15's "must be a button/role=button" was too
-    // restrictive -- LinkedIn's "Add a note?" modal sometimes renders the
-    // option as a span / div / link wrapper with the React onClick on a
-    // parent. v1.0.16: accept any visible element whose textContent or
-    // aria-label is "Add a note" (excluding "without"), let aggressiveClick
-    // walk up to find the React handler.
+    // v1.0.17 strategy: target buttons INSIDE the "Add a note?" modal
+    // dialog. LinkedIn's modal contains exactly two buttons: "Add a note"
+    // (outline) and "Send without a note" (filled). The Add-a-note one
+    // is whichever button does NOT contain "without" in its label or text.
+    //
+    // This is dramatically simpler than trying to text-match across the
+    // whole document and bypasses any screen-reader-only text wrappers
+    // that might pollute textContent.
 
-    // Strategy 1: scan ALL element types (not just buttons) for visible
-    // elements with matching text or label.
+    // Strategy 1: find the dialog by title text, then pick its
+    // non-"without" button.
+    const titles = [...document.querySelectorAll('h1, h2, h3, [role="heading"]')];
+    const dialogTitle = titles.find(h => {
+      if (!isActuallyVisible(h)) return false;
+      const t = (h.textContent || '').trim().toLowerCase();
+      return /add a note to your invitation/.test(t);
+    });
+    if (dialogTitle) {
+      // Walk up to find the modal/dialog container.
+      let modal = dialogTitle;
+      for (let i = 0; i < 8 && modal && modal !== document.body; i++) {
+        if (modal.getAttribute && (modal.getAttribute('role') === 'dialog' ||
+            modal.getAttribute('role') === 'alertdialog' ||
+            /modal|dialog|artdeco/i.test(modal.getAttribute('class') || ''))) {
+          break;
+        }
+        modal = modal.parentElement;
+      }
+      const scope = (modal && modal !== document.body) ? modal : dialogTitle.parentElement || document.body;
+      const buttons = scope.querySelectorAll('button, [role="button"], a');
+      for (const b of buttons) {
+        if (!isActuallyVisible(b)) continue;
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        const text = (b.textContent || '').toLowerCase();
+        if (/without/.test(aria) || /without/.test(text)) continue;
+        if (/close|dismiss|cancel|×/i.test(aria + ' ' + text)) continue;
+        // Whatever's left in a 2-button modal is "Add a note".
+        if (/add.*note|note/.test(aria + ' ' + text) || (b.textContent || '').trim().length < 30) {
+          return b;
+        }
+      }
+    }
+
+    // Strategy 2 (fallback): scan all visible role=dialog/alertdialog
+    // containers + any artdeco-modal element for the non-"without" button.
+    const modals = [
+      ...document.querySelectorAll('[role="dialog"], [role="alertdialog"]'),
+      ...document.querySelectorAll('[class*="artdeco-modal"], [class*="modal"]'),
+    ];
+    for (const m of modals) {
+      if (!isActuallyVisible(m)) continue;
+      const buttons = m.querySelectorAll('button, [role="button"]');
+      for (const b of buttons) {
+        if (!isActuallyVisible(b)) continue;
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        const text = (b.textContent || '').toLowerCase();
+        if (/without|close|dismiss|cancel|×/.test(aria + ' ' + text)) continue;
+        if (/add.*note|^add a note/.test(text)) return b;
+        if (/add.*note|^add a note/.test(aria)) return b;
+      }
+    }
+
+    // Strategy 3 (final fallback): the old exact-text scan across all elements.
     const all = document.querySelectorAll('button, [role="button"], a, span, div, li, [role="menuitem"]');
     for (const el of all) {
       if (!isActuallyVisible(el)) continue;
       const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
       const text = (el.textContent || '').trim().toLowerCase();
       if (/without/.test(aria) || /without/.test(text)) continue;
-      // Exact match wins -- most specific. Excludes the modal title which is
-      // "add a note to your invitation?" (longer).
       if (text === 'add a note' || aria === 'add a note') return el;
-    }
-
-    // Strategy 2: walk text nodes for the exact phrase "Add a note", return
-    // the parent (let aggressiveClick walk up via React fiber ancestor scan).
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const t = (node.textContent || '').trim();
-      if (t !== 'Add a note' && !/^add a note$/i.test(t)) continue;
-      const el = node.parentElement;
-      if (!el || !isActuallyVisible(el)) continue;
-      return el;
+      if (/^add a note\s*$/i.test(text)) return el;
     }
 
     return null;
