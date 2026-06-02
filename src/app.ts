@@ -37,6 +37,7 @@ import qaRoutes from './routes/admin/qaRoutes';
 import intelligenceDecisionRoutes from './routes/admin/intelligenceDecisionRoutes';
 import agentRoutes from './routes/admin/agentRoutes';
 import extensionRoutes from './routes/extension';
+import quoteTesterRoutes from './routes/admin/quoteTesterRoutes';
 
 export function createApp() {
   const app = express();
@@ -115,6 +116,7 @@ export function createApp() {
   app.use('/api/admin/decisions', intelligenceDecisionRoutes);
   app.use('/api/admin/agents', agentRoutes);
   app.use('/api/extension', extensionRoutes);
+  app.use('/api/admin/quotes', quoteTesterRoutes);
 
   // 404 handler
   app.use((_req: Request, res: Response) => {
