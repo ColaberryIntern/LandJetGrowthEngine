@@ -657,10 +657,9 @@
     const precise = [
       'textarea[name="message"]',
       'textarea#custom-message',
-      '[role="dialog"] textarea',
       'div[aria-labelledby*="add-a-note"] textarea',
       'textarea[placeholder*="know each other" i]',
-      'textarea[placeholder*="note" i]',
+      'textarea[placeholder*="add a note" i]',
     ];
     for (const sel of precise) {
       try {
@@ -669,11 +668,19 @@
       } catch {}
     }
 
-    // BULLETPROOF FALLBACK (v1.0.19): any visible textarea on the page.
-    // When the connect-note modal is open this is reliably the right one --
-    // LinkedIn profile pages do not have other visible textareas.
+    // v1.0.20 fallback: visible textarea that lives INSIDE a modal/dialog
+    // container. Excludes textareas in messaging widgets, comment boxes,
+    // and other unrelated UI that v1.0.19's permissive fallback was matching.
     for (const t of document.querySelectorAll('textarea')) {
-      if (isActuallyVisible(t)) return t;
+      if (!isActuallyVisible(t)) continue;
+      let p = t.parentElement;
+      while (p && p !== document.body) {
+        const role = p.getAttribute && p.getAttribute('role');
+        if (role === 'dialog' || role === 'alertdialog') return t;
+        const cls = (p.getAttribute && p.getAttribute('class')) || '';
+        if (/artdeco-modal|modal-?container|invitation|send-invite|connect-button|custom-invite/i.test(cls)) return t;
+        p = p.parentElement;
+      }
     }
     return null;
   }
