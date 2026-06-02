@@ -47,7 +47,7 @@ export default function OutreachPage() {
     { tone: 'direct', label: 'More Direct' },
   ]);
 
-  async function fetchData() {
+  async function fetchData(opts: { preserveInProgress?: boolean } = {}) {
     await ensureAuth();
     try {
       const [contactRes, campaignRes, settingsRes] = await Promise.allSettled([
@@ -56,7 +56,35 @@ export default function OutreachPage() {
         getOutreachSettings(),
       ]);
 
-      if (contactRes.status === 'fulfilled') setContacts(contactRes.value);
+      if (contactRes.status === 'fulfilled') {
+        // Ryan WhatsApp 2026-06-01: "I was literally working in a contact
+        // and then the page refreshed and that contact is gone."
+        // Root cause was the auto-refresh wholesale-replacing setContacts
+        // with the server response. If the contact Ryan was editing fell
+        // out of the queue between refreshes (daily cap shifted, extension
+        // advanced it, etc.), it vanished from his screen mid-edit.
+        // Fix: on auto-refresh, pin any contact the user has an open
+        // draft edit, a pending campaign-choice, or an in-flight action
+        // for. Initial loads still replace.
+        if (opts.preserveInProgress) {
+          setContacts(prev => {
+            const fresh = contactRes.value;
+            const freshIds = new Set(fresh.map(c => c.contact_id));
+            const inProgressIds = new Set<string>([
+              ...Object.keys(draftEdits),
+              ...Object.keys(pendingCampaignChoice),
+              ...(acting ? [acting] : []),
+            ]);
+            const pinned = prev.filter(c => inProgressIds.has(c.contact_id) && !freshIds.has(c.contact_id));
+            if (pinned.length > 0) {
+              showNotice(`Queue refreshed -- kept ${pinned.length} contact${pinned.length !== 1 ? 's' : ''} you're working on at the top.`);
+            }
+            return [...pinned, ...fresh];
+          });
+        } else {
+          setContacts(contactRes.value);
+        }
+      }
       if (campaignRes.status === 'fulfilled') setCampaigns(campaignRes.value.campaigns.filter((c: CampaignOption) => !c.name.startsWith('MB Capital')));
       if (settingsRes.status === 'fulfilled') setSettings(prev => ({ ...prev, ...settingsRes.value }));
       setError(null);
@@ -85,11 +113,12 @@ export default function OutreachPage() {
 
   // Auto-refresh on tab focus -- catches advances made by the Chrome
   // extension (or any other out-of-band action) so leads that have been
-  // Marked Done elsewhere drop off without a manual refresh.
+  // Marked Done elsewhere drop off without a manual refresh. Pinning
+  // in-progress contacts so they don't vanish mid-edit (Ryan 6/1 #4).
   useEffect(() => {
     function onVisible() {
       if (document.visibilityState === 'visible') {
-        fetchData();
+        fetchData({ preserveInProgress: true });
       }
     }
     document.addEventListener('visibilitychange', onVisible);

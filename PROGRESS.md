@@ -252,6 +252,13 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
   - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
+### Session: 2026-06-02 (cont.) -- Ryan #4 real fix + screenshot route fix
+
+- [x] Ryan #4 (real fix): pin in-progress contacts during auto-refresh
+  - Date: 2026-06-02
+  - What changed: frontend/app/outreach/page.tsx fetchData() now accepts preserveInProgress flag. Auto-refresh on tab focus (visibilitychange) calls with preserveInProgress=true; initial loads still replace wholesale. Contacts with open draftEdits, pendingCampaignChoice, or in-flight acting are pinned at the top even if they fall out of the server response. A notice tells the user "Queue refreshed -- kept N contacts you're working on at the top." This addresses the actual root cause of "I was literally working in a contact and then the page refreshed and that contact is gone" -- the previous toast-only fix only helped when the user took an action.
+  - Verification: tsc clean. Frontend redeploy pending.
+
 ### Session: 2026-06-02 -- Ryan bug-fix sprint + outreach attachment plumbing
 
 - [x] Ryan #2: preserve sequence_stage when re-categorizing contact across industries
