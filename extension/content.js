@@ -668,19 +668,23 @@
       } catch {}
     }
 
-    // v1.0.20 fallback: visible textarea that lives INSIDE a modal/dialog
-    // container. Excludes textareas in messaging widgets, comment boxes,
-    // and other unrelated UI that v1.0.19's permissive fallback was matching.
+    // v1.0.21: check if there is a visible "Add a note to your invitation"
+    // heading on the page. If yes, we are in the note-modal state and the
+    // first visible textarea is the right one. Sidesteps every class-name
+    // / role-attribute variation across Premium/non-Premium and old/new
+    // LinkedIn builds. The messaging widget never renders this heading so
+    // it cannot false-match.
+    const titles = document.querySelectorAll('h1, h2, h3, h4, [role="heading"], div[aria-level]');
+    let modalOpen = false;
+    for (const h of titles) {
+      if (!isActuallyVisible(h)) continue;
+      const t = (h.textContent || '').trim().toLowerCase();
+      if (/add a note to your invitation/.test(t)) { modalOpen = true; break; }
+    }
+    if (!modalOpen) return null;
+
     for (const t of document.querySelectorAll('textarea')) {
-      if (!isActuallyVisible(t)) continue;
-      let p = t.parentElement;
-      while (p && p !== document.body) {
-        const role = p.getAttribute && p.getAttribute('role');
-        if (role === 'dialog' || role === 'alertdialog') return t;
-        const cls = (p.getAttribute && p.getAttribute('class')) || '';
-        if (/artdeco-modal|modal-?container|invitation|send-invite|connect-button|custom-invite/i.test(cls)) return t;
-        p = p.parentElement;
-      }
+      if (isActuallyVisible(t)) return t;
     }
     return null;
   }
