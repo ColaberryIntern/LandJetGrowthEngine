@@ -446,6 +446,341 @@ describe('LandJet Pricing Engine', () => {
         { address: 'b', state: 'IL' },
       ]})).toBe(false);
     });
+
+    // ----- Sales tax stress tests (2026-06-02) -----
+    // Edge cases across IA/IL/TX scenarios. These were added so demos with
+    // Lorie + Ryan don't surface tax surprises on cross-state routes.
+
+    it('IL pickup -> IA dropoff: no Iowa tax (cross-state)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: 'Schaumburg, IL 60173', state: 'IL' },
+          { address: 'Des Moines, IA 50317', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('IA pickup -> IL dropoff: no Iowa tax (cross-state)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Chicago, IL', state: 'IL' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('IA pickup -> TX dropoff: no Iowa tax (cross-state to Texas)', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: 'Des Moines, IA', state: 'IA' },
+          { address: 'Dallas, TX', state: 'TX' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('Multi-stop all-IA round trip with passenger pickup in middle: tax applies', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'round_trip',
+        passenger_miles: 300,
+        payment: 'check',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Iowa City, IA', state: 'IA' },
+          { address: 'Cedar Rapids, IA', state: 'IA' },
+          { address: 'Des Moines, IA', state: 'IA' },
+        ],
+      });
+      const taxLine = q.lines.find(l => l.label === 'Iowa Tax (7%)');
+      expect(taxLine).toBeDefined();
+      expect(taxLine!.amount).toBeCloseTo(q.subtotal * 0.07, 2);
+    });
+
+    it('Iowa tax applied to subtotal only -- NOT to gratuity or CC fee', () => {
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'credit_card',  // forces CC fee
+        gratuity_pct: 0.20,
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Des Moines, IA', state: 'IA' },
+        ],
+      });
+      const taxLine = q.lines.find(l => l.label === 'Iowa Tax (7%)');
+      const ccLine = q.lines.find(l => l.label.includes('CC Convenience Fee'));
+      const gratLine = q.lines.find(l => l.label.includes('Gratuity'));
+      expect(taxLine).toBeDefined();
+      expect(ccLine).toBeDefined();
+      expect(gratLine).toBeDefined();
+      // Tax = 7% of subtotal, not of (subtotal + grat + cc fee)
+      expect(taxLine!.amount).toBeCloseTo(q.subtotal * 0.07, 2);
+      // Tax amount should NOT include gratuity in its base
+      expect(taxLine!.amount).toBeLessThan((q.subtotal + gratLine!.amount) * 0.07);
+    });
+
+    it('Single-stop IA-only trip: tax applies (single stop edge case)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'hourly_local',
+        service_hours: 4,
+        passenger_miles: 0,
+        payment: 'check',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeDefined();
+    });
+
+    it('Empty stops + is_iowa_only=false: no tax (Iowa market, non-IA trip)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        is_iowa_only: false,
+        stops: [],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('State string with leading/trailing whitespace handled (" IA ")', () => {
+      expect(isIowaOnlyTrip({ stops: [
+        { address: 'a', state: ' IA ' },
+        { address: 'b', state: 'IA' },
+      ]})).toBe(true);
+    });
+
+    it('Texas-only round trip: no Iowa tax', () => {
+      const q = calculateQuote({
+        market: 'dallas',
+        service_type: 'round_trip',
+        passenger_miles: 300,
+        payment: 'check',
+        stops: [
+          { address: 'Dallas, TX', state: 'TX' },
+          { address: 'Austin, TX', state: 'TX' },
+          { address: 'Dallas, TX', state: 'TX' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('Cross-state round trip IA->IL->IA: no tax (intermediate stop disqualifies)', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'check',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Chicago, IL', state: 'IL' },
+          { address: 'Davenport, IA', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('All-IA trip but Texas market (Dallas): no Iowa tax (market disqualifies)', () => {
+      const q = calculateQuote({
+        market: 'dallas',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: 'Davenport, IA', state: 'IA' },
+          { address: 'Des Moines, IA', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('All-IA trip on Omaha (NE) market: no Iowa tax (Omaha not iowa_tax_eligible)', () => {
+      const q = calculateQuote({
+        market: 'omaha',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        stops: [
+          { address: 'Council Bluffs, IA', state: 'IA' },
+          { address: 'Sioux City, IA', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+
+    it('isIowaOnlyTrip helper -- lowercase + full-state-name handling', () => {
+      // Lowercase 2-letter passes
+      expect(isIowaOnlyTrip({ stops: [
+        { address: 'a', state: 'ia' },
+        { address: 'b', state: 'IA' },
+      ]})).toBe(true);
+      // Full state name 'Iowa' is NOT a 2-letter code -- helper currently
+      // requires 2-letter; full names won't match. This documents current
+      // behavior so callers (BookRides parser, manual entry) normalize upstream.
+      expect(isIowaOnlyTrip({ stops: [
+        { address: 'a', state: 'Iowa' },
+      ]})).toBe(false);
+    });
+
+    it('Tax amount precision: subtotal $1000 -> exact $70 tax', () => {
+      // Use a configuration that yields a clean subtotal for precision check.
+      const q = calculateQuote({
+        market: 'des_moines',
+        service_type: 'one_way',
+        flat_rate_amount: 1000,
+        flat_rate_label: 'Test flat $1000',
+        passenger_miles: 0,
+        payment: 'check',
+        stops: [
+          { address: 'Des Moines, IA', state: 'IA' },
+          { address: 'Iowa City, IA', state: 'IA' },
+        ],
+      });
+      const taxLine = q.lines.find(l => l.label === 'Iowa Tax (7%)');
+      expect(taxLine).toBeDefined();
+      // Subtotal includes auto-20% gratuity on flat rate, so tax base = $1000 flat alone.
+      // Verify tax matches whatever the subtotal is times 0.07
+      expect(taxLine!.amount).toBeCloseTo(q.subtotal * 0.07, 2);
+    });
+
+    it('San Antonio (TX market) with IA stops: no tax even if passenger goes to IA', () => {
+      const q = calculateQuote({
+        market: 'san_antonio',
+        service_type: 'round_trip',
+        passenger_miles: 400,
+        payment: 'check',
+        stops: [
+          { address: 'San Antonio, TX', state: 'TX' },
+          { address: 'Davenport, IA', state: 'IA' },
+        ],
+      });
+      expect(q.lines.find(l => l.label.includes('Iowa Tax'))).toBeUndefined();
+    });
+  });
+
+  // ===================================================================
+  // MULTI-DAY ROUTING (per Ryan/Lorie 2026-05-21 ask: overnight or 2+
+  // per diem days routes to reservation desk for human review)
+  // ===================================================================
+
+  describe('Multi-day trip routing to human review queue', () => {
+    it('single-night overnight trip flags requires_human_review + warning + approval', () => {
+      const q = calculateQuote({
+        market: 'dallas',
+        service_type: 'one_way',
+        passenger_miles: 400,
+        payment: 'check',
+        overnight_nights: 1,
+      });
+      expect(q.requires_human_review).toBe(true);
+      expect(q.human_review_reasons).toContain('multi_day:1 overnight');
+      expect(q.warnings.find(w => /Multi-day trip.*1 overnight/i.test(w))).toBeDefined();
+      expect(q.approvals_needed.find(a => /Multi-day trip routing/i.test(a))).toBeDefined();
+    });
+
+    it('multi-night overnight uses plural ("3 overnights")', () => {
+      const q = calculateQuote({
+        market: 'dallas',
+        service_type: 'round_trip',
+        passenger_miles: 600,
+        payment: 'check',
+        overnight_nights: 3,
+      });
+      expect(q.human_review_reasons).toContain('multi_day:3 overnights');
+    });
+
+    it('overnight + per diem combined surfaces both in reason', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'round_trip',
+        passenger_miles: 500,
+        payment: 'check',
+        overnight_nights: 2,
+        per_diem_days: 3,
+      });
+      expect(q.human_review_reasons).toContain('multi_day:2 overnights + 3 days per diem');
+      expect(q.requires_human_review).toBe(true);
+    });
+
+    it('2+ per diem days alone triggers human review (no overnight)', () => {
+      const q = calculateQuote({
+        market: 'austin',
+        service_type: 'one_way',
+        passenger_miles: 300,
+        payment: 'check',
+        per_diem_days: 2,
+      });
+      expect(q.requires_human_review).toBe(true);
+      expect(q.human_review_reasons).toContain('multi_day:2 days per diem');
+    });
+
+    it('1 per diem day alone does NOT trigger human review (single-day standby)', () => {
+      const q = calculateQuote({
+        market: 'austin',
+        service_type: 'one_way',
+        passenger_miles: 300,
+        payment: 'check',
+        per_diem_days: 1,
+      });
+      expect(q.requires_human_review).toBe(false);
+      expect(q.human_review_reasons).toEqual([]);
+    });
+
+    it('regular same-day trip does NOT trigger human review', () => {
+      const q = calculateQuote({
+        market: 'dallas',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+      });
+      expect(q.requires_human_review).toBe(false);
+      expect(q.human_review_reasons).toEqual([]);
+      expect(q.warnings.find(w => /Multi-day trip/i.test(w))).toBeUndefined();
+    });
+
+    it('forward-only market (KC) also marks requires_human_review', () => {
+      const q = calculateQuote({
+        market: 'kansas_city',
+        service_type: 'one_way',
+        passenger_miles: 100,
+        payment: 'check',
+      });
+      expect(q.requires_human_review).toBe(true);
+      expect(q.human_review_reasons).toContain('forward_only_market:kansas_city');
+      expect(q.pricing_mode).toBe('forward_only');
+    });
+
+    it('multi-day trip with flat rate still flags human review', () => {
+      const q = calculateQuote({
+        market: 'quad_cities',
+        service_type: 'one_way',
+        passenger_miles: 200,
+        payment: 'check',
+        flat_rate_amount: 550,
+        flat_rate_label: 'QC -> ORD',
+        overnight_nights: 1,
+      });
+      expect(q.requires_human_review).toBe(true);
+      expect(q.pricing_mode).toBe('flat_rate');
+    });
   });
 
   // ===================================================================

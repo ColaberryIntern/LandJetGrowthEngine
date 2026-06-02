@@ -252,6 +252,28 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
   - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
+### Session: 2026-06-02 (late) -- 5-task sprint: tax tests, multi-day routing, attachments UI
+
+- [x] #5: Sales tax stress tests across IA/IL/TX scenarios
+  - Date: 2026-06-02
+  - What changed: 15 new tests in `src/tests/unit/landjetPricing.test.ts` under "Iowa-only 7% tax". Cover IL->IA cross-state, IA->IL/TX cross-state, multi-stop all-IA, multi-stop with intermediate non-IA leg, IA-only on non-IA-eligible markets (Dallas, Omaha, San Antonio), single-stop IA, case sensitivity (lowercase, whitespace, full state name), tax base = subtotal (not subtotal + gratuity + CC), tax precision against fixed flat-rate base.
+  - Verification: `npx jest landjetPricing.test.ts -t "Iowa-only 7% tax"` 22 passing. Total suite: 85/85.
+
+- [x] #3: Multi-day trip routing to human review queue
+  - Date: 2026-06-02
+  - What changed: `src/services/landjetPricing.ts` -- when `overnight_nights > 0` OR `per_diem_days >= 2`, the engine populates a `warnings` entry, an `approvals_needed` entry, and a new `requires_human_review: boolean` + `human_review_reasons: string[]` on QuoteOutput. Forward-only markets (KC) also set requires_human_review=true. Quote Tester UI (`frontend/app/quote-tester/page.tsx`) now renders a prominent orange "Reservation desk review required" banner above the warnings list, with each reason explained in plain English.
+  - Verification: 8 new tests in the "Multi-day trip routing to human review queue" describe block, all passing. Frontend tsc clean.
+
+- [x] #2: Outreach attachments management API + admin UI
+  - Date: 2026-06-02
+  - What changed: New `src/routes/admin/attachmentRoutes.ts` mounted at `/api/admin/attachments`. POST accepts JSON `{filename, base64}` (25MB limit, no multer dep), GET lists `OUTREACH_ATTACHMENTS_DIR`, DELETE removes by filename. Filename whitelist (`/^[A-Za-z0-9._-]{1,128}$/`) + extension whitelist (PDF/DOCX/PPTX/PNG/JPG) + path-traversal guard. New frontend page at `frontend/app/admin/attachments/page.tsx` lets Ali/Ryan upload deck files via file input (base64-encoded client-side), see all uploaded files with size + uploaded_at, and delete. The page documents the wiring step (set `sequence_steps[i].attachment_path` to the filename) since the per-step UI is a separate task (BC 9956274272).
+  - Verification: backend + frontend tsc clean. Deploy pending.
+
+- [x] #4: Per-market flat rate sets -- documented as data gap (no scaffolded values)
+  - Date: 2026-06-02
+  - What changed: `src/services/landjetPricing.ts` FLAT_ROUTES table now has a clear "NOT YET FILLED IN" comment block enumerating the missing Omaha / Austin / San Antonio / Dallas-extension routes (KC excluded per Percy 2026-05-06 forward-only rule). Did NOT add placeholder values since wrong numbers would mis-price live quotes; distance fallback stays in place until Ryan/Lorie send the rate sheets.
+  - Verification: tsc clean. BC ticket updated asking Ryan + Lorie for the actual rate sheets per market.
+
 ### Session: 2026-06-02 (cont.) -- Ryan #4 real fix + screenshot route fix
 
 - [x] Ryan #4 (real fix): pin in-progress contacts during auto-refresh

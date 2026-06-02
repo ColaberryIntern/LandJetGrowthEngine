@@ -26,6 +26,8 @@ interface QuoteOutput {
   grand_total: number;
   warnings: string[];
   approvals_needed: string[];
+  requires_human_review?: boolean;
+  human_review_reasons?: string[];
   forward_to?: string[];
   forward_reason?: string;
 }
@@ -414,6 +416,29 @@ export default function QuoteTesterPage() {
               {result.map && !result.map.embed_url && result.map.origin && result.map.destination && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                   Map unavailable — {result.map.configured ? 'addresses could not be embedded.' : 'GOOGLE_MAPS_API_KEY is not configured on the server.'}
+                </div>
+              )}
+
+              {/* HUMAN REVIEW BANNER -- multi-day, forward-only, etc. */}
+              {result.quote.requires_human_review && (
+                <div className="rounded-lg border-2 border-orange-300 bg-orange-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl leading-none">⚠</span>
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-orange-900 mb-1">Reservation desk review required</div>
+                      <div className="text-xs text-orange-800">
+                        This quote is not ready to send to the customer until the reservation desk has confirmed:
+                      </div>
+                      <ul className="mt-2 text-xs text-orange-900 space-y-1">
+                        {(result.quote.human_review_reasons || []).map((r, i) => {
+                          const label = r.startsWith('multi_day:') ? `Multi-day trip (${r.slice('multi_day:'.length)}) -- hotel + driver + customer schedule must be confirmed.`
+                            : r.startsWith('forward_only_market:') ? `Forward-only market (${r.slice('forward_only_market:'.length)}) -- the local team owns this quote.`
+                            : r;
+                          return <li key={i}>• {label}</li>;
+                        })}
+                      </ul>
+                    </div>
+                  </div>
                 </div>
               )}
 

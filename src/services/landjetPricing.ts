@@ -111,6 +111,8 @@ export interface QuoteOutput {
   grand_total: number;     // after CC fee
   warnings: string[];      // e.g., DOT compliance, "needs approval"
   approvals_needed: string[]; // line items that need concierge approval
+  requires_human_review: boolean; // true when the engine deferred a routing decision (multi-day, forward-only, etc.)
+  human_review_reasons: string[]; // structured reasons populated alongside the above
   forward_to?: string[];   // populated when pricing_mode === 'forward_only'
   forward_reason?: string; // human-readable reason for forwarding
 }
@@ -300,6 +302,20 @@ const FLAT_ROUTES: FlatRoute[] = [
   { label: 'Des Moines -> Iowa Hawkeyes (Kinnick)', pattern: /des moines.*?(kinnick|iowa city|iowa hawkeyes)/i, price: 1500, oneway: true },
   { label: 'QC -> Iowa State (Jack Trice)', pattern: /(quad cities|davenport).*?(iowa state|cyclones|jack trice|jace trice|ames)/i, price: 1500, oneway: true },
   { label: 'Des Moines -> Iowa State (Jack Trice)', pattern: /des moines.*?(iowa state|cyclones|jack trice|jace trice|ames)/i, price: 1200, oneway: true },
+  // -- NOT YET FILLED IN -----------------------------------------------------
+  // Per-market flat rate sets requested 2026-06-02 (BC 9946698749). Waiting
+  // on Ryan + Lorie for actual rate sheets before adding:
+  //   Omaha:   Omaha -> Eppley Airfield (OMA), Omaha -> Lincoln Airport (LNK),
+  //            Omaha -> KCI Kansas City Airport (MCI), Omaha -> Des Moines.
+  //   Austin:  Austin -> AUS (Bergstrom), Austin -> San Antonio (SAT),
+  //            Austin -> DFW, Austin -> Houston (IAH/HOU).
+  //   San Antonio: SAT -> Austin, SAT -> DFW, SAT -> Houston.
+  //   Dallas:  add DFW <-> Austin/Houston pairings beyond the current
+  //            Dallas/Fort Worth -> DFW shuttle.
+  //   Kansas City: deliberately NOT in this engine -- forward-only per
+  //            Percy 2026-05-06. Local team handles all KC pricing.
+  // Adding placeholder values would mis-price live quotes, so leaving the
+  // distance-pricing fallback in place until real numbers arrive.
 ];
 
 export function detectFlatRateRoute(pickup: string, dropoff: string): FlatRoute | null {
@@ -417,6 +433,8 @@ export function calculateQuote(input: QuoteInput): QuoteOutput {
       grand_total: 0,
       warnings: [`Forward-only market: ${market}. ${cfg.reason}`],
       approvals_needed: [],
+      requires_human_review: true,
+      human_review_reasons: [`forward_only_market:${market}`],
       forward_to: cfg.recipients,
       forward_reason: cfg.reason,
     };
@@ -629,6 +647,23 @@ function finalizeQuote(args: FinalizeArgs): QuoteOutput {
     lines.push({ label: `Per Diem (${input.per_diem_days} days @ $${rates.per_diem_default})`, amount: input.per_diem_days * rates.per_diem_default });
   }
 
+  // Multi-day trip routing (per Ryan/Lorie 2026-05-21 ask): any trip with an
+  // overnight or 2+ per diem days is a multi-day booking and must route to
+  // the reservation desk for human review before the quote leaves the
+  // building -- driver availability + hotel booking + customer schedule
+  // alignment cannot be confirmed by the engine alone.
+  const isMultiDay = !!((input.overnight_nights && input.overnight_nights > 0) ||
+                       (input.per_diem_days && input.per_diem_days >= 2));
+  if (isMultiDay) {
+    const nights = input.overnight_nights || 0;
+    const days = input.per_diem_days || 0;
+    const desc = nights > 0
+      ? `${nights} overnight${nights !== 1 ? 's' : ''}${days > 0 ? ` + ${days} day${days !== 1 ? 's' : ''} per diem` : ''}`
+      : `${days} days per diem`;
+    warnings.push(`Multi-day trip (${desc}). Verify hotel arrangements + driver availability + customer schedule with the reservation desk before sending to customer.`);
+    approvals_needed.push(`Multi-day trip routing -- reservation desk review required (${desc})`);
+  }
+
   // Flat dollar gratuity (or default for customer category)
   const override = CUSTOMER_OVERRIDES[args.customer_category];
   const flat_gratuity = input.gratuity_amount ?? (override.default_gratuity_amount && input.gratuity_pct == null ? override.default_gratuity_amount : 0);
@@ -666,6 +701,16 @@ function finalizeQuote(args: FinalizeArgs): QuoteOutput {
     warnings.push('DOT: trips over 15 hrs require a second driver. Add additional_drivers_hours.');
   }
 
+  const human_review_reasons: string[] = [];
+  if (isMultiDay) {
+    const nights = args.input.overnight_nights || 0;
+    const days = args.input.per_diem_days || 0;
+    const desc = nights > 0
+      ? `${nights} overnight${nights !== 1 ? 's' : ''}${days > 0 ? ` + ${days} day${days !== 1 ? 's' : ''} per diem` : ''}`
+      : `${days} days per diem`;
+    human_review_reasons.push(`multi_day:${desc}`);
+  }
+
   return {
     market: args.market,
     customer_category: args.customer_category,
@@ -678,6 +723,8 @@ function finalizeQuote(args: FinalizeArgs): QuoteOutput {
     grand_total,
     warnings,
     approvals_needed,
+    requires_human_review: human_review_reasons.length > 0,
+    human_review_reasons,
   };
 }
 
