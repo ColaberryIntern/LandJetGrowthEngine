@@ -7,7 +7,7 @@ import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
-import { sendOutreachEmail, getSenderForCampaign, testConnection } from '../../services/outreachEmailService';
+import { sendOutreachEmail, getSenderForCampaign, testConnection, loadAttachmentFromPath } from '../../services/outreachEmailService';
 import { recordAgentRun } from '../../intelligence/agents/agentRegistry';
 import { logger } from '../../config/logger';
 
@@ -1003,17 +1003,30 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
       return res.status(404).json({ error: 'Contact not found' });
     }
 
-    const { campaign_id } = req.body;
+    const { campaign_id, preserve_stage } = req.body;
     const previousCampaignId = lead.campaign_id;
     const movingToNewCampaign = campaign_id && campaign_id !== previousCampaignId;
+    // Ryan WhatsApp 2026-06-01: re-categorizing a contact across industries
+    // should keep their existing outreach progress (e.g. LinkedIn connection
+    // already pending at stage 3), not bounce them back to stage 1.
+    // Default to preserving stage; callers can opt-out with preserve_stage=false.
+    const shouldPreserveStage = preserve_stage !== false;
+    const previousStage = lead.sequence_stage;
 
     lead.campaign_id = campaign_id || null;
-    // When moving to a different campaign, reset to step 1 so the lead starts
-    // fresh in the new campaign's voice/sequence. Prevents stale draft from the
-    // wrong campaign showing up in the queue.
     if (movingToNewCampaign) {
-      lead.sequence_stage = 1;
-      lead.next_action_at = null;
+      if (shouldPreserveStage) {
+        // Clamp to the new campaign's max so we never exceed its sequence_steps.
+        const newCampaign = await Campaign.findByPk(campaign_id, { attributes: ['sequence_steps'] });
+        const newMaxSteps = (newCampaign?.sequence_steps as any[] | null)?.length || 3;
+        lead.sequence_stage = Math.min(previousStage, newMaxSteps);
+        // Reset the timer so they show up today in the new campaign's queue
+        // instead of waiting on the old next_action_at.
+        lead.next_action_at = null;
+      } else {
+        lead.sequence_stage = 1;
+        lead.next_action_at = null;
+      }
     }
     await lead.save();
 
@@ -1113,6 +1126,8 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
       draft,
       status: updated.outreach_status,
       moved_from_campaign_id: movingToNewCampaign ? previousCampaignId : null,
+      stage_preserved: movingToNewCampaign && shouldPreserveStage && updated.sequence_stage === Math.min(previousStage, ((campaign?.sequence_steps as any[] | null)?.length || 3)),
+      previous_stage: movingToNewCampaign ? previousStage : null,
     });
   } catch (error) {
     logger.error('POST /:id/campaign failed', { error: (error as Error).message });
@@ -1167,6 +1182,17 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       // Use campaign-specific signature if set, otherwise global signature
       const signature = (campaign?.settings as any)?.email_signature || globalSettings.email_signature || '';
 
+      // Ryan WhatsApp 2026-06-01 ask: attach the investor deck on a specific
+      // investor-campaign step, intro deck after the second industry touch.
+      // The step declares the file via sequence_steps[i].attachment_path
+      // (relative to OUTREACH_ATTACHMENTS_DIR). We load + base64-encode here
+      // and forward to Graph. Missing file logs a warning and the send still
+      // goes out without the attachment rather than failing the whole step.
+      const attachmentPath = (stepInfo as any)?.attachment_path as string | undefined;
+      const attachments = attachmentPath
+        ? [await loadAttachmentFromPath(attachmentPath)].filter((a): a is NonNullable<typeof a> => a !== null)
+        : undefined;
+
       emailResult = await sendOutreachEmail({
         to: recipientEmail,
         subject: globalSettings.test_mode ? `[TEST -> ${leadBefore.email}] ${emailSubject}` : emailSubject,
@@ -1174,6 +1200,7 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         from: senderEmail,
         senderName,
         signature,
+        attachments,
         lead_id: leadBefore.id,
         campaign_id: leadBefore.campaign_id || null,
         delivery_mode: globalSettings.test_mode ? 'test' : 'live',

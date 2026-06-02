@@ -21,6 +21,14 @@ export default function OutreachPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Ryan WhatsApp 2026-06-01: "I was working in a contact and then the page
+  // refreshed and that contact is gone." Always tell the user where the
+  // contact went after an action so it never feels like it vanished.
+  const [notice, setNotice] = useState<{ msg: string; until: number } | null>(null);
+  function showNotice(msg: string, durationMs: number = 6000) {
+    setNotice({ msg, until: Date.now() + durationMs });
+    setTimeout(() => setNotice(curr => (curr && curr.until <= Date.now() ? null : curr)), durationMs + 100);
+  }
   const [filter, setFilter] = useState<string>('all');
   const [showSettings, setShowSettings] = useState(false);
   const [testSendCount, setTestSendCount] = useState(0);
@@ -95,11 +103,32 @@ export default function OutreachPage() {
       // Pass edited subject/body if user modified the draft
       const body = edit ? { subject: edit.subject, body: edit.body } : undefined;
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      await fetch(`/api/admin/outreach/${contactId}/advance`, {
+      // Ryan WhatsApp 2026-06-01: "have to mark done twice" -- root cause was
+      // not checking response.ok and optimistically removing the contact even
+      // when the server returned a 4xx. We now confirm advance succeeded
+      // before removing locally; on failure, surface the error and leave the
+      // contact visible so a single retry click actually completes the work.
+      const resp = await fetch(`/api/admin/outreach/${contactId}/advance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(body || {}),
       });
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        throw new Error(errBody.error || `Mark Done failed (HTTP ${resp.status}). Please try again.`);
+      }
+      const advanceData = await resp.json().catch(() => null) as any;
+      const contact = contacts.find(c => c.contact_id === contactId);
+      const name = contact ? `${contact.name || 'Contact'}` : 'Contact';
+      if (advanceData?.status === 'COMPLETED') {
+        showNotice(`${name}: sequence complete -- no more follow-ups scheduled.`);
+      } else if (advanceData?.next_action_at) {
+        const when = new Date(advanceData.next_action_at);
+        const dateStr = when.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        showNotice(`${name}: advanced to step ${advanceData.sequence_stage}. Next follow-up ${dateStr}.`);
+      } else {
+        showNotice(`${name}: marked done.`);
+      }
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
       setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
     } catch (e) { setError((e as Error).message); }
@@ -107,10 +136,13 @@ export default function OutreachPage() {
   }
 
   async function handleSkip(contactId: string) {
+    const contact = contacts.find(c => c.contact_id === contactId);
+    const name = contact?.name || 'Contact';
     setActing(contactId);
     try {
       await skipOutreachContact(contactId);
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+      showNotice(`${name}: skipped. Will reappear in tomorrow's queue.`);
     } catch (e) { setError((e as Error).message); }
     finally { setActing(null); }
   }
@@ -121,6 +153,7 @@ export default function OutreachPage() {
     try {
       await removeOutreachContact(contactId);
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+      showNotice(`${contactName}: removed from this campaign. Re-assignable from the contact's profile.`);
     } catch (e) { setError((e as Error).message); }
     finally { setActing(null); }
   }
@@ -131,6 +164,7 @@ export default function OutreachPage() {
     try {
       await blockOutreachContact(contactId, 'manual_block_from_outreach');
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+      showNotice(`${contactName}: blocked from all outreach (do-not-contact list).`);
     } catch (e) { setError((e as Error).message); }
     finally { setActing(null); }
   }
@@ -158,6 +192,20 @@ export default function OutreachPage() {
       setContacts(prev => prev.map(c => c.contact_id === contactId ? updatedContact : c));
       setDraftEdits(prev => { const n = { ...prev }; delete n[contactId]; return n; });
       setPendingCampaignChoice(prev => { const n = { ...prev }; delete n[contactId]; return n; });
+      const u = updatedContact as any;
+      const name = `${u.name || (u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : 'Contact')}`;
+      const campaignName = campaigns.find(c => c.id === campaignId)?.name || 'new campaign';
+      // Ryan WhatsApp 2026-06-01: confirm whether stage was preserved or reset
+      // so re-categorization doesn't feel like "the contact disappeared and
+      // started over." Backend sets stage_preserved=true when we kept their
+      // prior progress (per default preserve_stage=true behavior).
+      if (u.stage_preserved && u.previous_stage && u.previous_stage > 1) {
+        showNotice(`Moved to ${campaignName}. Kept at stage ${u.sequence_stage} (preserved from ${u.previous_stage}).`);
+      } else if (u.previous_stage && u.previous_stage > 1) {
+        showNotice(`Moved to ${campaignName}. Restarted at stage 1 (previously ${u.previous_stage}).`);
+      } else {
+        showNotice(`Moved ${name} to ${campaignName}.`);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
@@ -528,6 +576,13 @@ export default function OutreachPage() {
 
       {error && (
         <div className="mt-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {notice && (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-md bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+          <div className="flex-1">{notice.msg}</div>
+          <button onClick={() => setNotice(null)} className="text-emerald-600 hover:text-emerald-800 text-xs font-medium">Dismiss</button>
+        </div>
       )}
 
       {filteredContacts.length === 0 && !error && (

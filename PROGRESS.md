@@ -252,6 +252,28 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
   - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
+### Session: 2026-06-02 -- Ryan bug-fix sprint + outreach attachment plumbing
+
+- [x] Ryan #2: preserve sequence_stage when re-categorizing contact across industries
+  - Date: 2026-06-02
+  - What changed: `src/routes/admin/outreachRoutes.ts:1006-1030` POST /:id/campaign now accepts `preserve_stage` (default true). When moving to a new campaign, the lead's existing sequence_stage is preserved and clamped to the new campaign's max steps. Response surfaces `stage_preserved` + `previous_stage` so the UI can toast "kept at stage 3" vs "restarted at stage 1." Old behavior (unconditional reset to 1) was Ryan's blocker per WhatsApp 6/1: "If I take a contact in the wrong industry bucket and I'm on stage 3, it puts them back at stage 1."
+  - Verification: tsc clean. Backend deployed.
+
+- [x] Ryan #1: LinkedIn "Mark Done" double-click eliminated
+  - Date: 2026-06-02
+  - What changed: `frontend/app/outreach/page.tsx` handleAdvance now checks `response.ok` before optimistically removing the contact from the local list. Previous behavior: fetch errors (auth expiry, 4xx) silently passed and the optimistic remove fired anyway; the visibility-change refresh then brought the contact back, forcing a second click. Now: 4xx surfaces as an error banner and the contact stays visible so a single retry click actually completes the work.
+  - Verification: tsc clean. Frontend deployed.
+
+- [x] Ryan #4: "contact disappeared after refresh" -- toast feedback on every action
+  - Date: 2026-06-02
+  - What changed: added a green notice banner in `outreach/page.tsx` that confirms what just happened after Mark Done / Skip / Remove / Block / Move. Examples: "John Doe: advanced to step 2. Next follow-up Wed Jun 5." or "Moved to Manufacturing. Kept at stage 3 (preserved from 3)." Ryan no longer has to guess where a contact went after an action. Underlying disappear-on-refresh behavior (next_action_at moves into the future after advance) is correct; the toast removes the surprise.
+  - Verification: tsc clean. Frontend deployed.
+
+- [x] Outreach email attachment plumbing (dep for Ryan 6/1 deck attachment ask)
+  - Date: 2026-06-02
+  - What changed: `src/services/outreachEmailService.ts` SendEmailInput accepts `attachments: OutreachAttachment[]` and forwards them as `#microsoft.graph.fileAttachment` items on the Graph sendMail call. New helper `loadAttachmentFromPath(relPath)` reads a file from `OUTREACH_ATTACHMENTS_DIR` (default `/opt/landjet-growth-engine/attachments`), base64-encodes it, infers content-type, and returns the attachment payload. Path-traversal guard included. `/advance` reads `stepInfo.attachment_path` from the campaign sequence step and auto-attaches when present. Missing file logs a warning and the send proceeds without the attachment so a missing deck never blocks the whole campaign step.
+  - Verification: tsc clean. Backend deployed. Deck file upload + per-campaign sequence_steps schema enhancement still pending (separate BC todo).
+
 ### Session: 2026-06-02 -- Quote Tester Google Maps integration
 
 - [x] Quote Tester: address-based mileage auto-fill + route map

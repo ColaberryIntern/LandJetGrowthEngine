@@ -10,6 +10,20 @@
 
 import { logger } from '../config/logger';
 import { CommunicationLog } from '../models/CommunicationLog';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+
+// Ryan WhatsApp 2026-06-01 ask: investor deck attached on a specific step of
+// the investor campaign, intro deck attached after the second touch on
+// industry campaigns. SendEmailInput now accepts an `attachments` array
+// (already base64-encoded) which is forwarded to the Graph API as inline
+// fileAttachments. The /advance handler builds this array by reading file
+// paths declared on the campaign's sequence step (sequence_steps[i].attachment_path).
+export interface OutreachAttachment {
+  filename: string;
+  contentType: string;     // e.g. 'application/pdf'
+  contentBytes: string;    // base64-encoded
+}
 
 interface SendEmailInput {
   to: string;
@@ -18,11 +32,50 @@ interface SendEmailInput {
   from?: string;
   senderName?: string;
   signature?: string;
+  attachments?: OutreachAttachment[];
   // Optional audit fields -- when provided, a row is written to communication_logs
   // on send (success or failure) so we have a full audit trail per lead/campaign.
   lead_id?: number;
   campaign_id?: string | null;
   delivery_mode?: 'live' | 'test';
+}
+
+/**
+ * Load a file from disk and base64-encode it for Graph API attachment.
+ * Path is resolved relative to OUTREACH_ATTACHMENTS_DIR (default: /opt/landjet-growth-engine/attachments).
+ * Returns null if the file cannot be read so the send still goes through
+ * (with a warning logged) rather than blocking the whole campaign.
+ */
+export async function loadAttachmentFromPath(relativePath: string): Promise<OutreachAttachment | null> {
+  try {
+    const baseDir = process.env.OUTREACH_ATTACHMENTS_DIR || '/opt/landjet-growth-engine/attachments';
+    // Defense in depth: prevent path traversal outside the attachments dir.
+    const resolved = path.resolve(baseDir, relativePath);
+    if (!resolved.startsWith(path.resolve(baseDir))) {
+      logger.warn('loadAttachmentFromPath: refused path-traversal attempt', { relativePath });
+      return null;
+    }
+    const buf = await fs.readFile(resolved);
+    const ext = path.extname(relativePath).toLowerCase();
+    const contentTypeMap: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+    };
+    return {
+      filename: path.basename(relativePath),
+      contentType: contentTypeMap[ext] || 'application/octet-stream',
+      contentBytes: buf.toString('base64'),
+    };
+  } catch (e) {
+    logger.warn('loadAttachmentFromPath: file unreadable, skipping attachment', {
+      relativePath, error: (e as Error).message,
+    });
+    return null;
+  }
 }
 
 /**
@@ -143,20 +196,27 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
       content = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333">${htmlBody}<br><br>${input.signature}</div>`;
     }
 
+    const message: Record<string, unknown> = {
+      subject: input.subject,
+      body: { contentType, content },
+      toRecipients: [{ emailAddress: { address: input.to } }],
+      from: { emailAddress: { name: senderName, address: fromEmail } },
+    };
+    if (input.attachments && input.attachments.length > 0) {
+      message.attachments = input.attachments.map(a => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.filename,
+        contentType: a.contentType,
+        contentBytes: a.contentBytes,
+      }));
+    }
     const graphResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${fromEmail}/sendMail`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message: {
-          subject: input.subject,
-          body: { contentType, content },
-          toRecipients: [{ emailAddress: { address: input.to } }],
-          from: { emailAddress: { name: senderName, address: fromEmail } },
-        },
-      }),
+      body: JSON.stringify({ message }),
     });
 
     if (graphResponse.status === 202 || graphResponse.status === 200) {
