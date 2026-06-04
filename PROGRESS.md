@@ -1,7 +1,7 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-05-26
+Last updated: 2026-06-04
 
 ---
 
@@ -224,6 +224,55 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - Verification: `npx tsc --noEmit` clean on frontend
 - [ ] Deploy: update Dockerfile.backend to COPY docs/, rebuild, push to prod
   - Notes: Dockerfile.backend currently lives only on VPS as untracked file; will modify in place during deploy and bring into the repo in a follow-up
+
+### Session: 2026-05-27 to 2026-05-31 -- Chrome extension iteration (v1.0.3 through v1.0.13)
+
+Catchup entry per BC 9946676849. The extension shipped 11 versions between v1.0.2 (logged 5/26) and v1.0.14 (logged separately in the 6/01 stepwise UI work). Each fixed a specific failure surface against LinkedIn's React DOM or MV3 service worker constraints. All zips committed to docs/ and served via /api/extension/version.
+
+- [x] Extension v1.0.3 -- CSP-safe marker injection
+  - Date: 2026-05-27 (commit 9d47c9b)
+  - What changed: dropped inline-script injection from marker.js; the marker now uses a CSP-compliant DOM-level signal so Chrome's content security policy on growth.landjet.com cannot block the presence detector.
+- [x] Extension v1.0.4 -- zero-touch install (token baked into download)
+  - Date: 2026-05-27 (commit cfba2b9)
+  - What changed: backend extension.ts personalizes the downloaded zip with the user's API token in config.js so the user does not have a separate sign-in step after install.
+- [x] Extension v1.0.5 -- load config.js at SW install per MV3 rule
+  - Date: 2026-05-28 (commit 95126e7)
+  - What changed: background.js calls importScripts('config.js') at the TOP of the service worker (not inside a handler) so MV3's install-time loading rule does not strip the config. Fixed silent token-missing failure on first install.
+- [x] Extension v1.0.6 -- globalThis instead of window in service worker scope
+  - Date: 2026-05-28 (commit 2b1e5c7)
+  - What changed: config.js now sets `globalThis.LANDJET_CONFIG`, not `window.LANDJET_CONFIG`. MV3 service workers do not expose `window`; the previous emit threw `ReferenceError: window is not defined` at install time.
+- [x] Extension v1.0.7 -- shared draft cache + auto-refresh outreach tab
+  - Date: 2026-05-29 (commit 0b66051)
+  - What changed: when the extension advances a lead (Send detected), it now broadcasts to any open Outreach tab so the lead drops off the queue immediately without a manual refresh. Uses chrome.tabs.sendMessage + a draft cache so re-opening LinkedIn for the same lead within 30s reuses the rendered draft instead of round-tripping the API.
+- [x] Extension v1.0.8 -- one-click Connect & Paste (5 clicks down to 2)
+  - Date: 2026-05-29 (commit 10f4c24)
+  - What changed: first attempt at consolidating Open Connect, Add a note, paste into a single button. Worked on Bill Polk's profile; failed on profiles where LinkedIn rendered Connect inside the "..." overflow menu instead of on the header.
+- [x] Extension v1.0.9 -- broader Add-a-note selector + resumable auto-flow
+  - Date: 2026-05-30 (commit f16f2f1)
+  - What changed: Add-a-note finder now scans multiple selector variants and resumes the flow from whichever step is currently visible (so a partial manual click does not force restart). Addressed v1.0.8's mid-flight failure where Connect was inside the overflow menu.
+- [x] Extension v1.0.10 -- scope Connect search to dropdown + header only
+  - Date: 2026-05-30 (commit 05acfd4)
+  - What changed: removed the page-wide Connect button scan that was picking up the sidebar "More profiles for you" Connect buttons and trying to click those. Connect search now restricted to two locations: profile header and the open "..." dropdown.
+- [x] Extension v1.0.11 -- real pointer-event sequence for clicks
+  - Date: 2026-05-30 (commit d0fd492)
+  - What changed: replaced `el.click()` with a full pointerdown/pointerup/mousedown/mouseup/click sequence dispatched with correct coordinates so LinkedIn's React pointer-event listeners fire. Worked on Connect; still failed on Add-a-note where the React handler was gated on isTrusted.
+- [x] Extension v1.0.12 -- aggressive Add-a-note finder
+  - Date: 2026-05-31 (commit 949b5ea)
+  - What changed: walked every visible element in the dialog tree and matched on aria-label or direct text against "Add a note". Found the button on more profiles but the click still no-op'd on isTrusted-gated React handlers.
+- [x] Extension v1.0.13 -- dispatch keyboard Enter alongside mouse sequence
+  - Date: 2026-05-31 (commit 0d04cef)
+  - What changed: added KeyboardEvent('Enter') dispatched with the mouse sequence in case LinkedIn's handler is keyboard-only. Did not work. This was the version Ali confirmed failed end-to-end on 2026-05-31 PM and triggered the stepwise UI pivot for v1.0.14.
+
+### Session: 2026-05-30 to 2026-05-31 -- Network diagnostic + Basecamp audit
+
+- [x] Network re-diagnostic + power management fixes for Ali's laptop
+  - Date: 2026-05-30
+  - What changed: data collection script + raw logs committed to tmp/network-diagnostic/ (collect.ps1, finish-as-admin.ps1, network_raw_logs.txt, events.txt, Frontier5824.xml). Diagnostic synthesized: WiFi adapter losing the Frontier5824 5GHz radio under DFS load. Applied: PCIe ASPM off, WiFi power saving off, USB suspend off, DNS fallback added, Frontier5824 profile rebuilt from the saved XML.
+  - Verification: connection stable through subsequent overnight session. Follow-up todo BC 9946184379 (move 5GHz radio off DFS channel 100) still open.
+- [x] Basecamp project audit -- closed the 60-day inactivity gap
+  - Date: 2026-05-31
+  - What changed: tmp/bc-audit-2026-05-31.js wrote a comprehensive backfill against project 46699826 todolist 9734159722. 13 units of work shipped 2026-05-14 to 2026-05-31 were created as completed todos with verification comments (commit hash + what shipped) so the external "are they working on this?" monitor stopped flagging. A second pass created the outstanding-work todos with realistic due dates (covers the BC 9946XXX series visible in current open queue).
+  - Verification: BC project activity feed populated; external monitor reverted to green. Helper pattern (tmp/helper.js with getToken from CCPP MSSQL) used by every subsequent BC sync script in this repo.
 
 ### Session: 2026-05-14 -- Pricing engine corrections (Lorie sync + Ryan clarification)
 - [x] Fix #1: Trip fee count -- ONE per booking always
