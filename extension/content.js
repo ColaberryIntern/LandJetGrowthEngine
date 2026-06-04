@@ -82,21 +82,31 @@
         ${isLinkedInStep ? `
           <textarea class="landjet-msg" rows="5">${escapeHtml(messageBody)}</textarea>
           <div class="landjet-char-count">${messageBody.length} chars</div>
-          <div class="landjet-steps">
-            <button class="landjet-step landjet-step-1" data-step="1">
-              <span class="landjet-step-num">1</span>
-              <span class="landjet-step-label">Open Connect dialog</span>
-            </button>
-            <button class="landjet-step landjet-step-2" data-step="2">
-              <span class="landjet-step-num">2</span>
-              <span class="landjet-step-label">Click Add a note</span>
-            </button>
-            <button class="landjet-step landjet-step-3" data-step="3">
-              <span class="landjet-step-num">3</span>
-              <span class="landjet-step-label">Paste message</span>
-            </button>
-          </div>
-          <p class="landjet-hint">Click each step. After step 3, click LinkedIn's <strong>Send</strong> to mark Done. If a step does nothing, do it manually on LinkedIn and the next step will light up.</p>
+          <button class="landjet-primary" data-action="start">
+            <span class="landjet-primary-icon">&#9889;</span>
+            <span class="landjet-primary-label">Copy message + open Connect</span>
+            <span class="landjet-primary-sub">Then on LinkedIn: Add a note &rarr; Ctrl+V &rarr; Send</span>
+          </button>
+          <details class="landjet-advanced">
+            <summary>Manual mode (3 separate steps)</summary>
+            <div class="landjet-steps">
+              <button class="landjet-step landjet-step-1" data-step="1">
+                <span class="landjet-step-num">1</span>
+                <span class="landjet-step-label">Open Connect dialog</span>
+              </button>
+              <button class="landjet-step landjet-step-2" data-step="2">
+                <span class="landjet-step-num">2</span>
+                <span class="landjet-step-label">Click Add a note</span>
+              </button>
+              <button class="landjet-step landjet-step-3" data-step="3">
+                <span class="landjet-step-num">3</span>
+                <span class="landjet-step-label">Paste message</span>
+              </button>
+            </div>
+            <p class="landjet-hint">If the one-click button does not get the modal open, walk through these three. The active step lights up as LinkedIn's state changes.</p>
+            <button class="landjet-diagnostic" data-action="diagnose">Dump diagnostics (paste in BC if something fails)</button>
+            <textarea class="landjet-diag-out" readonly placeholder="Click 'Dump diagnostics' on a failing profile and paste the output back to Ali."></textarea>
+          </details>
         ` : `
           <div class="landjet-warning">Next step for this lead is <strong>${escapeHtml(channel)}</strong>, not LinkedIn. Open the outreach page to handle.</div>
         `}
@@ -108,10 +118,32 @@
       panel.remove();
     });
 
-    // Wire up the 3-step stepwise UI. Each step does exactly ONE LinkedIn
-    // action. If a step's auto-click silently fails (LinkedIn's React handler
-    // rejected our synthetic event), the user can do that ONE click on
-    // LinkedIn manually, and the state detector advances the active step.
+    // v1.0.22: the primary path is now ONE button. It copies the message to
+    // the clipboard (which is always trusted, no React fiber needed) and
+    // attempts to open the Connect dialog. The user then clicks "Add a note"
+    // on LinkedIn, hits Ctrl+V, and clicks Send. Whether or not our auto-
+    // click of Connect succeeds, the message is in the clipboard so the
+    // user can always paste.
+    const primaryBtn = panel.querySelector('.landjet-primary');
+    if (primaryBtn) {
+      primaryBtn.addEventListener('click', async () => {
+        const textarea = panel.querySelector('.landjet-msg');
+        const text = textarea ? textarea.value : '';
+        const copied = await copyToClipboard(text);
+        if (copied) {
+          setStatus('Message copied to clipboard. Now: open Connect (or click "Add a note" if already open) -> Ctrl+V -> Send.', 'success');
+        } else {
+          setStatus('Could not access clipboard. Falling back to text-fill in the LinkedIn textarea.', 'info');
+        }
+        // Try to advance LinkedIn UI as far as we can. Failures are non-fatal
+        // because the clipboard fallback always works.
+        await runStepOpenConnect();
+        updateStepHighlight();
+      });
+    }
+
+    // Wire up the 3-step stepwise UI as advanced/manual mode (inside the
+    // collapsed <details>). Same one-action-per-button behaviour as v1.0.14.
     const stepBtns = panel.querySelectorAll('.landjet-step');
     stepBtns.forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -124,11 +156,115 @@
       });
     });
 
+    // Diagnostic dump button -- prints what each finder matched, whether
+    // React props were present, the current modal/dropdown state. This is
+    // the unblocker for the v1.0.14 -> v1.0.21 selector iteration loop:
+    // when something fails, Ali pastes this output and a targeted fix
+    // ships in one iteration instead of seven.
+    const diagBtn = panel.querySelector('.landjet-diagnostic');
+    if (diagBtn) {
+      diagBtn.addEventListener('click', () => {
+        const out = panel.querySelector('.landjet-diag-out');
+        if (out) out.value = JSON.stringify(buildDiagnostics(), null, 2);
+      });
+    }
+
+    // Auto-copy the message to the clipboard on initial panel render so the
+    // user can Ctrl+V at any point, even before clicking our primary button.
+    // Best-effort; failures are silent (Chrome may block until user gesture).
+    if (isLinkedInStep && messageBody) {
+      copyToClipboard(messageBody).then(ok => {
+        if (ok) setStatus('Message pre-copied to clipboard. Ready to paste at any point.', 'info');
+      });
+    }
+
     // Initial highlight + start auto-detect of state transitions so the
     // active step lights up as soon as the user manually moves LinkedIn
     // forward.
     updateStepHighlight();
     startStateWatcher();
+  }
+
+  // ----- v1.0.22 helpers: clipboard + diagnostics -----
+
+  async function copyToClipboard(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* fall through to legacy path */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function buildDiagnostics() {
+    const labelEl = (el) => {
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        tag: el.tagName,
+        text: ((el.textContent || '').trim()).slice(0, 80),
+        aria: (el.getAttribute && el.getAttribute('aria-label')) || null,
+        href: (el.getAttribute && el.getAttribute('href')) || null,
+        role: (el.getAttribute && el.getAttribute('role')) || null,
+        cls: ((el.getAttribute && el.getAttribute('class')) || '').slice(0, 120),
+        visible: isActuallyVisible(el),
+        rect: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
+        reactProps: !!findReactProps(el),
+        reactOnClick: !!(findReactProps(el) && findReactProps(el).onClick),
+      };
+    };
+    return {
+      version: '1.0.22',
+      url: location.href,
+      profile: location.pathname,
+      timestamp: new Date().toISOString(),
+      flowState: detectFlowState(),
+      activeStep: activeStepFromState(detectFlowState()),
+      currentLead: currentLead ? {
+        lead_id: currentLead.lead_id,
+        name: currentLead.name,
+        channel: currentLead.channel,
+        sequence_stage: currentLead.sequence_stage,
+        draft_chars: (currentLead.draft_body || '').length,
+      } : null,
+      finders: {
+        moreActionsButton: labelEl(findMoreActionsButton()),
+        connectOnProfileHeader: labelEl(findConnectOnProfileHeader()),
+        connectInOpenDropdown: labelEl(findConnectInOpenDropdown()),
+        addNoteButton: labelEl(findAddNoteButton()),
+        connectNoteTextarea: labelEl(findConnectNoteTextarea()),
+      },
+      visibleModalTitles: Array.from(document.querySelectorAll('h1, h2, h3, h4, [role="heading"]'))
+        .filter(isActuallyVisible)
+        .map(h => (h.textContent || '').trim().slice(0, 80))
+        .filter(t => t.length > 0)
+        .slice(0, 12),
+      visibleDialogs: Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
+        .filter(isActuallyVisible).length,
+      visibleTextareas: Array.from(document.querySelectorAll('textarea'))
+        .filter(isActuallyVisible)
+        .map(t => ({
+          placeholder: t.getAttribute('placeholder') || null,
+          name: t.getAttribute('name') || null,
+          id: t.id || null,
+          inDialog: !!t.closest('[role="dialog"]'),
+        })),
+    };
   }
 
   // ----- Step state machine -----
