@@ -227,7 +227,7 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
 
 ### Session: 2026-05-27 to 2026-05-31 -- Chrome extension iteration (v1.0.3 through v1.0.13)
 
-Catchup entry per BC 9946676849. The extension shipped 11 versions between v1.0.2 (logged 5/26) and v1.0.14 (logged separately in the 6/01 stepwise UI work). Each fixed a specific failure surface against LinkedIn's React DOM or MV3 service worker constraints. All zips committed to docs/ and served via /api/extension/version.
+Catchup entry per BC 9946676849. The extension shipped 11 versions between v1.0.2 (logged 5/26) and v1.0.14 (logged in the next session below). Each fixed a specific failure surface against LinkedIn's React DOM or MV3 service worker constraints. All zips committed to docs/ and served via /api/extension/version.
 
 - [x] Extension v1.0.3 -- CSP-safe marker injection
   - Date: 2026-05-27 (commit 9d47c9b)
@@ -262,6 +262,38 @@ Catchup entry per BC 9946676849. The extension shipped 11 versions between v1.0.
 - [x] Extension v1.0.13 -- dispatch keyboard Enter alongside mouse sequence
   - Date: 2026-05-31 (commit 0d04cef)
   - What changed: added KeyboardEvent('Enter') dispatched with the mouse sequence in case LinkedIn's handler is keyboard-only. Did not work. This was the version Ali confirmed failed end-to-end on 2026-05-31 PM and triggered the stepwise UI pivot for v1.0.14.
+
+### Session: 2026-06-01 to 2026-06-03 -- Chrome extension iteration (v1.0.14 through v1.0.22)
+
+Catchup entry. After v1.0.13 was confirmed failed end-to-end (Ali test 5/31 PM), the next 9 versions split between two distinct strategies: stepwise UI (v1.0.14), React-fiber click bypass + Add-a-note finder hardening (v1.0.15-1.0.18), textarea finder hardening (v1.0.19-1.0.21), and the v1.0.22 architectural pivot to clipboard-first + diagnostic dump that finally landed end-to-end. v1.0.22 is the production build today; Ali confirmed real-profile success 2026-06-03.
+
+- [x] Extension v1.0.14 -- stepwise 3-button UI (9 clicks down to 4)
+  - Date: 2026-06-01 (commit 460a299)
+  - What changed: replaced the brittle auto-flow from v1.0.8-1.0.13 with three discrete buttons -- (1) Open Connect Menu, (2) Click Add a note, (3) Paste Message. Each does exactly one LinkedIn action so failure modes are localized. State watcher uses MutationObserver to auto-advance the active-step highlight as LinkedIn's DOM transitions. Closed the original BC 9946676792.
+- [x] Extension v1.0.15 -- React fiber direct onClick (synthetic-click gate bypass)
+  - Date: 2026-06-01 (commit bdd59bf)
+  - What changed: LinkedIn's React handlers ignore synthetic clicks because `event.isTrusted` is false on content-script-dispatched events. Added a fiber walker that finds the `__reactProps$xxx` key on the target DOM node and calls `props.onClick` directly, bypassing the event system. Confirmed working against the Connect menuitem.
+- [x] Extension v1.0.16 -- lenient findAddNoteButton (any element type)
+  - Date: 2026-06-01 (commit e2228c3)
+  - What changed: relaxed the Add-a-note finder to accept any visible element (button, a, span, div) matching the label, then walked up to a clickable ancestor for the React fiber call. Earlier versions required a button tag and missed LinkedIn variants that wrap the label in a span.
+- [x] Extension v1.0.17 -- dialog-scoped Add-a-note finder
+  - Date: 2026-06-02 (commit 3f58c4f)
+  - What changed: restricted the Add-a-note search to elements inside a visible dialog/alertdialog container so the page-wide text scan stopped matching unrelated "add a note" labels elsewhere on the LinkedIn page (e.g., in messaging widget tooltips).
+- [x] Extension v1.0.18 -- direct-text Add-a-note finder + graceful manual fallback
+  - Date: 2026-06-02 (commit e8e487f)
+  - What changed: new bulletproof finder that walks every element and checks IMMEDIATE child text (excludes nested screen-reader spans). Immune to aria-hidden sr-only wrapper text that polluted textContent matches in earlier versions. When the finder returns null, the panel now surfaces a clear "click Add a note manually -- the next step will light up" message instead of a silent failure.
+- [x] Extension v1.0.19 -- bulletproof textarea finder (any visible textarea)
+  - Date: 2026-06-02 (commit 16ae5c4)
+  - What changed: textarea finder relaxed to accept any visible textarea on the page. Too permissive: matched LinkedIn's persistent messaging widget at the bottom of every profile, so the paste step would inject the connection-request message into the wrong field.
+- [x] Extension v1.0.20 -- textarea must be in modal scope
+  - Date: 2026-06-02 (commit ca19165)
+  - What changed: re-tightened to require the textarea sit inside a `[role="dialog"]` or `.artdeco-modal` ancestor. Fixed the messaging-widget false match from v1.0.19 but still false-matched on profile pages where LinkedIn's "Send InMail" overlay was open.
+- [x] Extension v1.0.21 -- textarea fallback gated on visible modal title
+  - Date: 2026-06-02 (commit 3b31901)
+  - What changed: the precise-selector path stayed in place; the fallback now first checks for a visible "Add a note to your invitation" heading anywhere on the page, and only then picks the first visible textarea. Sidesteps every class-name and role-attribute variation across Premium and non-Premium LinkedIn builds. Ali parked the extension work the same evening to focus on the Quote Tester.
+- [x] Extension v1.0.22 -- clipboard-first flow + diagnostic dump
+  - Date: 2026-06-03 (commit a32f970)
+  - What changed: architectural pivot. Stopped trying to automate the paste step (the v1.0.15-1.0.21 failure surface) and embraced `navigator.clipboard.writeText` which is always trusted. New primary "Copy message + open Connect" button auto-copies on click; pre-copies on panel render so Ctrl+V works at any point. 3-step stepwise UI moved into a collapsed Manual mode <details>. New "Dump diagnostics" button prints JSON of which finders matched, whether React props were present, current modal state, visible modal titles, visible textareas with placeholder + dialog context. Added clipboardWrite to manifest permissions. Ali confirmed real-profile end-to-end success 2026-06-03; install email + HTML walkthrough sent to Ryan 2026-06-04.
 
 ### Session: 2026-05-30 to 2026-05-31 -- Network diagnostic + Basecamp audit
 
