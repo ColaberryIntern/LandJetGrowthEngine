@@ -7,7 +7,7 @@ import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
-import { sendOutreachEmail, getSenderForCampaign, testConnection, loadAttachmentFromPath } from '../../services/outreachEmailService';
+import { sendOutreachEmail, testConnection, loadAttachmentFromPath, resolveSender } from '../../services/outreachEmailService';
 import { recordAgentRun } from '../../intelligence/agents/agentRegistry';
 import { logger } from '../../config/logger';
 
@@ -1164,7 +1164,15 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         emailBody = draft.body;
       }
 
-      const senderEmail = getSenderForCampaign(campaign?.name || '', leadBefore.vertical);
+      // Per BC 9950199280 + Ryan WhatsApp 2026-06-01: per-campaign
+      // sender_email wins over the name-based router so the ryan@ vs
+      // rlandry@ drift cannot recur. resolveSender trims whitespace
+      // and falls back to SENDER_MAP only if nothing is configured.
+      const senderEmail = resolveSender({
+        campaignSenderEmail: (campaign?.settings as any)?.sender_email || null,
+        campaignName: campaign?.name || '',
+        vertical: leadBefore.vertical,
+      });
       const senderName = campaign?.settings?.sender_name || 'Ryan Landry';
 
       // Test mode: redirect to test email, keep lead's name/subject/body intact

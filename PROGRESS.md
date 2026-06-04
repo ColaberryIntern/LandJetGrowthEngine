@@ -252,7 +252,14 @@ Ryan completed his first live demo on 2026-04-21. System is live at http://95.21
   - What changed: Updated 4 existing tests that asserted old `apply_base_to_return_leg` behavior; added 11 new tests for Lorie/Ryan corrections (62 total, all passing); rewrote `project_landjet_pricing_decisions.md` memory file with sections 4-10 reflecting new rules
   - Verification: `npx tsc --noEmit` clean; `npx jest src/tests/unit/landjetPricing.test.ts` 62/62 pass
 
-### Session: 2026-06-02 (late) -- 5-task sprint: tax tests, multi-day routing, attachments UI
+### Session: 2026-06-03 -- BC 9950199280: sender alignment to rlandry@
+
+- [x] Sender alignment fix + ALLOWED_SENDERS guard + 25 regression tests
+  - Date: 2026-06-03
+  - What changed: `src/services/outreachEmailService.ts` SENDER_MAP fallbacks now all point to rlandry@landjet.com (was: investor=rlandry@, customer=ryan@, general=ryan.landry@). New `resolveSender({inputFrom, campaignSenderEmail, campaignName, vertical})` helper enforces precedence (explicit > campaign > SENDER_MAP) and trims whitespace. New `ALLOWED_SENDERS` whitelist (`{'rlandry@landjet.com', 'rmlandry29@gmail.com'}`) is enforced inside sendOutreachEmail; any disallowed sender is rejected with a typed error before Graph is called and a comm log row is written with sender_guard=true. `src/routes/admin/outreachRoutes.ts` /advance now uses resolveSender (campaign-settings-first) instead of the name-based router. DB cleaned: 8 campaigns with trailing whitespace on settings.sender_email trimmed (UPDATE ... jsonb_set ... TRIM); all 20 campaigns now read "rlandry@landjet.com" exactly.
+  - Verification: tsc clean. `npx jest outreachSender.test.ts` 25/25 passing. SQL verification: distinct sender_email values across all campaigns = 1 (rlandry@landjet.com). Sender guard test confirms ryan@/ryan.landry@/typo addresses are blocked before Graph call.
+
+
 
 - [x] #5: Sales tax stress tests across IA/IL/TX scenarios
   - Date: 2026-06-02

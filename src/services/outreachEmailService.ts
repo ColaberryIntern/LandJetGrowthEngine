@@ -100,11 +100,52 @@ interface SendEmailResult {
   from: string;
 }
 
+// Canonical sender per Ryan WhatsApp 2026-06-01: he was surprised any
+// campaigns were sending from ryan@. Per BC 9950199280, defaults now all
+// align to rlandry@landjet.com. Per-campaign sender_email in
+// campaigns.settings still wins when set; this map is the last-resort
+// fallback only. ALLOWED_SENDERS below is enforced as a guard so a
+// misconfigured campaign cannot quietly send from anything else.
 const SENDER_MAP: Record<string, string> = {
   investor: process.env.OUTREACH_EMAIL_INVESTOR || 'rlandry@landjet.com',
-  customer: process.env.OUTREACH_EMAIL_CUSTOMER || 'ryan@landjet.com',
-  general: process.env.OUTREACH_EMAIL_GENERAL || 'ryan.landry@landjet.com',
+  customer: process.env.OUTREACH_EMAIL_CUSTOMER || 'rlandry@landjet.com',
+  general: process.env.OUTREACH_EMAIL_GENERAL || 'rlandry@landjet.com',
 };
+
+// Hard whitelist. If any code path tries to send from anything not on this
+// list, the send is rejected with a typed error rather than going out
+// from an unexpected address. To intentionally add a new sender, add it
+// here AND confirm it has a corresponding M365 mailbox + Graph permission.
+export const ALLOWED_SENDERS = new Set<string>([
+  'rlandry@landjet.com',
+  // Test redirect address used by outreach test_mode -- gmail; only valid
+  // because test_mode rewrites the `to` and never actually transmits from
+  // it, but Graph still rejects unknown senders so we whitelist it for
+  // unit tests that go through sendOutreachEmail in test mode.
+  'rmlandry29@gmail.com',
+]);
+
+/**
+ * Resolve the sender address for a given send. Order of precedence:
+ *   1. Explicit `inputFrom` (caller passed `input.from`)
+ *   2. Per-campaign `campaignSenderEmail` (campaigns.settings.sender_email)
+ *   3. Name-based SENDER_MAP fallback (last resort)
+ * Output is always trimmed. Validation against ALLOWED_SENDERS happens
+ * inside sendOutreachEmail.
+ */
+export function resolveSender(opts: {
+  inputFrom?: string;
+  campaignSenderEmail?: string | null;
+  campaignName?: string;
+  vertical?: string | null;
+}): string {
+  const trim = (s?: string | null) => (s ? s.trim() : '');
+  return (
+    trim(opts.inputFrom) ||
+    trim(opts.campaignSenderEmail) ||
+    getSenderForCampaign(opts.campaignName || '', opts.vertical)
+  );
+}
 
 // OAuth2 credentials
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
@@ -166,10 +207,25 @@ async function getGraphToken(): Promise<string> {
 
 /**
  * Send an outreach email via Microsoft Graph API.
+ *
+ * Sender guard: if the resolved `from` address is not in ALLOWED_SENDERS,
+ * the send is rejected with a typed error so we never quietly transmit
+ * from an unexpected mailbox (e.g., the ryan@ vs rlandry@ regression
+ * Ryan caught 2026-06-01). Add new senders to ALLOWED_SENDERS only after
+ * provisioning the M365 mailbox + Graph permissions.
  */
 export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  const fromEmail = input.from || SENDER_MAP.general;
+  const fromEmail = (input.from || SENDER_MAP.general).trim();
   const senderName = input.senderName || 'Ryan Landry';
+
+  if (!ALLOWED_SENDERS.has(fromEmail)) {
+    const error = `Sender ${fromEmail} is not in ALLOWED_SENDERS. Update src/services/outreachEmailService.ts to add it after provisioning the Graph mailbox.`;
+    logger.error('Outreach send blocked by sender guard', { fromEmail, allowed: [...ALLOWED_SENDERS] });
+    await writeCommLog(input, fromEmail, 'failed', null, { error, sender_guard: true }).catch(e =>
+      logger.warn('comm log write failed (sender_guard)', { err: e.message }),
+    );
+    return { success: false, error, from: fromEmail };
+  }
 
   if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {
     logger.warn('OAuth2 credentials not configured, email not sent');
