@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>LandJet Quote Tester — Visual</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #f7fafc; color: #2d3748; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
+  .head h1 { margin: 0; font-size: 28px; font-weight: 600; color: #1a202c; }
+  .head p { margin: 4px 0 0; color: #718096; font-size: 14px; }
+  .pill { background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+  .grid { display: grid; grid-template-columns: 2fr 3fr; gap: 24px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { flex: 1; text-align: center; padding: 8px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; background: #f7fafc; color: #4a5568; border: none; }
+  .tab.on { background: #1a202c; color: #fff; }
+  .label { font-size: 11px; font-weight: 500; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  textarea { width: 100%; padding: 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 12px; font-family: ui-monospace, "Cascadia Code", monospace; resize: vertical; min-height: 220px; color: #2d3748; }
+  .samples { margin-top: 12px; }
+  .samples .label { margin-bottom: 6px; }
+  .sample-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sample { background: #f7fafc; border: 1px solid #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 11px; color: #4a5568; cursor: pointer; }
+  .btn { width: 100%; padding: 11px; background: #2b6cb0; color: #fff; font-weight: 500; border: 0; border-radius: 6px; font-size: 13px; cursor: pointer; margin-top: 16px; }
+  .btn:hover { background: #1a365d; }
+
+  /* OUTPUT */
+  .hero { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .hero .total { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 22px; }
+  .total .l { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }
+  .total .amt { font-size: 42px; font-weight: 700; color: #1a202c; margin-top: 4px; line-height: 1; }
+  .total .tags { margin-top: 10px; display: flex; gap: 6px; }
+  .total .tags span { background: #edf2f7; color: #4a5568; padding: 3px 8px; border-radius: 4px; font-size: 11px; }
+  .margin-card { padding: 22px; border-radius: 10px; border: 1px solid; }
+  .margin-amber { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .margin-card .l { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }
+  .margin-card .row { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+  .margin-card .pct { font-size: 32px; font-weight: 700; line-height: 1; }
+  .margin-card .dollar { font-size: 14px; opacity: 0.7; }
+  .margin-card .band { margin-top: 10px; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+  .margin-card .band .glyph { font-size: 16px; }
+
+  .alerts { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; padding: 14px 18px; border-radius: 10px; margin-bottom: 16px; }
+  .alerts .l { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .alerts ul { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.6; }
+
+  .trail-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 16px; }
+  .trail-head { padding: 12px 20px; border-bottom: 1px solid #e2e8f0; font-size: 11px; font-weight: 600; color: #4a5568; text-transform: uppercase; letter-spacing: 0.5px; }
+  .step { display: grid; grid-template-columns: 3fr 7fr 2fr; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #edf2f7; align-items: start; }
+  .step:last-of-type { border-bottom: 0; }
+  .step .phase { font-size: 13px; font-weight: 500; color: #1a202c; }
+  .step .sub { font-size: 11px; color: #718096; margin-top: 2px; }
+  .step .expl { font-size: 12px; color: #4a5568; line-height: 1.5; }
+  .step .num { text-align: right; }
+  .step .num .a { font-size: 14px; font-weight: 600; color: #1a202c; }
+  .step .num .r { font-size: 10px; color: #a0aec0; margin-top: 2px; }
+  .trail-foot { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #f7fafc; border-top: 2px solid #1a202c; border-radius: 0 0 10px 10px; }
+  .trail-foot .l { font-size: 14px; font-weight: 600; color: #1a202c; }
+  .trail-foot .v { font-size: 18px; font-weight: 700; color: #1a202c; }
+
+  .cost-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; }
+  .cost-card .l { font-size: 11px; font-weight: 600; color: #4a5568; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .cost-card .ln { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #4a5568; }
+  .cost-card .ln.bold { font-weight: 600; color: #1a202c; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 6px; }
+  .cost-card .margin-row { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 10px 12px; border-radius: 6px; font-weight: 700; display: flex; justify-content: space-between; margin-top: 10px; }
+  .mono { font-family: ui-monospace, "Cascadia Code", monospace; }
+
+  .nav { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 14px 24px; display: flex; align-items: center; gap: 24px; }
+  .nav .brand { font-size: 16px; font-weight: 600; color: #1a202c; }
+  .nav a { color: #4a5568; text-decoration: none; font-size: 13px; padding: 6px 10px; border-radius: 4px; }
+  .nav a.on { background: #ebf8ff; color: #2b6cb0; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <div class="brand">LandJet Growth Engine</div>
+  <a>Outreach</a>
+  <a>Campaigns</a>
+  <a>Inbound</a>
+  <a class="on">Quote Tester</a>
+  <a>Agents</a>
+  <a style="margin-left:auto;color:#718096;">Admin ▾</a>
+</div>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1>Quote Tester</h1>
+      <p>Paste an inbound email or enter trip details manually. See the full pricing engine breakdown, margin, and approval routing.</p>
+    </div>
+    <span class="pill">v1 internal</span>
+  </div>
+
+  <div class="grid">
+
+    <!-- LEFT: input -->
+    <div>
+      <div class="card">
+        <div class="tabs">
+          <button class="tab on">Paste email</button>
+          <button class="tab">Manual entry</button>
+        </div>
+        <div class="label">BookRides email body</div>
+<textarea>Office: Quad Cities
+Service Type: One Way
+Pickup: 123 Main St, Davenport, IA
+Dropoff: O'Hare International Airport, Chicago, IL
+Distance: 175
+Passengers: 2
+Customer: john@example.com
+</textarea>
+        <div class="samples">
+          <div class="label">Try a sample:</div>
+          <div class="sample-row">
+            <span class="sample">QC → ORD flat rate</span>
+            <span class="sample">QC → Des Moines distance</span>
+            <span class="sample">JD employee round-trip</span>
+          </div>
+        </div>
+        <button class="btn">Generate quote</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: output -->
+    <div>
+      <!-- HERO -->
+      <div class="hero">
+        <div class="total">
+          <div class="l">Grand total</div>
+          <div class="amt">$727.18</div>
+          <div class="tags">
+            <span>flat rate</span>
+            <span>standard</span>
+            <span>quad cities</span>
+          </div>
+        </div>
+        <div class="margin-card margin-amber">
+          <div class="l">Margin</div>
+          <div class="row">
+            <span class="pct">57.5%</span>
+            <span class="dollar">$418.42</span>
+          </div>
+          <div class="band">
+            <span class="glyph">!</span>
+            <span>Reservation desk review (50-60% margin)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ALERTS -->
+      <div class="alerts">
+        <div class="l">Concierge alerts</div>
+        <ul>
+          <li>Fuel surcharge not included on flat-rate quotes (route miles not tracked). Concierge: add $0.10/mi if applicable.</li>
+        </ul>
+      </div>
+
+      <!-- TRAIL -->
+      <div class="trail-card">
+        <div class="trail-head">How this quote was built</div>
+
+        <div class="step">
+          <div><div class="phase">Pricing Mode</div></div>
+          <div class="expl">Trip matched a registered flat-rate route (QC → O'Hare $550). Flat rate pricing applies, with per-route toll and auto-20% gratuity.</div>
+          <div class="num"></div>
+        </div>
+
+        <div class="step">
+          <div><div class="phase">Customer Category</div></div>
+          <div class="expl">Standard customer pricing (no override).</div>
+          <div class="num"></div>
+        </div>
+
+        <div class="step">
+          <div><div class="phase">Flat Rate</div><div class="sub">Flat Rate (QC → O'Hare)</div></div>
+          <div class="expl">Per-booking flat rate for the QC → O'Hare route. Includes 2 stops by default; each additional stop is $50.</div>
+          <div class="num"><div class="a">+ $550.00</div><div class="r">running $550.00</div></div>
+        </div>
+
+        <div class="step">
+          <div><div class="phase">Tolls</div><div class="sub">Tolls</div></div>
+          <div class="expl">QC → ORD carries a $10 toll (I-88/I-294 corridor). Baked into the flat-route definition; added on top of the base rate.</div>
+          <div class="num"><div class="a">+ $10.00</div><div class="r">running $560.00</div></div>
+        </div>
+
+        <div class="step">
+          <div><div class="phase">Gratuity</div><div class="sub">Gratuity (20%)</div></div>
+          <div class="expl">Auto-applied 20% gratuity on flat-rate quotes (per Lorie 2026-05-21). Calculated against the secondary total (base + tolls + tax).</div>
+          <div class="num"><div class="a">+ $112.00</div><div class="r">running $672.00</div></div>
+        </div>
+
+        <div class="step">
+          <div><div class="phase">CC Fee</div><div class="sub">CC Convenience Fee (3%)</div></div>
+          <div class="expl">3% credit card convenience fee. Only applied on credit_card payment method.</div>
+          <div class="num"><div class="a">+ $55.18</div><div class="r">running $727.18</div></div>
+        </div>
+
+        <div class="trail-foot">
+          <span class="l">Grand total</span>
+          <span class="v">$727.18</span>
+        </div>
+      </div>
+
+      <!-- COST + MARGIN -->
+      <div class="cost-card">
+        <div class="l">Cost + margin breakdown</div>
+        <div class="ln"><span>Driver hours</span><span class="mono">$70.00</span></div>
+        <div class="ln"><span>Fuel (200 mi @ 18 mpg)</span><span class="mono">$38.89</span></div>
+        <div class="ln"><span>Vehicle (per-mile cost)</span><span class="mono">$199.87</span></div>
+        <div class="ln"><span>Other variable</span><span class="mono">$0.00</span></div>
+        <div class="ln bold"><span>Total estimated cost</span><span class="mono">$308.76</span></div>
+        <div class="ln"><span>Revenue (grand total)</span><span class="mono">$727.18</span></div>
+        <div class="margin-row"><span>Projected margin</span><span class="mono">$418.42 (57.5%)</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

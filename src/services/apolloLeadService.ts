@@ -206,14 +206,20 @@ export async function pullLeadsForCampaign(
         existing.add(email.toLowerCase().trim());
 
         try {
-          const verticalGuess = campaign.name.toLowerCase().includes('construction') ? 'Construction'
-            : campaign.name.toLowerCase().includes('technology') || campaign.name.toLowerCase().includes('staffing') ? 'Technology'
-            : campaign.name.toLowerCase().includes('manufacturing') ? 'Manufacturing'
-            : campaign.name.toLowerCase().includes('insurance') ? 'Insurance'
-            : campaign.name.toLowerCase().includes('banking') || campaign.name.toLowerCase().includes('finance') ? 'Banking'
-            : campaign.name.toLowerCase().includes('healthcare') ? 'Healthcare'
-            : campaign.name.toLowerCase().includes('legal') ? 'Legal'
-            : campaign.name.toLowerCase().includes('sports') || campaign.name.toLowerCase().includes('events') ? 'Sports & Events'
+          // Ryan 2026-06-08: combined "Real Estate, Construction and Engineering" into a single
+          // vertical. The keyword set (construction | real estate | engineering) all map to one
+          // label so contacts like Century Communities (real estate) and Waterton (property mgmt)
+          // bucket alongside construction firms instead of getting mis-routed to insurance/banking.
+          const lowerName = campaign.name.toLowerCase();
+          const verticalGuess = (lowerName.includes('construction') || lowerName.includes('real estate') || lowerName.includes('engineering'))
+            ? 'Real Estate, Construction and Engineering'
+            : lowerName.includes('technology') || lowerName.includes('staffing') ? 'Technology'
+            : lowerName.includes('manufacturing') ? 'Manufacturing'
+            : lowerName.includes('insurance') ? 'Insurance'
+            : lowerName.includes('banking') || lowerName.includes('finance') ? 'Banking'
+            : lowerName.includes('healthcare') ? 'Healthcare'
+            : lowerName.includes('legal') ? 'Legal'
+            : lowerName.includes('sports') || lowerName.includes('events') ? 'Sports & Events'
             : null;
 
           await Lead.create({
@@ -223,6 +229,8 @@ export async function pullLeadsForCampaign(
             company: enriched.organization?.name || p.organization?.name || '',
             title: enriched.title || p.title || '',
             linkedin_url: enriched.linkedin_url || p.linkedin_url || null,
+            state: enriched.state || p.state || null,
+            city: enriched.city || p.city || null,
             industry: enriched.organization?.industry || p.organization?.industry || null,
             company_size: enriched.organization?.estimated_num_employees || p.organization?.estimated_num_employees || null,
             vertical: verticalGuess,

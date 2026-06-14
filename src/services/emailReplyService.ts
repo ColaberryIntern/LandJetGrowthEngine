@@ -1,5 +1,8 @@
+import { Op } from 'sequelize';
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { Lead } from '../models/Lead';
+import { CommunicationLog } from '../models/CommunicationLog';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -69,6 +72,83 @@ export async function getRecentInboxEmails(userEmail: string = 'rlandry@landjet.
     is_read: m.isRead,
     importance: m.importance || 'normal',
   }));
+}
+
+/**
+ * For each inbox email whose from_email matches a Lead, write a CommunicationLog
+ * inbound row (idempotent on provider_message_id = Outlook message id) and
+ * advance the lead's pipeline_stage to 'replied' if it's still upstream.
+ *
+ * Returns { matched, logged_new, advanced } counts. Non-fatal: any failure on
+ * a single email is logged and skipped; we don't want one bad row to block
+ * the inbox poll.
+ */
+export async function recordInboxMatches(emails: InboxEmail[]): Promise<{ matched: number; logged_new: number; advanced: number }> {
+  let matched = 0; let logged_new = 0; let advanced = 0;
+  if (emails.length === 0) return { matched, logged_new, advanced };
+
+  const fromAddrs = Array.from(new Set(emails.map(e => (e.from_email || '').trim().toLowerCase()).filter(Boolean)));
+  if (fromAddrs.length === 0) return { matched, logged_new, advanced };
+
+  const leads = await Lead.findAll({
+    where: { email: { [Op.in]: fromAddrs } },
+    attributes: ['id', 'email', 'pipeline_stage'],
+  });
+  const leadByEmail = new Map(leads.map(l => [l.email.toLowerCase(), l]));
+
+  for (const e of emails) {
+    const lead = leadByEmail.get((e.from_email || '').trim().toLowerCase());
+    if (!lead) continue;
+    matched += 1;
+
+    // Idempotent write: skip if we already logged this Outlook message.
+    const existing = await CommunicationLog.findOne({
+      where: { provider_message_id: e.id },
+      attributes: ['id'],
+    });
+    if (!existing) {
+      try {
+        await CommunicationLog.create({
+          lead_id: lead.id,
+          campaign_id: null,
+          channel: 'email',
+          direction: 'inbound',
+          delivery_mode: 'live',
+          status: 'delivered',
+          to_address: 'rlandry@landjet.com',
+          from_address: e.from_email,
+          subject: e.subject,
+          body: e.preview,
+          provider: 'microsoft_graph',
+          provider_message_id: e.id,
+          provider_response: null,
+          metadata: { sender_name: e.from },
+        } as any);
+        logged_new += 1;
+      } catch (err) {
+        logger.warn('Inbox inbound log write failed (non-fatal)', { messageId: e.id, error: (err as Error).message });
+        continue;
+      }
+    }
+
+    // Advance pipeline: new_lead or contacted -> replied.
+    if (lead.pipeline_stage === 'new_lead' || lead.pipeline_stage === 'contacted') {
+      try {
+        const [n] = await Lead.update(
+          { pipeline_stage: 'replied' },
+          { where: { id: lead.id, pipeline_stage: { [Op.in]: ['new_lead', 'contacted'] } } },
+        );
+        if (n > 0) {
+          advanced += 1;
+          logger.info('Lead pipeline advanced to replied', { lead_id: lead.id });
+        }
+      } catch (err) {
+        logger.warn('Pipeline advance to replied failed (non-fatal)', { lead_id: lead.id, error: (err as Error).message });
+      }
+    }
+  }
+
+  return { matched, logged_new, advanced };
 }
 
 /**

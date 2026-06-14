@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   getOutreachToday, advanceOutreachContact, skipOutreachContact, removeOutreachContact, blockOutreachContact,
   assignContactCampaign, getCampaigns,
@@ -11,6 +11,8 @@ import {
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
 import { ExtensionInstallButton } from '@/components/ExtensionInstallButton';
+import AdminFilterBar, { AdminFilters } from '@/components/AdminFilterBar';
+import { useDefaultFilters } from '@/lib/useDefaultFilters';
 
 interface CampaignOption { id: string; name: string; }
 
@@ -47,11 +49,25 @@ export default function OutreachPage() {
     { tone: 'direct', label: 'More Direct' },
   ]);
 
+  // Admin filter state. Initial value seeds from user.default_filters.states
+  // via useDefaultFilters once the profile fetch resolves (2026-06-14 refactor:
+  // replaced the territory enum with an N-state array). Until then we render
+  // with no filter and refetch when defaults arrive.
+  const [filters, setFilters] = useState<AdminFilters>({});
+  const defaultFilters = useDefaultFilters();
+  useEffect(() => {
+    if (defaultFilters) setFilters(defaultFilters);
+  }, [defaultFilters]);
+
   async function fetchData(opts: { preserveInProgress?: boolean } = {}) {
     await ensureAuth();
     try {
       const [contactRes, campaignRes, settingsRes] = await Promise.allSettled([
-        getOutreachToday(),
+        getOutreachToday({
+          states: filters.states,
+          city: filters.city,
+          campaign_id: filters.campaign_id,
+        }),
         getCampaigns() as Promise<{ campaigns: CampaignOption[]; total: number }>,
         getOutreachSettings(),
       ]);
@@ -109,7 +125,17 @@ export default function OutreachPage() {
   useEffect(() => {
     const timer = setTimeout(() => fetchData(), 500);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refetch when filters change. Skip the very first render -- the useEffect
+  // above already handles the initial load with whatever filters are seeded.
+  const firstFilterRender = useRef(true);
+  useEffect(() => {
+    if (firstFilterRender.current) { firstFilterRender.current = false; return; }
+    fetchData({ preserveInProgress: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.states?.join(','), filters.city, filters.campaign_id]);
 
   // Auto-refresh on tab focus -- catches advances made by the Chrome
   // extension (or any other out-of-band action) so leads that have been
@@ -360,6 +386,13 @@ export default function OutreachPage() {
             Refresh
           </button>
         </div>
+      </div>
+
+      {/* Admin filter bar -- Territory + State + City + Campaign. Channel
+         is hidden because each step has its own channel; filtering on it
+         for the today queue does not have a clean meaning. */}
+      <div className="mt-3">
+        <AdminFilterBar value={filters} onChange={setFilters} hiddenChips={['channel']} />
       </div>
 
       {/* Global Settings Panel */}

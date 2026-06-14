@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LandJet LinkedIn Assistant -- Install Guide</title>
+  <style>
+    *,*:before,*:after { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f7fafc; color: #2d3748; margin: 0; padding: 0; line-height: 1.55; }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 32px 24px 80px; }
+    h1 { font-size: 26px; color: #1a365d; margin: 0 0 6px; }
+    .lede { color: #4a5568; font-size: 15px; margin: 0 0 28px; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; background: #d1fae5; color: #065f46; margin-left: 6px; }
+    .pill-blue { background: #dbeafe; color: #1e40af; }
+
+    section { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 22px 26px; margin: 0 0 18px; }
+    section h2 { font-size: 18px; color: #1a365d; margin: 0 0 12px; }
+    section p { font-size: 14px; color: #2d3748; margin: 0 0 12px; }
+
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 0; }
+    .steps li { counter-increment: step; position: relative; padding: 0 0 18px 50px; }
+    .steps li:before { content: counter(step); position: absolute; left: 0; top: 0; width: 36px; height: 36px; border-radius: 50%; background: #1a365d; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; }
+    .steps li:not(:last-child):after { content: ""; position: absolute; left: 17px; top: 36px; bottom: 0; width: 2px; background: #e2e8f0; }
+    .step-title { font-weight: 600; color: #1a365d; font-size: 15px; margin: 6px 0 4px; }
+    .step-detail { font-size: 14px; color: #4a5568; }
+    .step-detail code { background: #edf2f7; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+    .step-detail a { color: #2b6cb0; text-decoration: none; }
+
+    .flow { background: #1a365d; color: #fff; padding: 14px 18px; border-radius: 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.8; margin: 16px 0; }
+    .flow span { display: inline-block; padding: 3px 9px; background: rgba(255,255,255,0.12); border-radius: 4px; margin: 2px 4px 2px 0; }
+    .arrow { color: #fbbf24; padding: 0 4px; }
+
+    .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+    .before-after > div { padding: 14px 16px; border-radius: 6px; }
+    .before { background: #fef2f2; border: 1px solid #fecaca; }
+    .after { background: #ecfdf5; border: 1px solid #bbf7d0; }
+    .before strong, .after strong { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .before strong { color: #991b1b; } .after strong { color: #065f46; }
+    .before .n, .after .n { font-size: 26px; font-weight: 700; color: #1a365d; }
+
+    .callout { background: #fef3c7; border-left: 4px solid #d97706; padding: 12px 14px; border-radius: 4px; margin: 12px 0; font-size: 13px; color: #78350f; }
+    .callout strong { color: #78350f; }
+
+    .troubleshoot { padding: 0; list-style: none; }
+    .troubleshoot li { padding: 10px 0; border-top: 1px solid #e2e8f0; font-size: 14px; }
+    .troubleshoot li:first-child { border-top: 0; }
+    .troubleshoot strong { display: block; color: #1a365d; margin-bottom: 4px; }
+
+    footer { text-align: center; color: #a0aec0; font-size: 12px; margin: 30px 0 0; }
+    .kbd { display: inline-block; padding: 1px 6px; border: 1px solid #cbd5e0; border-bottom-width: 2px; border-radius: 3px; background: #fff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #2d3748; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>LandJet LinkedIn Assistant <span class="pill">v1.0.22</span></h1>
+<p class="lede">Self-serve install guide. The extension lives in your Chrome browser, watches LinkedIn profile pages, and drops a small panel with your draft outreach message + a one-click "Copy + open Connect" button.</p>
+
+<section>
+  <h2>What it does</h2>
+  <div class="before-after">
+    <div class="before">
+      <strong>Before</strong>
+      <div class="n">9</div>
+      <p style="margin:6px 0 0;font-size:13px;color:#7f1d1d">clicks to send a personalized connection request: open profile, copy message from queue, switch tabs, click Connect, click Add a note, paste, click Send, switch back, mark Done.</p>
+    </div>
+    <div class="after">
+      <strong>After</strong>
+      <div class="n">4</div>
+      <p style="margin:6px 0 0;font-size:13px;color:#064e3b">clicks plus one <span class="kbd">Ctrl</span>+<span class="kbd">V</span>. The panel auto-appears with your message pre-copied to the clipboard. Mark Done fires automatically the moment LinkedIn confirms Send.</p>
+    </div>
+  </div>
+  <div class="flow">
+    <span>Click our button</span><span class="arrow">&rarr;</span><span>LinkedIn: Add a note</span><span class="arrow">&rarr;</span><span>Ctrl+V</span><span class="arrow">&rarr;</span><span>LinkedIn: Send</span>
+  </div>
+</section>
+
+<section>
+  <h2>Install <span class="pill pill-blue">5 minutes</span></h2>
+  <ol class="steps">
+    <li>
+      <div class="step-title">Sign in to the LandJet Growth Engine</div>
+      <div class="step-detail">Open <a href="http://95.216.199.47:4000">http://95.216.199.47:4000</a> and sign in with your LandJet credentials. You should land on the Outreach page.</div>
+    </li>
+    <li>
+      <div class="step-title">Download the extension zip</div>
+      <div class="step-detail">Click <strong>Download Extension</strong> in the top nav. The file <code>landjet-extension-v1.0.22-rlandry.zip</code> downloads with your API token already baked in -- no separate sign-in step needed inside the extension.</div>
+    </li>
+    <li>
+      <div class="step-title">Open the Chrome extensions page</div>
+      <div class="step-detail">In Chrome, type <code>chrome://extensions</code> in the address bar and hit Enter. Flip the <strong>Developer mode</strong> toggle in the top right to on.</div>
+    </li>
+    <li>
+      <div class="step-title">Unzip the file</div>
+      <div class="step-detail">Right-click the downloaded zip and choose Extract All (Windows) or double-click it (Mac). You will get a folder with files like <code>manifest.json</code>, <code>content.js</code>, etc.</div>
+    </li>
+    <li>
+      <div class="step-title">Load the unpacked folder</div>
+      <div class="step-detail">Back on the <code>chrome://extensions</code> page, click <strong>Load unpacked</strong> in the top left. Pick the folder you just extracted. The extension should appear in the list as <strong>LandJet LinkedIn Assistant</strong> with version <code>1.0.22</code>.</div>
+    </li>
+    <li>
+      <div class="step-title">Pin it (optional but recommended)</div>
+      <div class="step-detail">Click the puzzle-piece icon in Chrome's toolbar, find <strong>LandJet LinkedIn Assistant</strong>, and click the pin icon next to it. The LJ icon now sits in your toolbar for quick status checks.</div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>Use it</h2>
+  <ol class="steps">
+    <li>
+      <div class="step-title">Open any LinkedIn profile that has a lead in your queue today</div>
+      <div class="step-detail">If the contact is in the Outreach queue with channel = LinkedIn Connect, the LandJet panel slides in on the right side. If nothing appears, the contact is not in today's queue (and you should not be sending them a connection request).</div>
+    </li>
+    <li>
+      <div class="step-title">Confirm the draft message looks right</div>
+      <div class="step-detail">The panel shows the lead name, campaign, current step, and the AI-drafted note. Edit the textarea if you want to tweak. The clipboard updates as you edit.</div>
+    </li>
+    <li>
+      <div class="step-title">Click the big blue button</div>
+      <div class="step-detail"><strong>Copy message + open Connect</strong>. Your message goes onto the clipboard immediately. The extension tries to open the Connect dialog automatically. If it does not open (LinkedIn changes their DOM frequently), click LinkedIn's own Connect button.</div>
+    </li>
+    <li>
+      <div class="step-title">On LinkedIn: Add a note &rarr; Ctrl+V &rarr; Send</div>
+      <div class="step-detail">Click <strong>Add a note</strong> on the dialog, paste with <span class="kbd">Ctrl</span>+<span class="kbd">V</span> (or <span class="kbd">Cmd</span>+<span class="kbd">V</span> on Mac), click <strong>Send</strong>. The extension watches for the Send click and marks the lead Done in the outreach queue automatically.</div>
+    </li>
+  </ol>
+
+  <div class="callout"><strong>Test mode safety:</strong> if Test Mode is on (default while you are getting comfortable), Send does NOT actually transmit. The extension still logs the action so you can see what would have happened. Flip Test Mode off in /outreach Settings when you are ready to send for real.</div>
+</section>
+
+<section>
+  <h2>If something does not work</h2>
+  <ul class="troubleshoot">
+    <li><strong>Panel does not appear on a profile.</strong> Make sure the contact is in today's Outreach queue with channel = LinkedIn Connect. Refresh the page. If still nothing, click the LandJet icon in the toolbar and check that the extension is enabled and your API token is saved.</li>
+    <li><strong>"Copy + open Connect" works but Connect dialog does not open.</strong> Click LinkedIn's own Connect button. The clipboard already has your message. Proceed with Add a note &rarr; Ctrl+V &rarr; Send normally.</li>
+    <li><strong>Add a note button does not click when you press the manual mode button.</strong> Click LinkedIn's Add a note button yourself. The state watcher will detect it and light up step 3.</li>
+    <li><strong>You want the new "Lorie said this dead-leg quote should be 0" type of finding from your session forwarded back.</strong> In the extension panel, expand <strong>Manual mode</strong> and click <strong>Dump diagnostics</strong>. Copy the JSON output that appears in the textarea. Email it to Ali. He will ship a targeted fix the same day.</li>
+    <li><strong>Wrong version shown.</strong> Visit <a href="http://95.216.199.47:4000/api/extension/version">/api/extension/version</a>; should report <code>1.0.22</code>. If not, re-download via the in-app button. If yes, delete the old unpacked folder, extract the new zip, Load unpacked again.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>What "mark Done" means</h2>
+  <p>When LinkedIn confirms the Send, the extension calls the outreach API and advances the lead to the next step in the sequence. The contact disappears from your daily queue and the next follow-up is scheduled per the campaign's delay setting (default 4 days for follow-ups). If you ever need to undo, the <strong>Reset</strong> button in /outreach Settings shows your last 30 test-mode advances and lets you back any of them out.</p>
+</section>
+
+<footer>
+  LandJet LinkedIn Assistant v1.0.22 &middot; Generated 2026-06-04 for Ryan Landry &middot; Questions: ali@colaberry.com
+</footer>
+
+</div>
+</body>
+</html>

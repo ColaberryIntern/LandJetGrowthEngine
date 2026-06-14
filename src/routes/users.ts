@@ -44,6 +44,8 @@ router.get('/me/profile', authenticate, async (req: Request, res: Response, next
         last_name: user.last_name,
         role: user.role,
         status: user.status,
+        // territory_default deprecated 2026-06-14 -- read default_filters.states instead.
+        default_filters: user.default_filters,
         last_login_at: user.last_login_at,
       },
       completeness: {

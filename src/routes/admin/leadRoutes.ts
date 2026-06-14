@@ -1,9 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { createLead, getLeadById, updateLead, listLeads } from '../../services/leadService';
+import { createLead, getLeadById, updateLead, listLeads, parseStatesParam } from '../../services/leadService';
 import { createAuditLog } from '../../services/auditLogService';
 import { logger } from '../../config/logger';
+import { Lead } from '../../models/Lead';
+import { fn, col, where as sqlWhere, Op } from 'sequelize';
+
+const ALLOWED_DISTINCT_FIELDS = ['state', 'city', 'industry', 'vertical'] as const;
+type DistinctField = typeof ALLOWED_DISTINCT_FIELDS[number];
 
 const router = Router();
 
@@ -37,6 +42,9 @@ router.get('/', authorize('leads:read'), async (req: Request, res: Response, nex
       temperature: req.query.temperature as string,
       industry: req.query.industry as string,
       lead_source_type: req.query.lead_source_type as string,
+      state: req.query.state as string,
+      city: req.query.city as string,
+      states: parseStatesParam(req.query.states),
       search: req.query.search as string,
       min_score: req.query.min_score ? Number(req.query.min_score) : undefined,
       max_score: req.query.max_score ? Number(req.query.max_score) : undefined,
@@ -51,6 +59,42 @@ router.get('/', authorize('leads:read'), async (req: Request, res: Response, nex
       limit: filters.limit,
       offset: filters.offset,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Distinct values for the admin filter bar chip dropdowns. Whitelisted
+// fields only (state, city, industry, vertical) to keep this from turning
+// into an open query surface.
+router.get('/distinct', authorize('leads:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const field = req.query.field as string;
+    if (!ALLOWED_DISTINCT_FIELDS.includes(field as DistinctField)) {
+      return res.status(400).json({
+        error: `field must be one of: ${ALLOWED_DISTINCT_FIELDS.join(', ')}`,
+      });
+    }
+
+    const whereClause: Record<string, unknown> = { [field]: { [Op.ne]: null } };
+    // If field=city and a state is also passed, scope cities to the state.
+    if (field === 'city' && req.query.state) {
+      whereClause.state = { [Op.iLike]: req.query.state as string };
+    }
+
+    const rows = await Lead.findAll({
+      attributes: [[fn('DISTINCT', col(field)), field]],
+      where: whereClause,
+      order: [[col(field), 'ASC']],
+      limit: 500,
+      raw: true,
+    });
+
+    const values = rows
+      .map((r) => (r as unknown as Record<string, unknown>)[field])
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+
+    res.json({ field, values });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,7 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
 
+export type TerritoryDefault = 'tx_only' | 'non_tx' | 'all';
+
 export interface UserAttributes {
   id: string;
   email: string;
@@ -11,17 +13,22 @@ export interface UserAttributes {
   email_verified: boolean;
   verification_token: string | null;
   api_token: string | null; // long-lived bearer for Chrome extension / scripted clients
+  territory_default: TerritoryDefault;
+  default_filters: Record<string, unknown>;
   last_login_at: Date | null;
   created_at?: Date;
   updated_at?: Date;
 }
 
 export interface UserCreationAttributes
-  extends Omit<UserAttributes, 'id' | 'created_at' | 'updated_at' | 'last_login_at' | 'email_verified' | 'verification_token'> {
+  extends Omit<UserAttributes, 'id' | 'created_at' | 'updated_at' | 'last_login_at' | 'email_verified' | 'verification_token' | 'api_token' | 'territory_default' | 'default_filters'> {
   id?: string;
   last_login_at?: Date | null;
   email_verified?: boolean;
   verification_token?: string | null;
+  api_token?: string | null;
+  territory_default?: TerritoryDefault;
+  default_filters?: Record<string, unknown>;
 }
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
@@ -35,6 +42,8 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare email_verified: boolean;
   declare verification_token: string | null;
   declare api_token: string | null;
+  declare territory_default: TerritoryDefault;
+  declare default_filters: Record<string, unknown>;
   declare last_login_at: Date | null;
   declare created_at: Date;
   declare updated_at: Date;
@@ -89,6 +98,16 @@ export function initUserModel(sequelize: Sequelize): typeof User {
         type: DataTypes.STRING(128),
         allowNull: true,
         unique: true,
+      },
+      territory_default: {
+        type: DataTypes.ENUM('tx_only', 'non_tx', 'all'),
+        allowNull: false,
+        defaultValue: 'all',
+      },
+      default_filters: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: {},
       },
       last_login_at: {
         type: DataTypes.DATE,

@@ -4,6 +4,7 @@ import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine';
 import { QuoteOutput } from './landjetPricing';
 import { FaqMatch } from './landjetFaqService';
+import { validateAiQuoteBody, renderTemplateQuoteBody, QuoteContextForGuard } from './quoteResponseGuard';
 
 export interface QuoteRequest {
   lead_id?: number;
@@ -35,6 +36,11 @@ export interface QuoteResponse {
     approvals_needed: string[];
   };
   faq_matches?: Array<{ question: string; answer: string; score: number }>;
+  // True when the AI body failed the hallucination guard and the deterministic
+  // template was used instead. Concierge UI can surface this as a banner
+  // ("AI body was rejected -- template used; review tone before sending").
+  template_fallback?: boolean;
+  template_fallback_reasons?: string[];
 }
 
 /**
@@ -132,6 +138,34 @@ export async function generateQuoteResponse(request: QuoteRequest): Promise<Quot
     };
     if (pricing.mode === 'priced' && pricing.quote) {
       result.quote_summary = summarizeQuote(pricing.quote);
+
+      // Hallucination guard. Only enforced for priced mode because that's
+      // where wrong numbers can hit a customer. forward_only / faq / manual
+      // are lower-risk surfaces.
+      const guardCtx: QuoteContextForGuard = {
+        customer_name: request.name,
+        pickup_address: pricing.trip?.pickup_address,
+        dropoff_address: pricing.trip?.dropoff_address,
+        date_of_service: pricing.trip?.date_of_service,
+      };
+      const verdict = validateAiQuoteBody(parsedBody, pricing.quote, guardCtx);
+      if (!verdict.ok) {
+        logger.warn('AI quote body rejected by hallucination guard; using template fallback', {
+          leadId,
+          reasons: verdict.reasons,
+          ai_body_first_200: parsedBody.slice(0, 200),
+        });
+        recordAgentRun('quote_generator_guard', {
+          leadId,
+          rejected: true,
+          reasons: verdict.reasons,
+        }).catch(() => {});
+        const fallback = renderTemplateQuoteBody(pricing.quote, guardCtx);
+        result.subject = fallback.subject;
+        result.body = fallback.body;
+        result.template_fallback = true;
+        result.template_fallback_reasons = verdict.reasons;
+      }
     }
     if (pricing.mode === 'faq' && pricing.faq_matches) {
       result.faq_matches = pricing.faq_matches.map(m => ({

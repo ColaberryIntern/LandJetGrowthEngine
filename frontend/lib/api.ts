@@ -413,8 +413,22 @@ export function sendEmailReply(messageId: string, body: string) {
   });
 }
 
-export function getOutreachToday() {
-  return request<OutreachContact[]>('/admin/outreach/today');
+export interface OutreachTodayFilters {
+  // 2026-06-14: replaced territory enum with N-state array for per-location ownership.
+  states?: string[];
+  state?: string;
+  city?: string;
+  campaign_id?: string;
+}
+
+export function getOutreachToday(filters: OutreachTodayFilters = {}) {
+  const qs = new URLSearchParams();
+  if (filters.states && filters.states.length > 0) qs.set('states', filters.states.join(','));
+  if (filters.state) qs.set('state', filters.state);
+  if (filters.city) qs.set('city', filters.city);
+  if (filters.campaign_id) qs.set('campaign_id', filters.campaign_id);
+  const s = qs.toString();
+  return request<OutreachContact[]>(`/admin/outreach/today${s ? '?' + s : ''}`);
 }
 
 // Move a contact to a different campaign. Returns either:

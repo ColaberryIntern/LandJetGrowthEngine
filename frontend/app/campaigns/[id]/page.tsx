@@ -26,6 +26,11 @@ export default function CampaignDetailPage() {
   const [prompt, setPrompt] = useState('');
   const [steps, setSteps] = useState<any[]>([]);
 
+  // Available attachments for the per-step attachment_path picker. Sourced from
+  // GET /api/admin/attachments (same list shown on /admin/attachments). Falls
+  // back to [] on failure so the editor still renders.
+  const [attachmentFiles, setAttachmentFiles] = useState<{ filename: string }[]>([]);
+
   // Settings state
   const [senderName, setSenderName] = useState('Ryan Landry');
   const [senderRole, setSenderRole] = useState('CEO, LandJet');
@@ -35,6 +40,10 @@ export default function CampaignDetailPage() {
   const [campaignPriority, setCampaignPriority] = useState(50);
   const [aiDrafts, setAiDrafts] = useState(true);
   const [emailSignature, setEmailSignature] = useState('');
+  // Step-count cap (Ali 2026-06-09). 0 = inherit global default (OUTREACH_MAX_STEPS env, defaults to 8).
+  // Override here to either raise or lower the ceiling per campaign.
+  const [maxSteps, setMaxSteps] = useState<number>(0);
+  const GLOBAL_MAX_STEPS_DEFAULT = 8;
 
   // Leads state
   const [search, setSearch] = useState('');
@@ -72,6 +81,7 @@ export default function CampaignDetailPage() {
           setAiDrafts(c.settings?.ai_drafts_enabled ?? true);
           setCampaignPriority(c.settings?.priority || 50);
           setEmailSignature(c.settings?.email_signature || '');
+          setMaxSteps(typeof c.settings?.max_steps === 'number' ? c.settings.max_steps : 0);
         }
       } catch {}
       setLoading(false);
@@ -97,6 +107,7 @@ export default function CampaignDetailPage() {
         setAiDrafts(c.settings.ai_drafts_enabled ?? aiDrafts);
         setCampaignPriority(c.settings.priority || campaignPriority);
         setEmailSignature(c.settings.email_signature || emailSignature);
+        setMaxSteps(typeof c.settings.max_steps === 'number' ? c.settings.max_steps : 0);
       }
       if (c.channel_config?.email?.daily_limit !== undefined) setEmailsPerDay(c.channel_config.email.daily_limit);
       setFlash(section);
@@ -128,6 +139,23 @@ export default function CampaignDetailPage() {
     updated[index] = { ...updated[index], [field]: value };
     setSteps(updated);
   }
+
+  // Load the file list for the attachment picker once per page load.
+  // Reuses the existing /api/admin/attachments endpoint that powers the
+  // /admin/attachments page.
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const r = await fetch('/api/admin/attachments', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!r.ok) return;
+        const data = await r.json() as { files: { filename: string }[] };
+        setAttachmentFiles(data.files || []);
+      } catch { /* non-fatal: dropdown just shows "No attachment" */ }
+    })();
+  }, []);
 
   const filteredContacts = contacts.filter(c => {
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
@@ -575,6 +603,27 @@ export default function CampaignDetailPage() {
                       <textarea value={s.prompt} onChange={e => updateStep(i, 'prompt', e.target.value)} rows={2}
                         placeholder={ch.startsWith('linkedin') ? 'Message to send (will be interpolated with variables)' : 'Step-specific prompt (overrides campaign prompt for this stage)'}
                         className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-gray-500 focus:outline-none bg-white" />
+                      {ch === 'email' && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs font-medium text-gray-600">Attachment:</label>
+                          <select
+                            value={s.attachment_path || ''}
+                            onChange={e => updateStep(i, 'attachment_path', e.target.value || null)}
+                            className="flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-gray-500 focus:outline-none">
+                            <option value="">No attachment</option>
+                            {attachmentFiles.map(f => (
+                              <option key={f.filename} value={f.filename}>{f.filename}</option>
+                            ))}
+                            {s.attachment_path && !attachmentFiles.some(f => f.filename === s.attachment_path) && (
+                              <option value={s.attachment_path}>{s.attachment_path} (missing)</option>
+                            )}
+                          </select>
+                          {attachmentFiles.length === 0 && (
+                            <a href="/admin/attachments" target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-blue-600 hover:text-blue-800">Upload one</a>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -674,6 +723,27 @@ export default function CampaignDetailPage() {
                   <div className="flex justify-between text-xs text-gray-400 mt-1"><span>1 day</span><span>7 days</span><span>14 days</span></div>
                 </div>
 
+                {/* Max Steps cap */}
+                <div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Max steps</span>
+                    <span className="font-medium text-gray-900">
+                      {maxSteps === 0
+                        ? <span className="text-gray-500">default ({GLOBAL_MAX_STEPS_DEFAULT})</span>
+                        : maxSteps}
+                    </span>
+                  </div>
+                  <input type="range" min={0} max={15} value={maxSteps} onChange={e => setMaxSteps(parseInt(e.target.value))}
+                    className="mt-1 w-full h-2 rounded-full appearance-none bg-gray-200 accent-gray-900" />
+                  <div className="flex justify-between text-xs text-gray-400 mt-1"><span>default</span><span>5</span><span>10</span><span>15</span></div>
+                  {maxSteps > GLOBAL_MAX_STEPS_DEFAULT && (
+                    <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      Longer than the default ({GLOBAL_MAX_STEPS_DEFAULT} steps). Make sure this is intentional -- long sequences can hurt sender reputation.
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-400">Hard ceiling. Set to <em>default</em> to inherit the global cap. The lower of this and the defined step count wins.</p>
+                </div>
+
                 {/* AI Drafts Toggle */}
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">AI Draft Generation</span>
@@ -694,7 +764,15 @@ export default function CampaignDetailPage() {
                 </div>
               </div>
               <button onClick={() => saveField('config', {
-                settings: { ...(campaign?.settings || {}), follow_up_delay_days: followUpDelay, ai_drafts_enabled: aiDrafts, priority: campaignPriority, email_signature: emailSignature },
+                settings: {
+                  ...(campaign?.settings || {}),
+                  follow_up_delay_days: followUpDelay,
+                  ai_drafts_enabled: aiDrafts,
+                  priority: campaignPriority,
+                  email_signature: emailSignature,
+                  // 0 means "inherit global default" -- store as null so the backend uses env-level OUTREACH_MAX_STEPS.
+                  max_steps: maxSteps > 0 ? maxSteps : null,
+                },
                 channel_config: { ...(campaign?.channel_config || {}), email: { ...(campaign?.channel_config?.email || {}), enabled: true, daily_limit: emailsPerDay } },
               })} disabled={saving === 'config'}
                 className="mt-4 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">

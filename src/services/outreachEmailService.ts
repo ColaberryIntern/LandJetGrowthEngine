@@ -29,6 +29,11 @@ interface SendEmailInput {
   to: string;
   subject: string;
   body: string;
+  // When provided, sent as a full HTML message (contentType=HTML). The plain
+  // `body` field is then ignored for the wire payload but still used as the
+  // sign-off-strip source for audit / preview parity. Mutually exclusive with
+  // `signature` (which wraps `body` in a styled div + signature).
+  html?: string;
   from?: string;
   senderName?: string;
   signature?: string;
@@ -238,10 +243,14 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
     // Strip any AI-generated sign-off from the body so signature is the only one
     const cleanBody = stripSignOff(input.body);
 
-    // If signature is provided, build HTML email; otherwise plain text
+    // If signature is provided, build HTML email; otherwise plain text.
+    // If an explicit `html` is provided, send that as-is (overrides signature path).
     let contentType: 'Text' | 'HTML' = 'Text';
     let content = cleanBody;
-    if (input.signature && input.signature.trim()) {
+    if (input.html && input.html.trim()) {
+      contentType = 'HTML';
+      content = input.html;
+    } else if (input.signature && input.signature.trim()) {
       contentType = 'HTML';
       // Convert plain text body to HTML (preserve line breaks) and append signature
       const htmlBody = cleanBody
@@ -336,6 +345,24 @@ async function writeCommLog(
     provider_response: providerResponse,
     metadata: { sender_name: input.senderName || null },
   } as any);
+
+  // Pipeline advance: a successful live send means the lead has now been
+  // contacted. If they were still at new_lead, move them to contacted.
+  // Failures + test/simulated sends do not advance the pipeline.
+  if (status === 'sent' && (input.delivery_mode || 'live') === 'live') {
+    try {
+      const { Lead } = await import('../models/Lead');
+      const updated = await Lead.update(
+        { pipeline_stage: 'contacted' },
+        { where: { id: input.lead_id, pipeline_stage: 'new_lead' } },
+      );
+      if (updated[0] > 0) {
+        logger.info('Lead pipeline advanced to contacted on first send', { lead_id: input.lead_id });
+      }
+    } catch (e) {
+      logger.warn('Pipeline advance after send failed (non-fatal)', { lead_id: input.lead_id, error: (e as Error).message });
+    }
+  }
 }
 
 /**

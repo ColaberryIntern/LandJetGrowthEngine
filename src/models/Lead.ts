@@ -3,6 +3,7 @@ import { DataTypes, Model, Sequelize } from 'sequelize';
 export const PIPELINE_STAGES = [
   'new_lead',
   'contacted',
+  'replied',
   'meeting_scheduled',
   'proposal_sent',
   'negotiation',
@@ -15,11 +16,12 @@ export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 export const PIPELINE_ORDER: Record<PipelineStage, number> = {
   new_lead: 0,
   contacted: 1,
-  meeting_scheduled: 2,
-  proposal_sent: 3,
-  negotiation: 4,
-  enrolled: 5,
-  lost: 6,
+  replied: 2,
+  meeting_scheduled: 3,
+  proposal_sent: 4,
+  negotiation: 5,
+  enrolled: 6,
+  lost: 7,
 };
 
 export interface LeadAttributes {
@@ -34,6 +36,8 @@ export interface LeadAttributes {
   company_size: number | null;
   annual_revenue: number | null;
   linkedin_url: string | null;
+  state: string | null;
+  city: string | null;
   lead_source: string | null;
   lead_source_type: string | null;
   temperature: 'cold' | 'warm' | 'hot';
@@ -85,6 +89,8 @@ export class Lead
   declare company_size: number | null;
   declare annual_revenue: number | null;
   declare linkedin_url: string | null;
+  declare state: string | null;
+  declare city: string | null;
   declare lead_source: string | null;
   declare lead_source_type: string | null;
   declare temperature: 'cold' | 'warm' | 'hot';
@@ -156,6 +162,14 @@ export function initLeadModel(sequelize: Sequelize): typeof Lead {
       },
       linkedin_url: {
         type: DataTypes.STRING(500),
+        allowNull: true,
+      },
+      state: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+      },
+      city: {
+        type: DataTypes.STRING(120),
         allowNull: true,
       },
       lead_source: {
@@ -266,6 +280,7 @@ export function initLeadModel(sequelize: Sequelize): typeof Lead {
         { fields: ['status'] },
         { fields: ['industry'] },
         { fields: ['lead_source_type'] },
+        { fields: ['state'] },
       ],
     },
   );

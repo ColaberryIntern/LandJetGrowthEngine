@@ -414,3 +414,103 @@ describe('advanceLead', () => {
     expect(contact.save).not.toHaveBeenCalled();
   });
 });
+
+describe('advanceLead step-count cap', () => {
+  const ENV_SAVE = process.env.OUTREACH_MAX_STEPS;
+  beforeEach(() => { jest.clearAllMocks(); });
+  afterEach(() => { process.env.OUTREACH_MAX_STEPS = ENV_SAVE; });
+
+  function makeContactWithCampaign(sequence_stage: number, stepsDefined: number, maxStepsOverride: number | null = null) {
+    const steps = Array.from({ length: stepsDefined }, (_, i) => ({ step: i + 1, channel: 'email', delay_days: 4 }));
+    return makeContact({
+      sequence_stage,
+      outreach_status: 'ACTIVE',
+      save: jest.fn(),
+      campaign: {
+        id: 'c1',
+        sequence_steps: steps,
+        settings: maxStepsOverride === null ? {} : { max_steps: maxStepsOverride },
+      },
+    });
+  }
+
+  it('env default 8 caps a 10-step campaign at 8', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(8, 10);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // stage was 8 -> becomes 9. min(10, 8) = 8. 9 > 8 -> COMPLETED.
+    expect(result!.sequence_stage).toBe(9);
+    expect(result!.outreach_status).toBe('COMPLETED');
+    expect(result!.next_action_at).toBeNull();
+  });
+
+  it('env default 8 allows stage 7 -> 8 to keep going (8 is still <= cap)', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(7, 10);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    expect(result!.sequence_stage).toBe(8);
+    expect(result!.outreach_status).toBe('ACTIVE');
+  });
+
+  it('per-campaign override below env default wins (override 5 caps a 10-step campaign at 5)', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(5, 10, 5);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // stage was 5 -> becomes 6. min(10, 5) = 5. 6 > 5 -> COMPLETED.
+    expect(result!.sequence_stage).toBe(6);
+    expect(result!.outreach_status).toBe('COMPLETED');
+  });
+
+  it('per-campaign override above env default wins (override 12 with a 12-step campaign, env=8)', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(9, 12, 12);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // stage 9 -> 10. min(12, 12) = 12. 10 > 12? No. ACTIVE.
+    expect(result!.sequence_stage).toBe(10);
+    expect(result!.outreach_status).toBe('ACTIVE');
+  });
+
+  it('OUTREACH_MAX_STEPS env can raise the cap globally', async () => {
+    process.env.OUTREACH_MAX_STEPS = '10';
+    const contact = makeContactWithCampaign(9, 12);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // stage 9 -> 10. min(12, 10) = 10. 10 > 10? No. ACTIVE.
+    expect(result!.sequence_stage).toBe(10);
+    expect(result!.outreach_status).toBe('ACTIVE');
+  });
+
+  it('falls back to 8 when OUTREACH_MAX_STEPS is non-numeric', async () => {
+    process.env.OUTREACH_MAX_STEPS = 'banana';
+    const contact = makeContactWithCampaign(8, 12);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // stage 8 -> 9. min(12, 8) = 8. 9 > 8 -> COMPLETED.
+    expect(result!.sequence_stage).toBe(9);
+    expect(result!.outreach_status).toBe('COMPLETED');
+  });
+
+  it('campaign override of 0 is treated as "no override" (falls back to env default)', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(8, 12, 0);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // override 0 -> falls back to env default 8. stage 8 -> 9. 9 > 8 -> COMPLETED.
+    expect(result!.sequence_stage).toBe(9);
+    expect(result!.outreach_status).toBe('COMPLETED');
+  });
+
+  it('shorter step count still wins over higher cap (5 steps + cap of 8 -> stops at 5)', async () => {
+    delete process.env.OUTREACH_MAX_STEPS;
+    const contact = makeContactWithCampaign(5, 5);
+    mockFindByPk.mockResolvedValue(contact as any);
+    const result = await advanceLead('1');
+    // min(5, 8) = 5. stage 5 -> 6. 6 > 5 -> COMPLETED.
+    expect(result!.sequence_stage).toBe(6);
+    expect(result!.outreach_status).toBe('COMPLETED');
+  });
+});

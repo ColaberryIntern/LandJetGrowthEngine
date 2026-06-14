@@ -1,7 +1,7 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-06-04
+Last updated: 2026-06-08
 
 ---
 
@@ -404,7 +404,308 @@ Catchup entry. After v1.0.13 was confirmed failed end-to-end (Ali test 5/31 PM),
   - What changed: Reordered `quote-tester/page.tsx` so the Generate Quote button + error region appear immediately after the input fields. Sample list moved below with a divider; Ali no longer has to scroll past 8 samples to hit Generate.
   - Verification: TypeScript clean; deploy verified visually after frontend rebuild.
 
-### Session: 2026-04-21 (continued)
+### Session: 2026-06-08 -- TX/Percy split foundation (chunk 1 of 4)
+
+Foundation for the TX customer-outreach split Ryan proposed 2026-06-08 (BC 9974727488). Builds in 4 chunks: backend model + create endpoint (this), account management UI, reusable filter bar, wire into Outreach page. Percy provisioning deferred per Ali (Percy unresponsive to last week's emails; do not bug).
+
+- [x] **Chunk 1: User model territory_default + create-user endpoint**
+  - Date: 2026-06-08 (BC 9975229924)
+  - What changed:
+    - Migration `20260608120000-add-territory-default-to-users.js` adds `territory_default` ENUM(`tx_only`, `non_tx`, `all`) and `default_filters` JSONB to users table. Both have DB defaults; existing users get `'all'` and `{}` automatically (no behavior change for current accounts).
+    - `src/models/User.ts`: added `TerritoryDefault` type, new attrs on the interface + sequelize init, marked new fields optional on `UserCreationAttributes` so the `authService` / `seedAdmin` callers compile.
+    - `src/services/userManagementService.ts`: new `createUser(input, adminId)` returns `{ user, tempPassword }`. Validates email (normalized lowercase + trim before regex), first/last name, role (`admin|manager|user`), territory (`tx_only|non_tx|all`). Generates bcrypt-hashed temp password from 12 random bytes (16-char base64url). New `updateUserTerritory` helper for territory-only edits. `listUsers` + `getUserDetail` extended via a shared `USER_LIST_ATTRS` constant so the new fields surface everywhere.
+    - `src/routes/admin/userManagementRoutes.ts`: `POST /` (authorize `campaigns:write`) creates user and logs `user.create` audit entry, returns 201 with `{ user, temp_password }`. `PATCH /:id/territory` updates territory and logs `user.update_territory`.
+  - Verification:
+    - `tsc --noEmit` passes.
+    - `src/tests/unit/userManagementService.test.ts` (new): 12/12 pass. Coverage: happy path, lowercase+trim normalization, missing/invalid email rejected, missing names rejected, invalid role rejected, invalid territory rejected, duplicate-email guard, default territory falls back to `all`, `updateUserTerritory` happy path + invalid value + not-found.
+    - Regression sweep on `auth.test.ts` + `draftService.test.ts`: 11/11 pass, no breakage.
+  - Notes: Temp password is returned ONCE in the 201 response body. Frontend is expected to surface it for Ali to hand off out-of-band. No email-the-credentials flow on this chunk (deferred to later chunk, requires user consent + onboarding flow).
+
+- [x] **Chunk 2: Account Management page (frontend)**
+  - Date: 2026-06-08 (BC 9975229938)
+  - What changed:
+    - `frontend/app/admin/users/page.tsx` (NEW). Tailwind, `'use client'`, matches the `/admin/attachments` pattern (raw fetch + `authHeaders()` + `ensureAuth()`).
+    - List: email, name, role, status, territory_default, last_login. Inline `<select>` editors on role / status / territory call `PATCH /api/admin/user-management/:id/{role,status,territory}` with optimistic local state update.
+    - Create modal: email, first/last name, role dropdown, territory dropdown. POSTs `/api/admin/user-management`, surfaces the one-time `temp_password` in a dismissable amber callout for Ali to hand off out-of-band.
+    - Status + territory selects color-coded via Tailwind utility maps (territory: amber for `tx_only`, sky for `non_tx`, gray for `all`; status: emerald / gray / red).
+  - Verification: frontend `tsc --noEmit` clean. Page is reachable at `/admin/users` once frontend rebuilds; live verification deferred to end of chunk 4 build so we don't churn deploys.
+  - Notes: territory selector exposes "Texas only" / "Everything except Texas" / "All (no default filter)" -- maps 1-to-1 to the backend enum. Modal closes on backdrop click unless a create is in flight.
+
+- [x] **Chunk 2.5: Add state + city to Lead, Apollo ingest, distinct endpoint, territory filter**
+  - Date: 2026-06-08
+  - Why: Recon during chunk 3 surfaced that `Lead` had no `state` or `city` field. Apollo provides location data on the person object but we were dropping it. Per Ali decision, going with option (A) of three: add columns, fill for new leads only, existing rows stay NULL and default to Ryan's ownership.
+  - What changed:
+    - Migration `20260608130000-add-state-city-to-leads.js` adds `state VARCHAR(50)` and `city VARCHAR(120)`, both nullable, plus `leads_state_idx` index.
+    - `src/models/Lead.ts`: `state`, `city` added to attributes interface + class declare + sequelize init + index list.
+    - `src/services/apolloLeadService.ts`: ingest now writes `enriched.state || p.state || null` and `enriched.city || p.city || null` into each new lead.
+    - `src/services/leadService.ts`: `LeadFilters` extended with `state`, `city`, `territory` ('tx_only' | 'non_tx' | 'all'). Explicit `state`/`city` use case-insensitive equality. Territory uses Postgres `iRegexp` to match both `TX` and `Texas`. `non_tx` includes NULL state (existing leads stay with Ryan/Ali by default). Exported `isTerritory` type guard so the route can validate query params safely.
+    - `src/routes/admin/leadRoutes.ts`:
+      - `GET /admin/leads` now accepts `state`, `city`, `territory` query params.
+      - New `GET /admin/leads/distinct?field={state|city|industry|vertical}` returns sorted distinct values for filter chips. Field whitelist prevents arbitrary-column SQL exposure. When `field=city`, an optional `state=` param scopes to that state.
+  - Verification:
+    - `tsc --noEmit` clean.
+    - New `leadTerritoryFilter.test.ts`: 7/7 pass (territory=all is no-op, territory=tx_only adds iRegexp, territory=non_tx adds OR(state IS NULL, NOT iRegexp), explicit state filter still works, `isTerritory` accepts 3 valid + rejects everything else).
+  - Notes: NULL state for existing leads is intentional. Percy never sees NULL leads (`tx_only` requires explicit TX match); Ryan still sees them (`non_tx` includes NULL). No backfill performed on this chunk; if Ryan asks why an old TX lead isn't in Percy's queue, we can do a one-shot UPDATE based on company HQ or Apollo re-enrichment then.
+
+- [x] **Chunk 3: AdminFilterBar component + useDefaultFilters hook + profile endpoint patch**
+  - Date: 2026-06-08 (BC 9975229948)
+  - What changed:
+    - `frontend/components/AdminFilterBar.tsx` (NEW). Controlled component, takes `value: AdminFilters` + `onChange`. Five chips: Territory / State / City / Campaign / Channel. Each chip opens a dropdown (searchable for state/city/campaign). State chip pulls from `GET /admin/leads/distinct?field=state`; City chip pulls scoped to selected state. Campaign chip pulls from `/admin/campaigns`. Channel is hardcoded `email | linkedin | sms`. Clearing State auto-clears City. Optional `lockTerritory` prop hides the territory clear button (for non-admin users; backend enforcement is still the source of truth).
+    - `frontend/lib/useDefaultFilters.ts` (NEW). Hook reads `/api/users/me/profile` on mount, returns `AdminFilters` seeded from the user's `territory_default` + `default_filters`. Returns `undefined` until resolved so the caller can avoid an initial render with the wrong scope. Degrades gracefully when the profile fetch fails or token is missing.
+    - `src/routes/users.ts`: `/me/profile` response now includes `territory_default` and `default_filters` on the user object so the hook above can read them. (Backend tsc clean.)
+  - Verification: frontend `tsc --noEmit` clean, backend `tsc --noEmit` clean. Component will be smoke-tested in chunk 4 when wired into `/outreach`.
+  - Notes: Dropdown closes on outside click via `mousedown` listener with ref-guard. Cities depend on `value.state` via `useEffect` so picking a state refetches scoped cities. The `lockTerritory` prop is wired now but only enforced in chunk 4 (the page reads user role and sets it for non-admins).
+
+- [x] **Chunk 4: Wire AdminFilterBar into Outreach page (Percy provisioning DEFERRED)**
+  - Date: 2026-06-08 (BC 9975229963)
+  - What changed:
+    - `src/services/outreachQueryService.ts`: `getLeadsForToday` now accepts a `TodayFilters` object (`territory | state | city | campaign_id`). Filters injected into both the campaign loop and the unassigned-leads bucket. When a specific `campaign_id` is requested the unassigned bucket is skipped (unassigned leads do not belong to a campaign's scope).
+    - `src/routes/admin/outreachRoutes.ts`: `GET /admin/outreach/today` reads `req.query.territory|state|city|campaign_id` (territory whitelisted to `tx_only | non_tx | all`) and passes through.
+    - `frontend/lib/api.ts`: `getOutreachToday(filters?)` builds a query string from `OutreachTodayFilters`.
+    - `frontend/components/AdminFilterBar.tsx`: added `hiddenChips` prop (`'territory' | 'state' | 'city' | 'campaign' | 'channel'`) so callers can hide non-applicable chips.
+    - `frontend/app/outreach/page.tsx`: imports `AdminFilterBar` + `useDefaultFilters`, manages `filters` state seeded from the user's `territory_default`, renders the bar with `hiddenChips={['channel']}` between the page header and the queue (channel does not filter the today view -- each step has its own channel). Refetch triggers when any of `territory | state | city | campaign_id` changes (uses `useRef` to skip the redundant first render so the initial timer-based fetch is not duplicated).
+  - Verification:
+    - backend + frontend `tsc --noEmit` clean.
+    - Regression sweep on `userManagementService.test.ts` (12) + `leadTerritoryFilter.test.ts` (7) + `pipelineValidation.test.ts` (5): 24/24 pass.
+    - Manual smoke test of the live page deferred until the migrations get run -- the new state/city columns and territory_default are required for the page to render with real data.
+  - Notes (Percy):
+    - Percy account provisioning intentionally NOT done per Ali decision 2026-06-08 ("he still hasn't responded to last week's messages -- don't bug him"). Ali can create Percy's account through `/admin/users` whenever he's ready; the page is in place.
+    - The TX/Percy strategic ask is still tracked in BC 9974727488; Ryan still owes Ali answers on the 5 clarifying questions before cutover (sender address, cutover timing, in-flight TX leads, reporting split, scope).
+  - **Migrations not yet run.** When Ali is ready:
+    ```
+    npx sequelize-cli db:migrate                # local
+    ssh root@95.216.199.47 'cd /opt/colaberry-accelerator && docker compose exec backend npx sequelize-cli db:migrate'   # prod
+    ```
+  - **Migrations run 2026-06-08:** local + prod both applied. Prod path is `/opt/landjet-growth-engine/` (NOT `/opt/colaberry-accelerator/` -- CLAUDE.md is stale on this point). Used `docker cp` to surgically place the two migration files into the running `landjet-backend` container, then ran sequelize-cli inside the container. Schema is ready for whenever the feature code deploys.
+
+- [x] **Ryan Pulse -- single daily exec dashboard email (preview + manual send)**
+  - Date: 2026-06-08 (BC 9975522999)
+  - Why: BC 9946676802 ("verify Cory daily briefing") surfaced that there is no Cory briefing in code at all. The only briefing service today (`morningBriefingService`) is calendar-only and not wired to a cron. Ryan gets zero recurring status email. Ali greenlit a single overall report (skip split-by-domain).
+  - What changed:
+    - `src/services/ryanPulseService.ts` (NEW). `buildPulseSnapshot(now)` pulls yesterday's outbound sends (with cold vs follow-up split via `metadata.step_number`), inbound replies, leads added (split by `lead_source='api'` vs other), meetings booked (approximated via leads currently in `meeting_scheduled` with `updated_at` in window), full pipeline by stage, hot leads (top 6 with temperature='hot'), recent inbound replies for the "needs you" panel, upcoming scheduled sends in the next 24h clustered by half-hour, and a vs-last-week delta on the headline numbers. `renderPulseSubject / renderPulseText / renderPulseHtml` produce the email artifacts. Date windows computed in America/Chicago so "yesterday" matches Ryan's reality across DST.
+    - `src/routes/admin/outreachRoutes.ts`: `GET /admin/pulse` returns `{ snapshot, subject, text, html }` for preview. `POST /admin/pulse/send` sends via the existing `sendOutreachEmail`, defaulting recipient to `ali@colaberry.com` so Ali tests on himself before flipping to Ryan.
+    - `src/services/outreachEmailService.ts`: added optional `html` field to `SendEmailInput`. When provided, sent as `contentType=HTML` directly; takes precedence over the existing `signature`-driven HTML path. Pulse is the first caller; pattern is reusable for future HTML emails.
+    - `src/tests/unit/ryanPulseService.test.ts` (NEW). 11 tests: date-window math (yesterday 24h, last-week 8d gap, next-24 anchor), aggregation happy path (all sections populated), vs-last-week delta math, subject rendering (queued + needs-you bits, all-clear empty state), section ordering in plaintext, em-dash absence (client-facing rule), HTML root structure, empty-state copy.
+  - Verification: `tsc --noEmit` clean. 11/11 Pulse tests pass. Endpoints reachable: `curl -H "Authorization: Bearer $TOKEN" .../api/admin/pulse` returns JSON preview; `curl -X POST -d '{"email":"ali@colaberry.com"}' .../api/admin/pulse/send` sends.
+  - Scheduler wiring: INTENTIONALLY NOT DONE. Ali tests the rendered content on himself first; once verified, wire to `schedulerService.ts` at 7am CT weekdays with recipient flipped to `rlandry@landjet.com`. Adding a `pulse_enabled` flag in env or settings would make the toggle safer than a code change.
+  - Notes:
+    - The Cory dev briefing (technical: tests added, deploys, agent runs, escalations, confidence avg) described in CLAUDE.md is a separate future task. Ryan Pulse is the operational view; Cory Dev Briefing is the engineering view. Different audiences.
+    - "Meetings booked yesterday" uses an `updated_at` proxy on leads currently in `meeting_scheduled`. Will overcount if a meeting was scheduled then moved to another stage same day (rare); will undercount if a meeting was scheduled yesterday and moved out today (also rare). A `lead_pipeline_history` table would make this exact; not building it for v1.
+
+- [x] **Pipeline-stage transitions wired to real signals + 'replied' stage added**
+  - Date: 2026-06-08
+  - Why: Live verification of the Pulse against prod data showed 7,737 of 7,884 leads still in `new_lead` after thousands of sends. Root cause: pipeline_stage only advanced via the CEO intro flow; the bulk cold-outreach + inbox-reply paths never touched it. Ali called the "big fix" so the Pulse numbers mean something.
+  - What changed:
+    - Migration `20260608140000-add-replied-to-pipeline-stages.js` adds a `replied` enum value to `leads.pipeline_stage`, slotted between `contacted` and `meeting_scheduled`. Uses `ALTER TYPE ... ADD VALUE IF NOT EXISTS ... AFTER 'contacted'`. Down() is a no-op (Postgres limitation on enum value removal).
+    - `src/models/Lead.ts`: `PIPELINE_STAGES` and `PIPELINE_ORDER` updated for the new slot.
+    - `src/services/leadService.ts`: `validatePipelineTransition` special-cases the contacted -> meeting_scheduled jump (allowed; not every meeting comes through a tracked reply). All other transitions still enforce the no-more-than-1-step rule.
+    - `src/services/outreachEmailService.ts`: `writeCommLog` now advances `new_lead -> contacted` after a successful live send. Failures and test/simulated sends do not advance. Non-fatal if the update fails.
+    - `src/services/emailReplyService.ts`: new `recordInboxMatches(emails)` function. For each inbox email whose `from_email` matches a Lead by email, idempotently writes a CommunicationLog inbound row (keyed on Outlook message id via `provider_message_id`) and advances pipeline_stage to `replied` (only if currently `new_lead` or `contacted` -- never demotes).
+    - `src/routes/admin/outreachRoutes.ts`: `GET /admin/outreach/inbox` invokes `recordInboxMatches` after fetching and returns `{ matches: { matched, logged_new, advanced } }` alongside the email list. Match recording is non-fatal; the poll succeeds either way.
+    - `src/services/ryanPulseService.ts`: "WHERE WE STAND" row now reads `by_stage.replied` directly instead of the bogus `proposal_sent + negotiation` sum.
+    - `src/scripts/backfillLeadPipelineStages.ts` (NEW). Two-pass backfill: any lead with inbound comm log -> `replied`; any new_lead with outbound live `sent` -> `contacted`. Dry-run default; `--apply` flag to write. Prints stage distribution after.
+  - Verification:
+    - `tsc --noEmit` clean.
+    - 22/22 tests pass (`ryanPulseService.test.ts` updated for new stage shape, new `inboxMatchPipelineHook.test.ts` covers 6 cases on `recordInboxMatches`, `pipelineValidation.test.ts` unaffected).
+    - **Migration ran on prod** via the surgical docker-cp pattern -- both local + prod now have the `replied` enum value.
+    - **Backfill dry-run on prod surfaced a separate finding**: only 44 rows in `communication_logs` (the writeCommLog hook only started populating 2026-05-14), so the backfill has nothing to advance. But **all 7,737 `new_lead` leads have `last_contacted_at = NULL`** -- they are genuinely cold, not stuck. Data is internally consistent. No `--apply` was run because there's nothing to apply.
+    - Pulse re-rendered on prod with the new code: "WHERE WE STAND" now reads `replied 0` directly (was previously summing proposal_sent + negotiation). Numbers all accurate.
+  - Notes:
+    - Hooks fire only when the new code is actually deployed. Today's prod still runs the previous build. Once chunks 1-4 + this fix deploy together, every live send writes a CommunicationLog row + advances pipeline_stage; every inbox poll matches + persists + advances.
+    - The 7,737 cold leads sitting in `new_lead` are a separate finding: that's a real backlog of cold leads the system has not started outreach on. Worth flagging to Ryan as "ready to start sending" volume.
+    - `recordInboxMatches` writes the inbound row even when the lead's pipeline_stage is already past `contacted` (so the audit trail is complete). It just skips the advance in that case.
+
+- [x] **Per-step attachment_path picker UI in campaign sequence editor**
+  - Date: 2026-06-09 (BC 9956633203)
+  - Why: Ryan reported on 2026-06-08 he could not see attachments in the tool. The backend + admin upload page have been live since 2026-06-02 but there was no per-step UI to wire a file to a campaign step -- you had to PATCH the campaign API or edit the DB directly. Closes the loop so Ryan can finish what he started.
+  - What changed:
+    - `frontend/app/campaigns/[id]/page.tsx`: new state `attachmentFiles`, fetched once from `/api/admin/attachments` on mount (same endpoint that powers the existing /admin/attachments page). Non-fatal failure -- dropdown just shows "No attachment" if the fetch errors.
+    - For every step with `channel === 'email'`, render an "Attachment:" dropdown below the step's prompt textarea. Selecting a filename writes to `sequence_steps[i].attachment_path` via the existing `updateStep` helper. Selecting "No attachment" writes `null`. The existing **Save All** button persists `sequence_steps` as a JSONB blob, so the new field flows through with zero backend changes.
+    - Graceful "missing" rendering: if a step has an `attachment_path` that no longer exists in the file list (file was deleted, renamed, etc.), the dropdown still shows the saved value with a "(missing)" label so the user can see what is configured and fix it.
+    - "Upload one" inline link to /admin/attachments when the file list is empty, so first-time setup is one click away.
+    - Hidden for non-email channels (LinkedIn / SMS / Voice). Each step's channel select drives whether the picker appears.
+  - Verification:
+    - Frontend `tsc --noEmit` clean.
+    - Backend already consumes `attachment_path` at send time (outreachRoutes.ts L1253 / L1257; outreachEmailService.ts L21). Sequence-steps JSONB persistence pattern was confirmed via the existing `updateCampaignFields` -> PATCH /admin/campaigns/:id path.
+    - Manual smoke test against running app deferred until deploy. The deploy bundles this + chunks 1-4 + the pipeline-transition big fix + Ryan Pulse + the SendEmailInput html field.
+  - Notes:
+    - Once deployed, the workflow Ryan asked for is one screen: open campaign -> Strategy tab -> step 1 -> pick "LandJet Investor Deck 2026.pdf" from the dropdown -> Save All. The wire-investor-deck-step-1 (BC 9950199326) and wire-intro-deck-step-1 (BC 9950199337) todos then take ~30 seconds each via this UI.
+    - Default empty value is `""` in the select; that maps to `null` on the step (`onChange={e => updateStep(i, 'attachment_path', e.target.value || null)}`).
+
+- [x] **AI hallucination guard on inbound quote response (BookRides flow)**
+  - Date: 2026-06-09 (BC 9946698753)
+  - Why: Per Ali, "when the AI hallucinates ... I would make sure that there is a more deterministic step that doesn't rely on AI, and just kind of follows the calculation." The BookRides parser + pricing engine are already deterministic (regex + pure math). The only place AI is in the loop is the response-drafting stage in `inboundLeadService.generateQuoteResponse`, where GPT writes the email body using pre-computed pricing as context. Three real risks: rounding the grand total, inventing surcharges/perks, or dropping/mis-spelling key facts.
+  - What changed:
+    - `src/services/quoteResponseGuard.ts` (NEW). Exports `validateAiQuoteBody(body, pricing, ctx)` and `renderTemplateQuoteBody(pricing, ctx)`. Validator checks: (1) grand total appears verbatim in the body via `dollarVariants` helper that accepts `$1,247.50` / `$1247.50` / `$1247.5` / `1,247.50` / `$950`-style whole-dollar; (2) customer first name appears; (3) pickup and dropoff city (extracted via `extractCityFromAddress`) appear; (4) no forbidden invented-policy phrases (`complimentary`, `\d+% off`, `discount`, `refund`, `guarantee`, `loyalty`, `wifi/champagne/water bottles`, etc.). Template renderer produces a concierge-tone quote using the EXACT pricing data -- line items rendered as `Label: $amount.00`, grand total verbatim, warnings + approvals sections from pricing engine output.
+    - `src/services/inboundLeadService.ts`: after the AI response is parsed, in priced mode only, the guard runs. If it rejects, the body is replaced with the template version, `template_fallback: true` and `template_fallback_reasons: string[]` are set on the response, a `quote_generator_guard` agent run is recorded, and the rejection (with the first 200 chars of the AI body) is logged at WARN. `QuoteResponse` gains the two new optional fields so the concierge UI can surface a "AI body was rejected -- template used; review tone before sending" banner.
+    - Guard only fires for priced mode. `forward_only` and `faq` modes ship the AI body as-is because they do not embed money the system computed.
+  - Verification:
+    - `tsc --noEmit` clean.
+    - `src/tests/unit/quoteResponseGuard.test.ts` (NEW): 20/20 pass. Coverage: dollar variants (decimal, comma, whole-dollar), city extraction (TX, IA, malformed, undefined), validator (happy path, rounded total, missing name, missing pickup city, missing dropoff city, forbidden phrase variants for `complimentary` / `10% off` / `refundable`, whole-dollar total without decimal), template (line items present, customer name in opener, no forbidden phrases, fallback "Hi there" when no name, warnings + approvals sections).
+  - Notes:
+    - Forbidden-phrase list is intentionally conservative; concierge can extend it via a follow-up if specific perks become legitimate (e.g., if LandJet really does include WiFi, drop the `wifi` regex). All current rejections err on the side of "let a human edit instead of letting hallucination through."
+    - The template is a touch more formal than Lories voice on purpose -- a concierge eyeballing the queue spots fallbacks instantly and either ships them or rewrites them. We could add a "voice-pass" template variant later if Lorie wants warmer fallback copy.
+
+- [x] **Pipeline auto-runner (in-process cron) wired -- BC 9946676796 RESOLVED**
+  - Date: 2026-06-09
+  - Decision (Ali): went with option A (in-process setInterval) per the trade-off summary in the 2026-06-09 chat. Reasons captured in PROGRESS: light current load, one-container-per-stack pattern already established, all operations idempotent so restart mid-cycle is cheap. Graduate to a worker container when outbound load grows.
+  - What changed:
+    - `src/services/pipelineAutoRunner.ts` (NEW). Exports `startPipelineAutoRunner()` and `stopPipelineAutoRunner()`. Three jobs registered when `PIPELINE_AUTORUN=true`:
+      - **Inbound ingest** every 5 min: `ingestEmails(24)` + `processEmails()` from communicationOrchestratorService.
+      - **Outbound scheduler** every 1 min: `claimPendingActions()` then `processAction()` per claimed row.
+      - **Ryan Pulse** daily at 7am America/Chicago, weekdays only: `buildPulseSnapshot()` then `sendOutreachEmail()` with full HTML body via the SendEmailInput.html field added earlier.
+    - Each job has: an overlap guard (skip if previous cycle still running), try/catch so a single failure does not kill the loop, initial random jitter (0-30s ingest, 0-10s scheduler) so multiple backend restarts do not all fire at the same instant, and structured logging at completion with duration + counters.
+    - Off-switches: `PIPELINE_AUTORUN=false` (default) disables everything. Per-job `PIPELINE_DISABLE_INGEST` / `PIPELINE_DISABLE_SCHEDULER` / `PIPELINE_DISABLE_PULSE` for granular control. `PIPELINE_PULSE_RECIPIENT` overrides recipient (defaults to ali@colaberry.com so the verify-before-Ryan window is the default).
+    - Clean shutdown via SIGTERM / SIGINT clears intervals and timeouts.
+    - `src/server.ts`: calls `startPipelineAutoRunner()` AFTER `app.listen()` so an autorunner failure cannot block HTTP boot.
+  - Verification:
+    - `tsc --noEmit` clean.
+    - `src/tests/unit/pipelineAutoRunner.test.ts` (NEW): 12/12 pass. Covers `isAutorunEnabled` strict equality, `jitter` bounds, `msUntilNextPulse` math (correct at 7am, 8am, 6am CDT; always positive for every hour of day), `isWeekendInChicago` (Sat/Sun true, Tue false, TZ boundary correct around midnight Chicago time).
+  - **To turn it on in prod (Ali action when deploying):**
+    1. Add `PIPELINE_AUTORUN=true` to `/opt/landjet-growth-engine/.env`
+    2. Deploy or restart: `docker compose -f docker-compose.production.yml restart backend`
+    3. Tail logs to confirm first-fire jitter then steady cadence: `docker logs -f landjet-backend | grep pipeline\\.`
+    4. When ready for Ryan Pulse to actually flip to him, set `PIPELINE_PULSE_RECIPIENT=rlandry@landjet.com` (default stays on you until then).
+  - Notes:
+    - The Pulse recipient default of `ali@colaberry.com` is intentional. Once content is verified end-to-end on the live data, flip the env var. No code change required.
+    - The ingest job pulls Ali's Gmail filtered by `COMM_MONITORED_SENDERS`. If `info@landjet.com` is in that list (already configured in prod env), this is the path that gets it flowing. Resolves the original BC 9946676796 framing.
+
+- [x] **Ryan 2026-06-08 18:50 CT reply -- vertical merger + weekly sync locked**
+  - Date: 2026-06-09
+  - Source: Gmail message id 19ea96e4a092bde9 on thread "Re: Catching up on your five emails -- 2 decisions and a weekly sync". Archived to BC message board as id 9979283305 per the standing-rule for outside-comms storage.
+  - Three substantive inputs from Ryan:
+    1. Vertical decision (resolved both options Ali floated): *"Let's just call it Real Estate, Construction and Engineering. That will cover it all. Less is more."* Single combined vertical, not (a) Real Estate as its own bucket nor (b) fold-into-Construction.
+    2. Attachment visibility (answer to "which screen?"): two PNG screenshots showing the Outreach dashboard and inside-a-campaign view -- confirms option (b) from Ali's question (campaign step editor expecting the picker). Already resolved by the per-step attachment picker shipped earlier today (BC 9956633203). Once the next deploy lands, Ryan sees the picker.
+    3. Weekly sync: *"Would 10am Central Monday/Wednesday/Friday work for you? Or 9:30 any day of the week?"* Ali picked **Friday 9:30am CT** (the once-a-week option fits the 30-min framing).
+  - Code changes:
+    - `src/services/apolloLeadService.ts`: vertical-guess logic now maps any campaign name containing `construction`, `real estate`, or `engineering` to the single label `Real Estate, Construction and Engineering`. Stored on `Lead.vertical` going forward.
+    - `src/services/outreachQueryService.ts`: new `VERTICAL_PROMPTS['Real Estate, Construction and Engineering']` entry. Copy focuses on travel between project sites/properties/client meetings as a mobile workspace -- the cross-cutting theme that ties real estate, construction GCs/subs, and engineering firms together.
+  - Calendar:
+    - Recurring weekly Google Calendar event created. Friday 2026-06-12 09:30-10:00 America/Chicago, RRULE:FREQ=WEEKLY;BYDAY=FR. Google Meet attached. Ryan rlandry@landjet.com required; Percy pkapadia@landjet.com optional (so he stays in the loop without making it a 3-way standing commitment). Event id `ej3p84i8ivhsu2830tnde1l61k`.
+  - BC:
+    - **9946698782** (Schedule next sync) -- CLOSED. Replaced by the recurring invite. Lorie no longer in the recurring loop -- Ali handles those separately.
+    - **9973261206** (classifier audit 5 misclassified contacts) -- comment posted with Ryan's combined-vertical decision + the resulting per-contact bucket map (2 of 5 now route to the new combined vertical; the other 2 still need Ryan's Business Services confirmation).
+    - **9979283305** (NEW) -- inbound archive of Ryan's reply on the message board per the standing comms-archive rule.
+  - Verification: `tsc --noEmit` clean. Calendar event created successfully (htmlLink + Meet URL in tool response).
+  - Notes:
+    - The 5 misclassified contacts are NOT auto-updated to the new vertical on existing rows yet. Two of them (real estate) bucket cleanly into the combined vertical now that it exists; two others (Business Services / sandler / sparkfoundryww) need Ryan to confirm "Business Services" is the right bucket (not currently in VERTICAL_PROMPTS at all). I will queue the prod UPDATE statement once that's confirmed; the change is one one-shot SQL.
+    - The cross-vertical casing inconsistency in `VERTICAL_PROMPTS` (existing keys MANUFACTURING / INSURANCE / HEALTHCARE are uppercase while `apolloLeadService` stores 'Manufacturing' etc. on the lead) is pre-existing and not addressed here -- means the prompt-by-vertical lookup falls through to DEFAULT_PROMPT today. Worth a separate cleanup; out of scope for this change.
+
+- [x] **Per-campaign step-count cap (BC 9946676854)**
+  - Date: 2026-06-09
+  - Decision (Ali): option B from the 2026-06-09 framing -- hard cap with env-level global default + per-campaign override. Default ceiling: **8 steps**. Reasoning captured in chat: caps protect against runaway sequences (real reputational risk); global default means new campaigns inherit safely; per-campaign override handles the occasional long-nurture exception; 8 leaves headroom for two follow-ups beyond a 6-step cold sequence (the longest Ryan has referenced).
+  - What changed:
+    - `src/services/outreachQueryService.ts:advanceLead`: replaced `maxSteps = steps.length || 3` with `Math.min(steps.length || 3, effectiveCap)`. effectiveCap = `campaign.settings.max_steps` if it is a positive number, else `parseInt(process.env.OUTREACH_MAX_STEPS, 10)` if valid and positive, else 8. The cap is a CEILING -- shorter step counts still win when they are lower than the cap.
+    - `frontend/app/campaigns/[id]/page.tsx`: new `maxSteps` state in the Settings tab. Range slider 0-15 where 0 means "inherit global default (8)". Amber warning surfaces when the value exceeds the global default. Settings tab save serializes 0 as `null` on `settings.max_steps` so the backend falls through to env-level.
+  - Verification:
+    - `tsc --noEmit` clean (backend + frontend).
+    - `src/tests/unit/outreachQueries.test.ts`: 50/50 pass (42 existing + 8 new cap tests). New coverage: env default 8 caps a 10-step campaign at 8, stage 7 -> 8 stays ACTIVE under cap of 8, per-campaign override of 5 wins over 10-step definition, per-campaign override of 12 above env default wins, `OUTREACH_MAX_STEPS` env raises cap globally, non-numeric env falls back to 8, override of 0 falls back to env, shorter step count still wins over higher cap (5 steps + cap 8 -> stops at 5).
+  - **To raise the global ceiling later (Ali):** add `OUTREACH_MAX_STEPS=N` to `/opt/landjet-growth-engine/.env` and restart backend. No code change needed.
+  - Notes:
+    - 8 is intentionally conservative. Today's campaigns mostly run 3-5 steps; the cap is a safety net, not a binding constraint.
+    - Per-campaign override has UI but defaults to "inherit" on every campaign, so existing campaigns get the new behavior automatically once deployed.
+    - The advance-side cap is the only enforcement point. There is no separate "do not enqueue past N" check at queue time -- when `advanceLead` flips the lead to COMPLETED, the lead drops out of the queue naturally on the next `getLeadsForToday` call (it filters on `outreach_status='ACTIVE'`).
+
+### Session: 2026-06-14 -- Ryan phone call (territory model pivot + proposal deliverable)
+
+Ali in Nashville with Ram and Karun; missed the scheduled Friday 2026-06-12 weekly sync. Ryan called during breakfast Saturday morning to walk through three things: refined territory model, Friday 2026-06-19 proposal expectation, and a hint at a per-user priority-control feature. No code changes shipped this session -- entirely planning + BC bookkeeping. Inbound archive saved as BC message 9994743099.
+
+- [x] **Territory model refined per phone call -- architectural pivot from 3-value enum to N-state array (decision logged, refactor BC created)**
+  - Date: 2026-06-14
+  - What Ryan said:
+    - Ryan sees EVERYTHING. No territory filter applied by default. He will control his own priorities to surface what he cares about.
+    - Percy: Texas (unchanged from the 2026-06-08 plan).
+    - Iowa: handed off to a "new guy" Ryan has not yet named.
+    - Future: more owners over time, split by location.
+  - **Implication for shipped code:** the `territory_default` enum (`tx_only | non_tx | all`) we shipped in TX-split chunk 1 does NOT scale. There is no value for `ia_only`, and adding one per state means a schema migration every time. Wrong shape.
+  - **Decision:** deprecate `territory_default` in favor of the existing `default_filters` JSONB column. New shape: `default_filters.states: string[]` (empty / missing = sees all). Already have the column from chunk 1; the migration is just a backfill + a code refactor.
+  - Refactor scoped + queued in BC 9994743108 ("[Arch] Generalize territory model: deprecate territory_default enum, use default_filters.states[]"). ~3 hours backend + frontend + tests. Lands before Iowa owner is provisioned.
+  - **Not a fire drill:** the only user with the enum set today is Ali (`'all'`). Percy / Iowa / future owners do not have accounts yet, so the refactor can land cleanly before any provisioning fires.
+  - No code shipped this session; the refactor BC carries the full plan (file-by-file change list + tests + migration path).
+
+- [x] **Friday 2026-06-19 proposal -- task created with structure outline (BC 9994743106)**
+  - Date: 2026-06-14
+  - Ali committed on the call to deliver a written proposal at the Friday 2026-06-19 weekly sync. Two parts: (a) work done thus far, (b) work going forward. Pricing / commercial framing is Ali's call.
+  - BC todo created with a section-by-section structure outline (work shipped, work next 30 days, decisions Ryan owes) so Ali has a starting scaffold. PROGRESS.md is the authoritative work log to draw from. Due 2026-06-19.
+
+- [x] **Ryan priority-control feature scoped (BC 9994743116)**
+  - Date: 2026-06-14
+  - Ryan: "control my priorities so I see more of what I want to see" in the outreach queue. Today the queue orders by system-computed `priority_score`; Ryan wants a layer he controls on top.
+  - Four design options scoped in the BC todo (per-vertical weighting, manual pinning, per-attribute weighting, hybrid -- recommended). Final design pick happens at the Friday 6/19 sync with Ryan; implementation follows.
+
+- [x] **Iowa owner provisioning queued (BC 9994743113)**
+  - Date: 2026-06-14
+  - Blocked on Ryan providing the new owner's name + email. When unblocked: 7-step provisioning checklist in the BC todo (account, password handoff, Apollo target set, OAuth scope decision, optional per-owner Pulse). Depends on the territory model refactor landing first so the account uses `default_filters.states=['IA']` instead of the deprecated enum.
+
+- [x] **BC 9974727488 (TX/Percy strategy) -- retitled + comment with refined model**
+  - Date: 2026-06-14
+  - Title changed from TX/Percy-specific framing to per-location ownership: `[Ryan/Strategy] Territory model: per-location ownership (Ryan full visibility, Percy TX, IA owner TBD, N-state going forward)`. Description updated with the refined shape; comment added with the call summary. The original 5 clarifying questions are no longer applicable -- they were a strict TX/non-TX framing Ryan walked back.
+
+- [x] **Territory model refactor shipped -- deprecated territory_default enum, switched to default_filters.states[] (BC 9994743108)**
+  - Date: 2026-06-14
+  - Why: 2026-06-14 phone call surfaced that the 3-value enum cannot scale to N owners by location. Ali approved option A from the refactor BC. Refactor lands before any owner provisioning so we never have to back-migrate live user data.
+  - Backend:
+    - `src/services/userManagementService.ts`: dropped TerritoryDefault import + TERRITORIES constant. New exported `normalizeStates(input, label)` helper that uppercases / trims / dedupes / validates 2-letter codes. `createUser` accepts `states?: string[]` and writes to `default_filters.states`; defaults to `[]` (sees all). New `updateUserStates(id, states, adminId)` preserves other `default_filters` keys. The 3-value enum is no longer read or written by service code -- only the DB column still exists (orphaned; cost-free).
+    - `src/routes/admin/userManagementRoutes.ts`: PATCH `/:id/territory` replaced by PATCH `/:id/states` accepting `{ states: ["TX", "IA"] }`. Audit-log action renamed `user.update_states`. Create-endpoint response no longer echoes `territory_default`.
+    - `src/services/leadService.ts`: `LeadFilters.territory` removed. New `states?: string[]` field plus exported helpers `buildStatesPattern(states)` (Postgres iRegexp matching both 2-letter codes and full names case-insensitively, with a known-states fallback table) and `parseStatesParam(query)` (string -> array or array passthrough). The filter logic falls through to "no scope" when `states` is empty.
+    - `src/services/outreachQueryService.ts`: `TodayFilters.territory` replaced with `states`. Removed the TEXAS_PATTERN constant in favor of dynamic `buildStatesPattern`. `getLeadsForToday` dynamically imports buildStatesPattern from leadService to avoid a circular import.
+    - `src/routes/admin/leadRoutes.ts`: query parsing switched from `isTerritory(req.query.territory)` to `parseStatesParam(req.query.states)`.
+    - `src/routes/admin/outreachRoutes.ts:/today`: same.
+    - `src/routes/users.ts /me/profile`: stopped exposing `territory_default`. Frontend reads `default_filters.states` instead.
+  - Frontend:
+    - `frontend/lib/useDefaultFilters.ts`: reads `user.default_filters.states` directly. Seeds the filter state with `{ states }`. Empty array passes through (Ryan's "sees all" mental model).
+    - `frontend/components/AdminFilterBar.tsx`: territory chip + standalone State chip collapsed into a single **States** chip with a multi-select popover (search box, per-row checkbox, "X selected" header, Clear button, Done button). The chip label compresses to `"TX, IA"` or `"TX, IA +2"` when more than two selected. The `lockTerritory` prop renamed `lockStates`. `ChipName` enum updated to `'states' | 'city' | 'campaign' | 'channel'`.
+    - `frontend/app/admin/users/page.tsx`: territory dropdown column replaced with a free-form **States** text input column. Type "TX" or "TX, IA" or leave blank. Onblur (or Enter) triggers a PATCH `/states`. Create-modal swaps the territory dropdown for the same text-input pattern.
+    - `frontend/app/outreach/page.tsx`: passes `filters.states` to `getOutreachToday`. Refetch dependency switched from `filters.territory` to `filters.states?.join(',')` (avoids deep-equality issues).
+    - `frontend/lib/api.ts`: `OutreachTodayFilters.territory` -> `states?: string[]`; helper joins with comma for the query string.
+  - Tests:
+    - `src/tests/unit/userManagementService.test.ts` (rewritten): 16 tests covering `normalizeStates` (uppercases/trims/dedupes, rejects non-array, rejects bad codes), `createUser` (single state, multi-state, empty defaults to "sees all", email normalization, all the prior validation cases), `updateUserStates` (preserves other default_filters keys, normalizes input, accepts empty, rejects bad codes, throws NotFoundError).
+    - `src/tests/unit/leadTerritoryFilter.test.ts` (rewritten): 12 tests covering `listLeads` with omitted/empty/single/multi states, explicit state filter, states-overrides-state precedence, `buildStatesPattern` (single + multi + unknown codes), and `parseStatesParam` (string + array + empty).
+  - Verification: `tsc --noEmit` clean (backend + frontend). 33/33 on the refactored suites. Regression sweep on outreachQueries / inboxMatchPipelineHook / ryanPulseService: 67/67 pass. No regressions.
+  - **DB column status:** `users.territory_default` is orphaned but still exists. No drop migration -- the column has zero ongoing cost and a future drop is reversible. PROGRESS.md note serves as the tombstone.
+  - Notes:
+    - This unblocks the next four queued BCs: Percy provisioning (TX), Iowa owner provisioning (IA when named), account_manager role for Ryan self-serve, and per-owner Cory briefing. All four can now use the N-state shape from day 1.
+    - The `state` (singular) field on filter shapes is still present for cases where a non-default chip filter is wanted (filter to a specific city's state without changing the user's defaults). When both `states[]` and `state` are passed, the array wins.
+
+- [x] **Ryan self-serve account creation -- account_manager role scoped (BC 9994747925)**
+  - Date: 2026-06-14
+  - Extension to the phone call: Ali confirmed Ryan will create new owner accounts himself going forward. Ali sets up the first 2 (Percy = TX, Iowa owner when named). After that, Ryan takes over -- decides when a new owner joins, picks their territory states, creates the login.
+  - Two role-model options scoped in the BC (A: promote Ryan to admin; B: new `account_manager` role). Recommendation: **B** -- separates engine ops (Ali = admin) from team ops (Ryan = account_manager), defensible if anyone else uses Ryan's laptop, forward-compatible when he delegates further, audit trail is cleaner.
+  - `account_manager` capabilities:
+    - List users, create users with `role=manager` or `role=user`
+    - Change role / status / territory on manager / user accounts
+    - Cannot: create admins, demote admins, change Ali's account
+  - Sequencing (now locked):
+    1. Territory refactor lands (BC 9994743108) -- new `default_filters.states[]` shape
+    2. Ali provisions Percy (TX) via /admin/users
+    3. Ali provisions Iowa owner (when Ryan provides the name)
+    4. Validate both accounts (Percy sees TX, Iowa owner sees IA)
+    5. Ship account_manager role + UI gating (~3 hours)
+    6. Provision Ryan's account with `role=account_manager`
+    7. 5-minute walkthrough call with Ryan
+    8. Ryan owns all subsequent owner provisioning
+  - Cross-referenced via BC comments on the IA owner todo (9994743113), proposal todo (9994743106), and arch refactor todo (9994743108) so the sequencing dependency is visible from all directions.
+  - Effort: ~3 hours total (1 hr backend role + service gates, 1 hr frontend gating, 1 hr tests + walkthrough doc).
+  - Definition of Done: role shipped, Ryan provisioned, Ryan has created at least one new owner account via the UI without Ali touching the database.
+
+
+  - Date: 2026-06-09 (BC 9946676796 -- left OPEN with findings)
+  - Finding: the polling code exists but **no cron or worker triggers it in production**. Details:
+    - `src/services/gmailService.ts:fetchNewEmails` uses Gmail OAuth on Alis ali@colaberry.com mailbox (userId 'me') and filters by `process.env.COMM_MONITORED_SENDERS` -- a comma-separated `from:` list. If `info@landjet.com` is in that list (it is set in prod env, value redacted in audit), the function would pull those mails when invoked.
+    - `src/services/communicationOrchestratorService.ts:ingestEmails` calls `fetchNewEmails` and writes rows into `email_threads`.
+    - `src/routes/admin/communicationRoutes.ts:48,63` exposes `/api/admin/communication/...` endpoints that invoke `ingestEmails` and `runPipeline`.
+    - `src/services/schedulerService.ts` and `src/config/schedulerConstants.ts` contain NO references to `ingestEmails` or `runPipeline`. The OUTBOUND `claimPendingActions` is similarly only referenced from `src/scripts/runDemo.ts`, `validateApprovalFlow.ts`, and `validateCeoIntro.ts` -- demo + manual-validation scripts, not a production loop.
+    - Prod docker-compose has three containers: `landjet-backend`, `landjet-frontend`, `landjet-db`. No worker container, no cron container. No external systemd / k8s cron hits the API.
+    - Direct prod query confirms `email_threads` table has 0 rows.
+  - Root cause: the inbound + outbound pipelines are designed to be invoked, but nothing invokes them automatically. This is a missing piece of infrastructure, not a bug in the polling code itself.
+  - Options for Ali to choose between:
+    - **A. In-process setInterval loop** in `landjet-backend` (e.g., every 5 min trigger ingest + every 1 min trigger outbound). Simple, no new containers. Risk: backend restart loses in-flight cycles.
+    - **B. Separate worker container** in docker-compose that runs a node loop calling the same services. Cleaner separation, restart-tolerant, but new deploy artifact.
+    - **C. External cron** on the VPS (systemd timer or cron job) curling the admin endpoints. Simplest. Auth token needs to be a long-lived service token.
+  - Recommendation: **C** for the immediate gap (5-line systemd unit + a timer), **B** if/when the outbound pipeline graduates from manual validation to autonomous operation.
+  - Status: comment posted on BC 9946676796 with these findings; due date bumped to 2026-06-22 awaiting Alis pick on A/B/C.
+
+
 - Completed 10 of 14 demo call action items
 - Fixed auto-login race condition on all pages (root cause of "empty data" issue)
 - Redesigned homepage with live stats, agent grid by department, activity timeline

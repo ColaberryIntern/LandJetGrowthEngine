@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "LandJet LinkedIn Assistant",
+  "version": "1.0.1",
+  "description": "Pastes today's outreach message into LinkedIn connection notes and marks the lead Done when you click Send. Read-only on profiles, never auto-sends.",
+  "author": "Colaberry Inc.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "http://95.216.199.47:4000/*",
+    "http://95.216.199.47:3011/*",
+    "https://growth.landjet.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.linkedin.com/in/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LandJet LinkedIn Assistant"
+  }
+}

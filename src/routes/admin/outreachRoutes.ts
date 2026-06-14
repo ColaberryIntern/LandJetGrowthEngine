@@ -46,13 +46,63 @@ router.post('/briefing/send', authorize('campaigns:write'), async (req: Request,
   }
 });
 
+// --- Ryan Pulse -- single daily exec dashboard ---
+// GET  /admin/pulse           -> JSON snapshot + rendered subject/text/html (preview, no send)
+// POST /admin/pulse/send      -> sends to req.body.email (defaults to ali@colaberry.com during the test window)
+
+router.get('/pulse', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { buildPulseSnapshot, renderPulseSubject, renderPulseText, renderPulseHtml } = await import('../../services/ryanPulseService');
+    const snap = await buildPulseSnapshot();
+    res.json({
+      snapshot: snap,
+      subject: renderPulseSubject(snap),
+      text: renderPulseText(snap),
+      html: renderPulseHtml(snap),
+    });
+  } catch (error) {
+    logger.error('GET /pulse failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
+router.post('/pulse/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { buildPulseSnapshot, renderPulseSubject, renderPulseText, renderPulseHtml } = await import('../../services/ryanPulseService');
+    const { sendOutreachEmail } = await import('../../services/outreachEmailService');
+    // Default recipient is Ali during the verify-before-Ryan window. Explicit
+    // override required to send to anyone else.
+    const to = req.body.email || 'ali@colaberry.com';
+    const snap = await buildPulseSnapshot();
+    const result = await sendOutreachEmail({
+      to,
+      subject: renderPulseSubject(snap),
+      body: renderPulseText(snap),
+      html: renderPulseHtml(snap),
+      from: 'rlandry@landjet.com',
+      senderName: 'LandJet Growth Engine',
+    });
+    res.json({ success: result.success, to, snapshot_date: snap.for_date });
+  } catch (error) {
+    logger.error('POST /pulse/send failed', { error: (error as Error).message });
+    next(error);
+  }
+});
+
 // --- Email Reply Drafts ---
 
 router.get('/inbox', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const { getRecentInboxEmails } = await import('../../services/emailReplyService');
+    const { getRecentInboxEmails, recordInboxMatches } = await import('../../services/emailReplyService');
     const emails = await getRecentInboxEmails();
-    res.json({ emails, total: emails.length });
+    // Persist matches to CommunicationLog + advance pipeline_stage for any
+    // matched lead. Failures inside recordInboxMatches are non-fatal; the
+    // inbox poll still returns its results either way.
+    const matchStats = await recordInboxMatches(emails).catch(err => {
+      logger.warn('Inbox match recording failed (non-fatal)', { error: (err as Error).message });
+      return { matched: 0, logged_new: 0, advanced: 0 };
+    });
+    res.json({ emails, total: emails.length, matches: matchStats });
   } catch (error) {
     logger.error('GET /inbox failed', { error: (error as Error).message });
     next(error);
@@ -694,9 +744,15 @@ router.post('/campaigns/:campaignId/upload', authorize('campaigns:write'), async
 
 // --- Today's Outreach ---
 
-router.get('/today', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/today', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const leads = await getLeadsForToday();
+    const { parseStatesParam } = await import('../../services/leadService');
+    const leads = await getLeadsForToday({
+      states: parseStatesParam(req.query.states),
+      state: req.query.state as string | undefined,
+      city: req.query.city as string | undefined,
+      campaign_id: req.query.campaign_id as string | undefined,
+    });
 
     // Look up sender details once so both this and the lookup endpoint use
     // the same value for the AI prompt (and so any name change propagates).

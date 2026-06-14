@@ -9,11 +9,48 @@ export interface LeadFilters {
   temperature?: string;
   industry?: string;
   lead_source_type?: string;
+  state?: string;
+  city?: string;
+  // Per-user territory scope: list of 2-letter state codes. Empty or missing
+  // = sees all states. Replaces the 3-value territory enum (2026-06-14 refactor)
+  // so we can scale to N owners (Percy TX, Iowa owner, future owners by location)
+  // without a schema change per state.
+  states?: string[];
   search?: string;
   min_score?: number;
   max_score?: number;
   limit?: number;
   offset?: number;
+}
+
+const STATE_FULL_NAMES: Record<string, string> = {
+  TX: 'texas', IA: 'iowa', OK: 'oklahoma', LA: 'louisiana', AR: 'arkansas',
+  KS: 'kansas', NE: 'nebraska', MO: 'missouri', IL: 'illinois', WI: 'wisconsin',
+  MN: 'minnesota', SD: 'south dakota', ND: 'north dakota', NM: 'new mexico',
+};
+
+/**
+ * Build a Postgres iRegexp pattern that matches a state stored either as a
+ * 2-letter code (TX) or as a full name (Texas), case-insensitively. Apollo
+ * returns either format depending on the endpoint, and we store as-is.
+ */
+export function buildStatesPattern(states: string[]): string {
+  const tokens: string[] = [];
+  for (const code of states) {
+    const upper = code.toUpperCase();
+    tokens.push(upper);
+    const full = STATE_FULL_NAMES[upper];
+    if (full) tokens.push(full);
+  }
+  return `^(${tokens.join('|')})$`;
+}
+
+/** Type guard for incoming query-string states[] parameter. */
+export function parseStatesParam(v: unknown): string[] | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (Array.isArray(v)) return v.filter((s): s is string => typeof s === 'string');
+  if (typeof v === 'string') return v.split(',').map(s => s.trim()).filter(Boolean);
+  return undefined;
 }
 
 const VALID_LEAD_SOURCES = ['upload', 'manual', 'import', 'api', 'referral', 'website', 'campaign', 'enrichment'];
@@ -79,6 +116,16 @@ export async function listLeads(filters: LeadFilters) {
   if (filters.temperature) where.temperature = filters.temperature;
   if (filters.industry) where.industry = filters.industry;
   if (filters.lead_source_type) where.lead_source_type = filters.lead_source_type;
+  if (filters.state) where.state = { [Op.iLike]: filters.state };
+  if (filters.city) where.city = { [Op.iLike]: filters.city };
+
+  // Per-user state scope (replaces the old territory enum). Empty array = no
+  // scope applied (sees all). Non-empty = match any of the listed states.
+  // Overrides explicit `state` filter when both are set because the user
+  // default is more specific.
+  if (filters.states && filters.states.length > 0) {
+    where.state = { [Op.iRegexp]: buildStatesPattern(filters.states) };
+  }
 
   if (filters.min_score !== undefined || filters.max_score !== undefined) {
     where.lead_score = {};
@@ -114,8 +161,12 @@ export function validatePipelineTransition(current: PipelineStage, next: Pipelin
     throw new ValidationError(`Invalid pipeline stage: ${next}`);
   }
 
-  // Allow forward progression only (no skipping more than 1 step)
-  if (nextOrder > currentOrder + 1) {
+  // Allow forward progression only (no skipping more than 1 step).
+  // Exception: 'replied' may be skipped (not every meeting comes through a
+  // tracked inbound reply -- e.g., a prospect calls or books on the website).
+  // So `contacted -> meeting_scheduled` is allowed even though replied is in between.
+  const skippingOnlyReplied = current === 'contacted' && next === 'meeting_scheduled';
+  if (nextOrder > currentOrder + 1 && !skippingOnlyReplied) {
     throw new ValidationError(
       `Cannot skip from '${current}' to '${next}'. Next valid stage is '${
         Object.entries(PIPELINE_ORDER).find(([, v]) => v === currentOrder + 1)?.[0]

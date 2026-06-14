@@ -222,6 +222,10 @@ export const VERTICAL_PROMPTS: Record<string, string> = {
   MANUFACTURING: 'Write a short outreach email focused on ROI and productivity. The prospect runs a multi-facility manufacturing operation. Position LandJet as a mobile boardroom that replaces shuttle programs and eliminates productivity loss during executive travel between plants.',
   INSURANCE: 'Write a short outreach email focused on client readiness. The prospect is an insurance broker who travels 150-300 mile corridors regularly. Position LandJet as enabling confidential client conversations and meeting prep during travel time.',
   HEALTHCARE: 'Write a short outreach email focused on efficiency and coordination. The prospect works in a multi-location medical practice. Position LandJet as supporting physician and staff travel between facilities with productive, reliable transport.',
+  // Ryan 2026-06-08: combined vertical covering real estate developers, property management,
+  // construction GCs/subs, and engineering firms. Common thread is regular travel between
+  // project sites, properties, and client meetings -- the LandJet mobile-workspace angle.
+  'Real Estate, Construction and Engineering': 'Write a short outreach email focused on travel between project sites, properties, and client meetings. The prospect runs site visits, property tours, or project oversight that requires regular regional travel. Position LandJet as a mobile workspace that gives back hours of productivity between stops -- calls, reviews, and team check-ins happen in the vehicle instead of waiting at a coffee shop or running back to the office.',
 };
 
 export const DEFAULT_PROMPT = 'Write a short, professional outreach email reconnecting with a past client about premium ground transportation services.';
@@ -365,13 +369,26 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
  * Leads are scored with campaign priority added to their base score.
  * The final queue is sorted by combined score (highest first).
  */
-export async function getLeadsForToday(): Promise<Lead[]> {
+export interface TodayFilters {
+  // Per-user state scope. Empty / missing = sees all. 2026-06-14 refactor:
+  // replaces the 3-value territory enum with an N-state array so the model
+  // scales to per-location ownership (Percy TX, Iowa owner IA, future +).
+  states?: string[];
+  state?: string;
+  city?: string;
+  campaign_id?: string;
+}
+
+export async function getLeadsForToday(filters: TodayFilters = {}): Promise<Lead[]> {
+  const campaignWhere: Record<string, unknown> = { approval_status: 'live' };
+  if (filters.campaign_id) campaignWhere.id = filters.campaign_id;
+
   const campaigns = await Campaign.findAll({
-    where: { approval_status: 'live' },
+    where: campaignWhere,
     attributes: ['id', 'name', 'channel_config', 'settings', 'ai_system_prompt', 'sequence_steps'],
   });
 
-  const readyWhere = {
+  const readyWhere: Record<string, unknown> = {
     outreach_status: 'ACTIVE',
     status: 'active',
     [Op.or]: [
@@ -379,6 +396,13 @@ export async function getLeadsForToday(): Promise<Lead[]> {
       { next_action_at: { [Op.lte]: new Date() } },
     ],
   };
+
+  if (filters.state) readyWhere.state = { [Op.iLike]: filters.state };
+  if (filters.city) readyWhere.city = { [Op.iLike]: filters.city };
+  if (filters.states && filters.states.length > 0) {
+    const { buildStatesPattern } = await import('./leadService');
+    readyWhere.state = { [Op.iRegexp]: buildStatesPattern(filters.states) };
+  }
 
   const allLeads: Lead[] = [];
 
@@ -400,16 +424,20 @@ export async function getLeadsForToday(): Promise<Lead[]> {
     allLeads.push(...leads);
   }
 
-  // Pull unassigned leads (no campaign) with a small limit
-  const unassigned = await Lead.findAll({
-    where: { ...readyWhere, campaign_id: null },
-    limit: 3,
-    order: [['created_at', 'ASC']],
-  });
-  for (const lead of unassigned) {
-    lead.priority_score = computePriorityScore(lead);
+  // Pull unassigned leads (no campaign) with a small limit.
+  // Skip when a specific campaign is requested -- the user asked for one
+  // campaign's queue, unassigned leads do not belong to that scope.
+  if (!filters.campaign_id) {
+    const unassigned = await Lead.findAll({
+      where: { ...readyWhere, campaign_id: null },
+      limit: 3,
+      order: [['created_at', 'ASC']],
+    });
+    for (const lead of unassigned) {
+      lead.priority_score = computePriorityScore(lead);
+    }
+    allLeads.push(...unassigned);
   }
-  allLeads.push(...unassigned);
 
   // Sort by combined score (campaign priority + lead priority)
   allLeads.sort((a, b) => {
@@ -448,7 +476,19 @@ export async function advanceLead(leadId: string): Promise<Lead | null> {
   lead.last_contacted_at = now;
   lead.pipeline_stage = 'contacted';
 
-  const maxSteps = steps.length || 3;
+  // Step-count cap (Ali decision 2026-06-09): env-default + per-campaign override.
+  // The cap is a CEILING -- we never exceed it. If the campaign defines fewer
+  // steps than the cap, we still stop at the last defined step. If the campaign
+  // defines more, the cap wins. Set OUTREACH_MAX_STEPS=N in env to move the
+  // ceiling globally; set campaign.settings.max_steps to override for one campaign.
+  const envDefault = parseInt(process.env.OUTREACH_MAX_STEPS || '8', 10);
+  const safeEnvDefault = Number.isFinite(envDefault) && envDefault > 0 ? envDefault : 8;
+  const campaignOverride = typeof campaignSettings?.max_steps === 'number' && campaignSettings.max_steps > 0
+    ? campaignSettings.max_steps
+    : null;
+  const effectiveCap = campaignOverride ?? safeEnvDefault;
+  const definedSteps = steps.length || 3;
+  const maxSteps = Math.min(definedSteps, effectiveCap);
   if (lead.sequence_stage > maxSteps) {
     lead.outreach_status = 'COMPLETED';
     lead.next_action_at = null;
