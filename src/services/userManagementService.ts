@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Op } from 'sequelize';
 import { User } from '../models/User';
 import { AuditLog } from '../models/AuditLog';
-import { ValidationError, NotFoundError } from '../middleware/errors';
+import { ValidationError, NotFoundError, AuthorizationError } from '../middleware/errors';
 import { logger } from '../config/logger';
 
 export interface UserFilters {
@@ -14,11 +14,23 @@ export interface UserFilters {
   offset?: number;
 }
 
+export type UserRole = 'admin' | 'account_manager' | 'manager' | 'user';
+
+/**
+ * Identifies who is calling. Used for both audit logging and authorization
+ * checks at the service layer (a non-admin caller cannot escalate any account
+ * to admin / account_manager, and cannot touch an existing admin's record).
+ */
+export interface CallerInfo {
+  userId: string;
+  role: string;
+}
+
 export interface CreateUserInput {
   email: string;
   first_name: string;
   last_name: string;
-  role: 'admin' | 'manager' | 'user';
+  role: UserRole;
   // 2026-06-14 territory model refactor: per-user state list lives in
   // default_filters.states (JSONB). Empty / missing = sees all.
   // Replaces the 3-value territory_default enum.
@@ -26,7 +38,11 @@ export interface CreateUserInput {
   default_filters?: Record<string, unknown>;
 }
 
-const ROLES: Array<'admin' | 'manager' | 'user'> = ['admin', 'manager', 'user'];
+const ROLES: UserRole[] = ['admin', 'account_manager', 'manager', 'user'];
+// Roles a non-admin caller is allowed to assign on create or update.
+// account_manager can only ever produce manager/user accounts -- no admins,
+// no other account_managers (escalation would defeat the scoping).
+const NON_ADMIN_ASSIGNABLE_ROLES: UserRole[] = ['manager', 'user'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STATE_RE = /^[A-Z]{2}$/;
 const USER_LIST_ATTRS = ['id', 'email', 'first_name', 'last_name', 'role', 'status', 'default_filters', 'last_login_at', 'created_at'];
@@ -53,6 +69,23 @@ export function normalizeStates(input: unknown, fieldLabel = 'states'): string[]
     if (!out.includes(code)) out.push(code);
   }
   return out;
+}
+
+/**
+ * Helper used by the four mutating service functions to enforce that an
+ * account_manager (or any non-admin) cannot operate on an admin account.
+ * Throws AuthorizationError on violation.
+ */
+function assertCanTouchTarget(target: User, caller: CallerInfo): void {
+  if (caller.role === 'admin') return; // admins can touch anything
+  if (target.role === 'admin') {
+    throw new AuthorizationError('Only admins can modify admin accounts');
+  }
+  // account_manager cannot touch other account_managers either -- only an admin
+  // can change the role / status / states of someone with elevated privileges.
+  if (target.role === 'account_manager') {
+    throw new AuthorizationError('Only admins can modify account_manager accounts');
+  }
 }
 
 export async function listUsers(filters: UserFilters) {
@@ -94,27 +127,33 @@ export async function getUserDetail(id: string) {
   return { user, recentActivity };
 }
 
-export async function updateUserRole(id: string, newRole: string, adminId: string) {
-  const validRoles = ['admin', 'manager', 'user', 'viewer'];
-  if (!validRoles.includes(newRole)) {
-    throw new ValidationError(`Invalid role: ${newRole}. Valid: ${validRoles.join(', ')}`);
+export async function updateUserRole(id: string, newRole: string, caller: CallerInfo) {
+  if (!ROLES.includes(newRole as UserRole)) {
+    throw new ValidationError(`Invalid role: ${newRole}. Valid: ${ROLES.join(', ')}`);
   }
 
   const user = await User.findByPk(id);
   if (!user) throw new NotFoundError('User not found');
 
-  if (user.id === adminId) {
+  if (user.id === caller.userId) {
     throw new ValidationError('Cannot change your own role');
   }
 
-  const oldRole = user.role;
-  await user.update({ role: newRole as any });
+  assertCanTouchTarget(user, caller);
 
-  logger.info('User role updated', { userId: id, oldRole, newRole, by: adminId });
+  // Non-admins cannot escalate anyone to admin or account_manager.
+  if (caller.role !== 'admin' && !NON_ADMIN_ASSIGNABLE_ROLES.includes(newRole as UserRole)) {
+    throw new AuthorizationError(`account_manager cannot assign role "${newRole}"; can only set manager or user`);
+  }
+
+  const oldRole = user.role;
+  await user.update({ role: newRole as UserRole });
+
+  logger.info('User role updated', { userId: id, oldRole, newRole, by: caller.userId, callerRole: caller.role });
   return user;
 }
 
-export async function updateUserStatus(id: string, newStatus: string, adminId: string) {
+export async function updateUserStatus(id: string, newStatus: string, caller: CallerInfo) {
   const validStatuses = ['active', 'inactive', 'suspended'];
   if (!validStatuses.includes(newStatus)) {
     throw new ValidationError(`Invalid status: ${newStatus}. Valid: ${validStatuses.join(', ')}`);
@@ -123,13 +162,15 @@ export async function updateUserStatus(id: string, newStatus: string, adminId: s
   const user = await User.findByPk(id);
   if (!user) throw new NotFoundError('User not found');
 
-  if (user.id === adminId && newStatus !== 'active') {
+  if (user.id === caller.userId && newStatus !== 'active') {
     throw new ValidationError('Cannot deactivate your own account');
   }
 
-  await user.update({ status: newStatus as any });
+  assertCanTouchTarget(user, caller);
 
-  logger.info('User status updated', { userId: id, newStatus, by: adminId });
+  await user.update({ status: newStatus as 'active' | 'inactive' | 'suspended' });
+
+  logger.info('User status updated', { userId: id, newStatus, by: caller.userId, callerRole: caller.role });
   return user;
 }
 
@@ -137,19 +178,21 @@ export async function updateUserStatus(id: string, newStatus: string, adminId: s
  * Update the state list a user defaults to filtering by. Empty array = sees all.
  * Replaces the deprecated updateUserTerritory enum-based version (2026-06-14 refactor).
  */
-export async function updateUserStates(id: string, statesInput: unknown, adminId: string) {
+export async function updateUserStates(id: string, statesInput: unknown, caller: CallerInfo) {
   const states = normalizeStates(statesInput, 'states');
   const user = await User.findByPk(id);
   if (!user) throw new NotFoundError('User not found');
 
+  assertCanTouchTarget(user, caller);
+
   const current = (user.default_filters || {}) as Record<string, unknown>;
   const next = { ...current, states };
   await user.update({ default_filters: next });
-  logger.info('User default_filters.states updated', { userId: id, states, by: adminId });
+  logger.info('User default_filters.states updated', { userId: id, states, by: caller.userId, callerRole: caller.role });
   return user;
 }
 
-export async function createUser(input: CreateUserInput, adminId: string): Promise<{ user: User; tempPassword: string }> {
+export async function createUser(input: CreateUserInput, caller: CallerInfo): Promise<{ user: User; tempPassword: string }> {
   const normalizedEmail = (input.email ?? '').trim().toLowerCase();
   if (!normalizedEmail || !EMAIL_RE.test(normalizedEmail)) {
     throw new ValidationError('Invalid email');
@@ -159,6 +202,10 @@ export async function createUser(input: CreateUserInput, adminId: string): Promi
   }
   if (!ROLES.includes(input.role)) {
     throw new ValidationError(`Invalid role: ${input.role}. Valid: ${ROLES.join(', ')}`);
+  }
+  // Non-admins cannot CREATE admin or account_manager accounts.
+  if (caller.role !== 'admin' && !NON_ADMIN_ASSIGNABLE_ROLES.includes(input.role)) {
+    throw new AuthorizationError(`account_manager cannot create accounts with role "${input.role}"; can only create manager or user`);
   }
   const states = normalizeStates(input.states, 'states');
 
@@ -185,19 +232,29 @@ export async function createUser(input: CreateUserInput, adminId: string): Promi
     default_filters,
   });
 
-  logger.info('User created', { userId: user.id, email: normalizedEmail, role: input.role, states, by: adminId });
+  logger.info('User created', { userId: user.id, email: normalizedEmail, role: input.role, states, by: caller.userId, callerRole: caller.role });
   return { user, tempPassword };
 }
 
 export async function getUserStats() {
-  const [total, active, inactive, suspended, admins, managers] = await Promise.all([
+  const [total, active, inactive, suspended, admins, accountManagers, managers] = await Promise.all([
     User.count(),
     User.count({ where: { status: 'active' } }),
     User.count({ where: { status: 'inactive' } }),
     User.count({ where: { status: 'suspended' } }),
     User.count({ where: { role: 'admin' } }),
+    User.count({ where: { role: 'account_manager' } }),
     User.count({ where: { role: 'manager' } }),
   ]);
 
-  return { total, active, inactive, suspended, admins, managers, users: total - admins - managers };
+  return {
+    total,
+    active,
+    inactive,
+    suspended,
+    admins,
+    account_managers: accountManagers,
+    managers,
+    users: total - admins - accountManagers - managers,
+  };
 }

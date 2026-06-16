@@ -4,20 +4,28 @@ import { authorize } from '../../middleware/authorize';
 import {
   listUsers, getUserDetail, updateUserRole,
   updateUserStatus, updateUserStates, createUser, getUserStats,
+  CallerInfo,
 } from '../../services/userManagementService';
 import { createAuditLog } from '../../services/auditLogService';
 
 const router = Router();
 router.use(authenticate);
 
-router.get('/stats', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+// Helper: build the caller info object from the authenticated request. The
+// shape is shared across every mutating endpoint so the service layer can
+// enforce its caller-role rules in one place.
+function caller(req: Request): CallerInfo {
+  return { userId: req.user!.userId, role: req.user!.role };
+}
+
+router.get('/stats', authorize('users:read'), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await getUserStats();
     res.json(stats);
   } catch (error) { next(error); }
 });
 
-router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', authorize('users:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await listUsers({
       role: req.query.role as string,
@@ -30,37 +38,37 @@ router.get('/', authorize('campaigns:read'), async (req: Request, res: Response,
   } catch (error) { next(error); }
 });
 
-router.get('/:id', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', authorize('users:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await getUserDetail(req.params.id as string);
     res.json(result);
   } catch (error) { next(error); }
 });
 
-router.patch('/:id/role', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:id/role', authorize('users:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await updateUserRole(req.params.id as string, req.body.role, req.user!.userId);
+    const user = await updateUserRole(req.params.id as string, req.body.role, caller(req));
     await createAuditLog({
       userId: req.user!.userId,
       action: 'user.update_role',
       entityType: 'user',
       entityId: user.id,
-      newValue: { role: req.body.role },
+      newValue: { role: req.body.role, by_role: req.user!.role },
       ipAddress: req.ip || null,
     });
     res.json({ user });
   } catch (error) { next(error); }
 });
 
-router.post('/', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', authorize('users:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { user, tempPassword } = await createUser(req.body, req.user!.userId);
+    const { user, tempPassword } = await createUser(req.body, caller(req));
     await createAuditLog({
       userId: req.user!.userId,
       action: 'user.create',
       entityType: 'user',
       entityId: user.id,
-      newValue: { email: user.email, role: user.role, default_filters: user.default_filters },
+      newValue: { email: user.email, role: user.role, default_filters: user.default_filters, by_role: req.user!.role },
       ipAddress: req.ip || null,
     });
     res.status(201).json({
@@ -81,30 +89,30 @@ router.post('/', authorize('campaigns:write'), async (req: Request, res: Respons
 
 // PATCH /:id/states accepts { states: ["TX", "IA"] } and writes to default_filters.states.
 // 2026-06-14 refactor: replaces the old /:id/territory enum-based endpoint.
-router.patch('/:id/states', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:id/states', authorize('users:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await updateUserStates(req.params.id as string, req.body.states, req.user!.userId);
+    const user = await updateUserStates(req.params.id as string, req.body.states, caller(req));
     await createAuditLog({
       userId: req.user!.userId,
       action: 'user.update_states',
       entityType: 'user',
       entityId: user.id,
-      newValue: { states: (user.default_filters as Record<string, unknown>)?.states },
+      newValue: { states: (user.default_filters as Record<string, unknown>)?.states, by_role: req.user!.role },
       ipAddress: req.ip || null,
     });
     res.json({ user });
   } catch (error) { next(error); }
 });
 
-router.patch('/:id/status', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:id/status', authorize('users:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await updateUserStatus(req.params.id as string, req.body.status, req.user!.userId);
+    const user = await updateUserStatus(req.params.id as string, req.body.status, caller(req));
     await createAuditLog({
       userId: req.user!.userId,
       action: 'user.update_status',
       entityType: 'user',
       entityId: user.id,
-      newValue: { status: req.body.status },
+      newValue: { status: req.body.status, by_role: req.user!.role },
       ipAddress: req.ip || null,
     });
     res.json({ user });

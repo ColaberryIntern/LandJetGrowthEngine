@@ -8,7 +8,7 @@ export interface UserAttributes {
   password_hash: string;
   first_name: string;
   last_name: string;
-  role: 'admin' | 'manager' | 'user';
+  role: 'admin' | 'account_manager' | 'manager' | 'user';
   status: 'active' | 'inactive' | 'suspended';
   email_verified: boolean;
   verification_token: string | null;
@@ -37,7 +37,7 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare password_hash: string;
   declare first_name: string;
   declare last_name: string;
-  declare role: 'admin' | 'manager' | 'user';
+  declare role: 'admin' | 'account_manager' | 'manager' | 'user';
   declare status: 'active' | 'inactive' | 'suspended';
   declare email_verified: boolean;
   declare verification_token: string | null;
@@ -76,7 +76,7 @@ export function initUserModel(sequelize: Sequelize): typeof User {
         allowNull: false,
       },
       role: {
-        type: DataTypes.ENUM('admin', 'manager', 'user'),
+        type: DataTypes.ENUM('admin', 'account_manager', 'manager', 'user'),
         allowNull: false,
         defaultValue: 'user',
       },

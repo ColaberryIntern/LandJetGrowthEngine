@@ -667,6 +667,33 @@ Ali in Nashville with Ram and Karun; missed the scheduled Friday 2026-06-12 week
     - This unblocks the next four queued BCs: Percy provisioning (TX), Iowa owner provisioning (IA when named), account_manager role for Ryan self-serve, and per-owner Cory briefing. All four can now use the N-state shape from day 1.
     - The `state` (singular) field on filter shapes is still present for cases where a non-default chip filter is wanted (filter to a specific city's state without changing the user's defaults). When both `states[]` and `state` are passed, the array wins.
 
+- [x] **Ryan self-serve account creation shipped -- account_manager role + UI gating (BC 9994747925)**
+  - Date: 2026-06-15
+  - Backend:
+    - Migration `20260615180000-add-account-manager-role.js` adds `account_manager` to the `enum_users_role` enum via `ALTER TYPE ADD VALUE IF NOT EXISTS`. Applied local + prod via the surgical docker-cp pattern.
+    - `src/models/User.ts`: role union extended to `'admin' | 'account_manager' | 'manager' | 'user'`. Sequelize ENUM updated to match.
+    - `src/config/roles.ts`: new `account_manager` role with permissions `users:read`, `users:write`, plus `leads:read | campaigns:read | analytics:read | notifications:read` for general read access.
+    - `src/services/userManagementService.ts`:
+      - New `CallerInfo` type (`{ userId, role }`) replaces the bare `adminId: string` arg on every mutating function. Routes now pass the caller's identity AND role through.
+      - New `assertCanTouchTarget()` helper enforces: only admins can modify admins or other account_managers. Used by `updateUserRole`, `updateUserStatus`, `updateUserStates`.
+      - `createUser` refuses `role=admin` or `role=account_manager` when caller is not an admin -- account_manager can only create `manager` or `user` accounts.
+      - `updateUserRole` refuses promotion to admin or account_manager when caller is not an admin.
+      - `getUserStats` extended to break out `account_managers` count alongside `admins` / `managers` / `users`.
+    - `src/routes/admin/userManagementRoutes.ts`: switched all endpoints from `authorize('campaigns:read'/'campaigns:write')` to `authorize('users:read'/'users:write')`. Tighter scope -- regular managers no longer have implicit user-management access. Caller info threaded into every service call via a `caller(req)` helper. Audit logs include `by_role`.
+  - Frontend:
+    - `frontend/app/admin/users/page.tsx`: fetches the current user's role on mount from `/me/profile`. Drives all UI gating:
+      - Create-modal role dropdown shows admin + account_manager + manager + user when caller is admin; only manager + user when caller is account_manager. Plus a contextual help line.
+      - Inline role dropdowns on each user row use the same restricted list when caller is account_manager.
+      - Rows where the target is admin or account_manager show their role/status/states as read-only spans (greyed background) when caller is account_manager.
+    - Backend remains the source of truth; the gating is a UX guard, not a security boundary (any tampered API call still gets rejected at the service layer).
+  - Tests: `src/tests/unit/userManagementService.test.ts` extended to 40 tests. New caller-role scenarios:
+    - `createUser`: admin creates admin / account_manager (both succeed); account_manager creates manager / user (both succeed); account_manager CANNOT create admin or account_manager (both AuthorizationError).
+    - `updateUserRole`: admin promotes to admin (ok); account_manager promotes to manager (ok); account_manager CANNOT promote to admin / account_manager / touch an admin / touch another account_manager (all AuthorizationError). Self-role-change blocked.
+    - `updateUserStatus`: same shape -- admin can suspend anyone, account_manager can suspend non-admin/non-amgr targets, blocked otherwise.
+    - `updateUserStates`: admin can change any; account_manager can change manager/user but not admin or other account_managers.
+  - Verification: `tsc --noEmit` clean (backend + frontend). 40/40 userManagementService tests pass. Migration applied local + prod.
+  - **Ryan provisioning path now ready:** once Ali decides on Ryan's email (probably `rlandry@landjet.com` per the canonical-sender confirmation), he creates Ryan via `POST /admin/users` with `role: 'account_manager'` and `states: []` (sees all). Hands off the temp password. Ryan logs in, opens `/admin/users`, and can create Percy (TX) / Iowa owner (when named) / any future territory owner himself.
+
 - [x] **Ryan self-serve account creation -- account_manager role scoped (BC 9994747925)**
   - Date: 2026-06-14
   - Extension to the phone call: Ali confirmed Ryan will create new owner accounts himself going forward. Ali sets up the first 2 (Percy = TX, Iowa owner when named). After that, Ryan takes over -- decides when a new owner joins, picks their territory states, creates the login.

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ensureAuth } from '@/lib/auth';
 
-type Role = 'admin' | 'manager' | 'user';
+type Role = 'admin' | 'account_manager' | 'manager' | 'user';
 type Status = 'active' | 'inactive' | 'suspended';
 
 interface UserRow {
@@ -25,7 +25,10 @@ interface ListResponse { users: UserRow[]; total: number; }
 
 const API_BASE = '/api/admin/user-management';
 
-const ROLE_OPTIONS: Role[] = ['admin', 'manager', 'user'];
+const ROLE_OPTIONS: Role[] = ['admin', 'account_manager', 'manager', 'user'];
+// What an account_manager can see / assign. Excludes admin + account_manager
+// so they cannot escalate. Mirrors the backend caller-role checks.
+const ROLE_OPTIONS_FOR_ACCOUNT_MANAGER: Role[] = ['manager', 'user'];
 const STATUS_OPTIONS: Status[] = ['active', 'inactive', 'suspended'];
 
 const STATUS_BADGE: Record<Status, string> = {
@@ -88,6 +91,32 @@ export default function UsersPage() {
   // Track in-progress text edits for the states column so the user can type
   // freely before we PATCH. Empty key = not editing.
   const [statesDraft, setStatesDraft] = useState<Record<string, string>>({});
+
+  // Current user's role -- drives the UI gating. account_manager users
+  // cannot create or edit admin / account_manager accounts. Backend enforces
+  // the same rules; this is a UX guard, not the security boundary.
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const r = await fetch('/api/users/me/profile', { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const data = await r.json() as { user: { role: Role } };
+        setCurrentUserRole(data.user.role);
+      } catch { /* non-fatal: gating just defaults to most-restrictive */ }
+    })();
+  }, []);
+
+  const isAdmin = currentUserRole === 'admin';
+  const availableRoles = isAdmin ? ROLE_OPTIONS : ROLE_OPTIONS_FOR_ACCOUNT_MANAGER;
+  function canEditRow(target: UserRow): boolean {
+    if (isAdmin) return true;
+    // account_manager cannot touch admin or other account_manager accounts
+    return target.role !== 'admin' && target.role !== 'account_manager';
+  }
 
   async function fetchList() {
     setLoading(true);
@@ -237,34 +266,51 @@ export default function UsersPage() {
                 const current = getStates(u);
                 const draft = statesDraft[u.id];
                 const displayValue = draft !== undefined ? draft : current.join(', ');
+                const editable = canEditRow(u);
+                // The inline role dropdown only shows roles the caller is allowed
+                // to assign. account_managers never see admin / account_manager
+                // in the picker.
+                const rowRoles = isAdmin ? ROLE_OPTIONS : ROLE_OPTIONS_FOR_ACCOUNT_MANAGER;
                 return (
-                  <tr key={u.id} className="hover:bg-gray-50">
+                  <tr key={u.id} className={`hover:bg-gray-50 ${!editable ? 'bg-gray-50/60' : ''}`}>
                     <td className="px-5 py-3 font-mono text-xs text-gray-900">{u.email}</td>
                     <td className="px-5 py-3 text-xs text-gray-700">{u.first_name} {u.last_name}</td>
                     <td className="px-5 py-3 text-xs">
-                      <select value={u.role}
-                        onChange={e => patchField(u.id, 'role', e.target.value)}
-                        disabled={saving && savingField?.field === 'role'}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs">
-                        {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
+                      {editable ? (
+                        <select value={u.role}
+                          onChange={e => patchField(u.id, 'role', e.target.value)}
+                          disabled={saving && savingField?.field === 'role'}
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs">
+                          {rowRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      ) : (
+                        <span className="text-gray-700">{u.role}</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-xs">
-                      <select value={u.status}
-                        onChange={e => patchField(u.id, 'status', e.target.value)}
-                        disabled={saving && savingField?.field === 'status'}
-                        className={`rounded px-2 py-1 text-xs ${STATUS_BADGE[u.status]} border-0`}>
-                        {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      {editable ? (
+                        <select value={u.status}
+                          onChange={e => patchField(u.id, 'status', e.target.value)}
+                          disabled={saving && savingField?.field === 'status'}
+                          className={`rounded px-2 py-1 text-xs ${STATUS_BADGE[u.status]} border-0`}>
+                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      ) : (
+                        <span className={`rounded px-2 py-1 text-xs ${STATUS_BADGE[u.status]}`}>{u.status}</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-xs">
-                      <input type="text" value={displayValue}
-                        placeholder="empty = sees all"
-                        onChange={e => setStatesDraft(prev => ({ ...prev, [u.id]: e.target.value }))}
-                        onBlur={() => commitStatesDraft(u)}
-                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                        disabled={saving && savingField?.field === 'states'}
-                        className="w-32 rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono uppercase" />
+                      {editable ? (
+                        <input type="text" value={displayValue}
+                          placeholder="empty = sees all"
+                          onChange={e => setStatesDraft(prev => ({ ...prev, [u.id]: e.target.value }))}
+                          onBlur={() => commitStatesDraft(u)}
+                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                          disabled={saving && savingField?.field === 'states'}
+                          className="w-32 rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono uppercase" />
+                      ) : (
+                        <span className="text-gray-600 font-mono">{current.length > 0 ? current.join(', ') : 'all'}</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-xs text-gray-600">{fmtDate(u.last_login_at)}</td>
                   </tr>
@@ -305,8 +351,11 @@ export default function UsersPage() {
                 <select value={createForm.role}
                   onChange={e => setCreateForm({ ...createForm, role: e.target.value as Role })}
                   className="w-full rounded border border-gray-300 px-3 py-2 text-sm">
-                  {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  {availableRoles.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
+                {!isAdmin && (
+                  <p className="mt-1 text-xs text-gray-500">As an account_manager you can create manager or user accounts. Only admins can create admins or other account_managers.</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Default states</label>

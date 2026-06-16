@@ -8,6 +8,22 @@ export const ROLES: Record<string, RoleDefinition> = {
     name: 'admin',
     permissions: ['*'],
   },
+  // 2026-06-14: scoped role for Ryan-style team admins. Can manage non-admin
+  // user accounts (create, edit role/status/states for manager + user roles)
+  // but cannot touch admins or escalate anyone to admin/account_manager.
+  // Enforced both at the route layer (users:read/users:write permissions)
+  // and at the service layer (caller-role checks in userManagementService).
+  account_manager: {
+    name: 'account_manager',
+    permissions: [
+      'users:read',
+      'users:write',
+      'leads:read',
+      'campaigns:read',
+      'analytics:read',
+      'notifications:read',
+    ],
+  },
   manager: {
     name: 'manager',
     permissions: [
