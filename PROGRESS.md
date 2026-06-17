@@ -1,7 +1,29 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-06-08
+Last updated: 2026-06-17
+
+---
+
+## Session: 2026-06-17
+
+- [x] **Auto-runner queue diagnosis (BC 10008606590)**
+  - Date: 2026-06-17
+  - What changed: Investigated why 0 outbound sends fired in the 24 hours after PIPELINE_AUTORUN=true. No code change; structured findings emailed via Mandrill.
+  - Verification: pipeline.pulse log (`success:true, to:ali@colaberry.com` at 2026-06-17 12:00 UTC) confirms Pulse path is healthy; SELECT count(*) FROM scheduled_emails = 0 each minute; SELECT count(*) FROM leads WHERE next_action_at < now() = 124.
+  - Notes: Root cause is in [pipelineAutoRunner.ts](src/services/pipelineAutoRunner.ts) -- only 3 jobs registered (ingest, scheduler, pulse). Missing 4th job that finds leads with overdue next_action_at and writes to scheduled_emails. The sequence-engine query exists at [sequenceEngineService.ts:56](src/services/sequenceEngineService.ts#L56) but is not wired into the cron loop. Not fixed in this session; flagged as the next thing to wire.
+
+- [x] **Mandrill kit installed for Ali-side internal comms (BC 10008606590, BC 10008611940)**
+  - Date: 2026-06-17
+  - What changed: Pulled the 7-file Mandrill setup kit from the Ali Personal BC vault (todo 9982045828) into scripts/mandrill/. Added scripts/mandrill-send-html.js wrapper that takes any HTML report + a BC ticket and sends via Mandrill SMTP with branded signature + em-dash strip + BC comment auto-attach. Includes SVG-to-PNG rasterization via sharp (Gmail strips inline svg). Added nodemailer + sharp to package.json.
+  - Verification: Mandrill IDs e878e7e9...@colaberry.com (diagnosis), b363bfdd...@colaberry.com (Ryan report v3), d291742e...@colaberry.com (Ryan report v3 with rasterized charts) -- all delivered to Ali's inbox; BC comments auto-posted on todos 10008606590 + 10008611940.
+  - Notes: Scope is Ali-side internal reports only. Ryan's outbound to leads continues to use the existing send path. Memory file written at reference_mandrill_kit_landjet.md so future sessions reach for Mandrill (not Gmail OAuth) for Ali-side comms.
+
+- [x] **Friday weekly briefing locked in (BC 10008641010)**
+  - Date: 2026-06-17
+  - What changed: Built src/services/weeklyBriefingService.ts + src/services/weeklyBriefingRenderer.ts. Added 4th job to pipelineAutoRunner.ts that fires every Friday 9:15 AM CT (15 min before the recurring 9:30 call with Ryan). Sends to ali@colaberry.com, rlandry@landjet.com, pkapadia@landjet.com. Same v3 report design Ali signed off on, with charts rasterized to PNG via sharp.
+  - Verification: `npx tsc --noEmit` clean; msUntilNextFridayBriefing() smoke test confirms next fire = Friday 2026-06-19 at 9:15 AM CT.
+  - Notes: Requires MANDRILL_API_KEY in the backend container env. Optional BASECAMP_ACCESS_TOKEN posts a comment on todo 10008641010 each Friday; token expires 2026-06-23 so this side-effect will silently fail after that until manually refreshed.
 
 ---
 

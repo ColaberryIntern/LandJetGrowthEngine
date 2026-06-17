@@ -38,10 +38,15 @@ import { logger } from '../config/logger';
 const INGEST_INTERVAL_MS = 5 * 60 * 1000;
 const SCHEDULER_INTERVAL_MS = 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_WEEK_MS = 7 * ONE_DAY_MS;
 const PULSE_TZ = 'America/Chicago';
 const PULSE_HOUR_LOCAL = 7;
+// Friday pre-call briefing: 9:15 AM CT, 15 min before the recurring 9:30 call.
+const BRIEFING_HOUR_LOCAL = 9;
+const BRIEFING_MIN_LOCAL = 15;
+const BRIEFING_DOW_NAME = 'Fri';
 
-const running = { ingest: false, scheduler: false, pulse: false };
+const running = { ingest: false, scheduler: false, pulse: false, briefing: false };
 const timers: ReturnType<typeof setInterval>[] = [];
 const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -76,6 +81,32 @@ export function msUntilNextPulse(now: Date = new Date()): number {
 export function isWeekendInChicago(now: Date = new Date()): boolean {
   const day = new Intl.DateTimeFormat('en-US', { timeZone: PULSE_TZ, weekday: 'short' }).format(now);
   return day === 'Sat' || day === 'Sun';
+}
+
+/**
+ * Milliseconds from `now` until the next Friday 9:15 AM America/Chicago. If
+ * today is Friday and 9:15 AM has not yet passed, returns the gap until today's
+ * 9:15. Otherwise returns the gap until next Friday.
+ */
+export function msUntilNextFridayBriefing(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: PULSE_TZ,
+    weekday: 'short', hour: 'numeric', minute: 'numeric', second: 'numeric',
+    hour12: false,
+  }).formatToParts(now);
+  const weekday = parts.find(p => p.type === 'weekday')?.value ?? 'Mon';
+  const hh = Number(parts.find(p => p.type === 'hour')?.value ?? '0');
+  const mm = Number(parts.find(p => p.type === 'minute')?.value ?? '0');
+  const ss = Number(parts.find(p => p.type === 'second')?.value ?? '0');
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const todayIdx = DOW.indexOf(weekday);
+  const friIdx = DOW.indexOf(BRIEFING_DOW_NAME);
+  const nowMsOfDay = hh * 3600000 + mm * 60000 + ss * 1000;
+  const targetMsOfDay = BRIEFING_HOUR_LOCAL * 3600000 + BRIEFING_MIN_LOCAL * 60000;
+
+  let daysUntilFri = (friIdx - todayIdx + 7) % 7;
+  if (daysUntilFri === 0 && nowMsOfDay >= targetMsOfDay) daysUntilFri = 7;
+  return daysUntilFri * ONE_DAY_MS + (targetMsOfDay - nowMsOfDay);
 }
 
 async function runIngest(): Promise<void> {
@@ -129,6 +160,34 @@ async function runScheduler(): Promise<void> {
   }
 }
 
+async function runWeeklyBriefing(): Promise<void> {
+  if (running.briefing) {
+    logger.info('pipeline.briefing skipped: previous cycle still running');
+    return;
+  }
+  if (process.env.PIPELINE_DISABLE_BRIEFING === 'true') {
+    logger.info('pipeline.briefing skipped: PIPELINE_DISABLE_BRIEFING=true');
+    return;
+  }
+  running.briefing = true;
+  const start = Date.now();
+  try {
+    const { sendWeeklyBriefing } = await import('./weeklyBriefingService');
+    const result = await sendWeeklyBriefing();
+    logger.info('pipeline.briefing complete', {
+      duration_ms: Date.now() - start,
+      mandrill_id: result.messageId,
+      recipients: result.recipients,
+      chart_count: result.chartCount,
+      bc_comment_url: result.bcCommentUrl,
+    });
+  } catch (e) {
+    logger.error('pipeline.briefing failed (non-fatal)', { error: (e as Error).message });
+  } finally {
+    running.briefing = false;
+  }
+}
+
 async function runPulse(): Promise<void> {
   if (running.pulse) return;
   if (process.env.PIPELINE_DISABLE_PULSE === 'true') return;
@@ -173,6 +232,7 @@ export function startPipelineAutoRunner(): void {
     ingest_interval_ms: INGEST_INTERVAL_MS,
     scheduler_interval_ms: SCHEDULER_INTERVAL_MS,
     pulse_first_fire_ms: msUntilNextPulse(),
+    briefing_first_fire_ms: msUntilNextFridayBriefing(),
   });
 
   // Inbound ingest. Initial 0-30s jitter so multiple restarts don't fire at once.
@@ -195,6 +255,13 @@ export function startPipelineAutoRunner(): void {
     void runPulse();
     timers.push(setInterval(() => { void runPulse(); }, ONE_DAY_MS));
   }, untilPulse));
+
+  // Friday pre-call briefing: next Friday 9:15 AM CT, then weekly.
+  const untilBriefing = msUntilNextFridayBriefing();
+  timeouts.push(setTimeout(() => {
+    void runWeeklyBriefing();
+    timers.push(setInterval(() => { void runWeeklyBriefing(); }, ONE_WEEK_MS));
+  }, untilBriefing));
 
   process.on('SIGTERM', stopPipelineAutoRunner);
   process.on('SIGINT', stopPipelineAutoRunner);
