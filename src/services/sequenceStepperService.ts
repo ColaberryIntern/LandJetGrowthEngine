@@ -22,8 +22,6 @@
  */
 
 import { Op, QueryTypes, WhereOptions } from 'sequelize';
-import { Lead } from '../models/Lead';
-import { Campaign } from '../models/Campaign';
 import { ScheduledEmail, ScheduledEmailAttributes, ScheduledEmailCreationAttributes } from '../models/ScheduledEmail';
 import { getSequelize } from '../config/database';
 import { logger } from '../config/logger';
@@ -93,13 +91,29 @@ export function nextStepIndex(pipelineStage: string): number | null {
  * gated to the safe pipeline_stage values. Returns the raw rows + their
  * campaign so the caller can compute previews.
  */
-async function findOverdueLeads(limit: number): Promise<Array<{ lead: Lead; campaign: Campaign }>> {
-  // Raw SQL for the discovery query -- the rest of the service touches Sequelize
-  // models normally. This sidesteps a Sequelize attribute-mapping issue on the
-  // Lead model in this codebase and matches the pattern in usageStatsService.
+interface LeadLite {
+  id: number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  pipeline_stage: string;
+  next_action_at: Date | null;
+  campaign_id: string | null;
+}
+
+interface CampaignLite {
+  id: string;
+  name: string;
+  sequence_id: string | null;
+  sequence_steps: SequenceStep[];
+}
+
+async function findOverdueLeads(limit: number): Promise<Array<{ lead: LeadLite; campaign: CampaignLite }>> {
   const sequelize = getSequelize();
-  const rows = await sequelize.query<{ id: number }>(
-    `SELECT id FROM leads
+  const leads = await sequelize.query<LeadLite>(
+    `SELECT id, email, first_name, last_name, pipeline_stage::text AS pipeline_stage,
+            next_action_at, campaign_id::text AS campaign_id
+     FROM leads
      WHERE next_action_at <= now()
        AND campaign_id IS NOT NULL
        AND pipeline_stage IN ('new_lead', 'contacted')
@@ -108,20 +122,22 @@ async function findOverdueLeads(limit: number): Promise<Array<{ lead: Lead; camp
      LIMIT :limit`,
     { type: QueryTypes.SELECT, replacements: { limit } },
   );
-  if (rows.length === 0) return [];
-
-  const leadIds = rows.map(r => r.id);
-  const leads = await Lead.findAll({ where: { id: { [Op.in]: leadIds } } });
-  const leadMap = new Map(leads.map(l => [l.id, l]));
+  if (leads.length === 0) return [];
 
   const campaignIds = [...new Set(leads.map(l => l.campaign_id).filter(Boolean) as string[])];
-  const campaigns = await Campaign.findAll({ where: { id: { [Op.in]: campaignIds } } });
-  const campaignMap = new Map(campaigns.map(c => [c.id, c]));
+  const campaigns = await sequelize.query<{ id: string; name: string; sequence_id: string | null; sequence_steps: SequenceStep[] | null }>(
+    `SELECT id::text AS id, name, sequence_id::text AS sequence_id, sequence_steps
+     FROM campaigns
+     WHERE id IN (:ids)`,
+    { type: QueryTypes.SELECT, replacements: { ids: campaignIds } },
+  );
+  const campaignMap = new Map<string, CampaignLite>(
+    campaigns.map(c => [c.id, { id: c.id, name: c.name, sequence_id: c.sequence_id, sequence_steps: Array.isArray(c.sequence_steps) ? c.sequence_steps : [] }]),
+  );
 
-  const pairs: Array<{ lead: Lead; campaign: Campaign }> = [];
-  for (const id of leadIds) {
-    const lead = leadMap.get(id);
-    if (!lead || !lead.campaign_id) continue;
+  const pairs: Array<{ lead: LeadLite; campaign: CampaignLite }> = [];
+  for (const lead of leads) {
+    if (!lead.campaign_id) continue;
     const campaign = campaignMap.get(lead.campaign_id);
     if (!campaign) continue;
     pairs.push({ lead, campaign });
@@ -129,10 +145,8 @@ async function findOverdueLeads(limit: number): Promise<Array<{ lead: Lead; camp
   return pairs;
 }
 
-function getSequenceSteps(campaign: Campaign): SequenceStep[] {
-  const raw = (campaign as unknown as { sequence_steps?: unknown }).sequence_steps;
-  if (!Array.isArray(raw)) return [];
-  return raw as SequenceStep[];
+function getSequenceSteps(campaign: CampaignLite): SequenceStep[] {
+  return campaign.sequence_steps || [];
 }
 
 function daysOverdue(nextActionAt: Date | null | undefined): number {
@@ -157,7 +171,7 @@ async function isAlreadyQueuedOrSent(leadId: number, campaignId: string, stepInd
   return !!existing;
 }
 
-function previewForPair(lead: Lead, campaign: Campaign, step: SequenceStep, stepIndex: number): StepperPreview {
+function previewForPair(lead: LeadLite, campaign: CampaignLite, step: SequenceStep, stepIndex: number): StepperPreview {
   const delay = step.delay_days ?? 3;
   return {
     lead_id: lead.id,
@@ -165,8 +179,8 @@ function previewForPair(lead: Lead, campaign: Campaign, step: SequenceStep, step
     lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
     campaign_id: campaign.id,
     campaign_name: campaign.name,
-    current_pipeline_stage: (lead as unknown as { pipeline_stage: string }).pipeline_stage,
-    days_overdue: daysOverdue((lead as unknown as { next_action_at: Date | null }).next_action_at),
+    current_pipeline_stage: lead.pipeline_stage,
+    days_overdue: daysOverdue(lead.next_action_at),
     next_step_index: stepIndex,
     next_step_channel: step.channel,
     next_step_delay_days: delay,
@@ -216,8 +230,8 @@ export async function runStepperCycle(opts: { dryRun?: boolean; limit?: number }
           lead_id: lead.id, lead_email: lead.email,
           lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
           campaign_id: campaign.id, campaign_name: campaign.name,
-          current_pipeline_stage: (lead as unknown as { pipeline_stage: string }).pipeline_stage,
-          days_overdue: daysOverdue((lead as unknown as { next_action_at: Date | null }).next_action_at),
+          current_pipeline_stage: lead.pipeline_stage,
+          days_overdue: daysOverdue(lead.next_action_at),
           next_step_index: -1, next_step_channel: '(none)', next_step_delay_days: 0,
           next_action_at_new: '',
           reason_skipped: 'campaign has no sequence_steps defined',
@@ -225,14 +239,14 @@ export async function runStepperCycle(opts: { dryRun?: boolean; limit?: number }
         result.skipped++;
         continue;
       }
-      const stepIdx = nextStepIndex((lead as unknown as { pipeline_stage: string }).pipeline_stage);
+      const stepIdx = nextStepIndex(lead.pipeline_stage);
       if (stepIdx === null || stepIdx >= steps.length) {
         result.previews.push({
           lead_id: lead.id, lead_email: lead.email,
           lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
           campaign_id: campaign.id, campaign_name: campaign.name,
-          current_pipeline_stage: (lead as unknown as { pipeline_stage: string }).pipeline_stage,
-          days_overdue: daysOverdue((lead as unknown as { next_action_at: Date | null }).next_action_at),
+          current_pipeline_stage: lead.pipeline_stage,
+          days_overdue: daysOverdue(lead.next_action_at),
           next_step_index: stepIdx ?? -1, next_step_channel: '(beyond sequence)', next_step_delay_days: 0,
           next_action_at_new: '',
           reason_skipped: stepIdx === null ? 'pipeline_stage not auto-steppable' : 'sequence already complete',
@@ -270,18 +284,16 @@ export async function runStepperCycle(opts: { dryRun?: boolean; limit?: number }
         // following step's delay (so this lead surfaces again when the next
         // follow-up is due).
         const nextStepDelay = steps[stepIdx + 1]?.delay_days ?? 0;
-        const sequenceId = (campaign as unknown as { sequence_id?: string | null }).sequence_id ?? null;
-        const phone = (lead as unknown as { phone?: string | null }).phone ?? null;
         const createPayload: ScheduledEmailCreationAttributes = {
           lead_id: lead.id,
           campaign_id: campaign.id,
-          sequence_id: sequenceId,
+          sequence_id: campaign.sequence_id,
           step_index: stepIdx,
           channel: step.channel,
           subject: step.subject || null,
           body: null, // dispatcher generates at send time
           to_email: step.channel === 'email' ? lead.email : null,
-          to_phone: step.channel !== 'email' ? phone : null,
+          to_phone: null,
           voice_agent_type: null,
           max_attempts: 1,
           fallback_channel: null,
@@ -300,7 +312,10 @@ export async function runStepperCycle(opts: { dryRun?: boolean; limit?: number }
         const nextActionAt = nextStepDelay > 0
           ? new Date(Date.now() + nextStepDelay * 86_400_000)
           : null;
-        await lead.update({ next_action_at: nextActionAt } as unknown as Partial<Lead>);
+        await sequelize.query(
+          `UPDATE leads SET next_action_at = :next WHERE id = :id`,
+          { type: QueryTypes.UPDATE, replacements: { next: nextActionAt, id: lead.id } },
+        );
         result.queued++;
       }
     } catch (err) {
