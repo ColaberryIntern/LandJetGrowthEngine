@@ -22,8 +22,37 @@ Last updated: 2026-06-17
 - [x] **Friday weekly briefing locked in (BC 10008641010)**
   - Date: 2026-06-17
   - What changed: Built src/services/weeklyBriefingService.ts + src/services/weeklyBriefingRenderer.ts. Added 4th job to pipelineAutoRunner.ts that fires every Friday 9:15 AM CT (15 min before the recurring 9:30 call with Ryan). Sends to ali@colaberry.com, rlandry@landjet.com, pkapadia@landjet.com. Same v3 report design Ali signed off on, with charts rasterized to PNG via sharp.
-  - Verification: `npx tsc --noEmit` clean; msUntilNextFridayBriefing() smoke test confirms next fire = Friday 2026-06-19 at 9:15 AM CT.
+  - Verification: `npx tsc --noEmit` clean; msUntilNextFridayBriefing() smoke test confirms next fire = Friday 2026-06-19 at 9:15 AM CT; deployed to prod via commit 0bba03a; backend boot log shows `briefing_first_fire_ms: 139607000`; sharp 8.18.3 + libvips verified inside Alpine container.
   - Notes: Requires MANDRILL_API_KEY in the backend container env. Optional BASECAMP_ACCESS_TOKEN posts a comment on todo 10008641010 each Friday; token expires 2026-06-23 so this side-effect will silently fail after that until manually refreshed.
+
+- [x] **Live-fire smoke test of Friday briefing (BC 10008641010)**
+  - Date: 2026-06-17
+  - What changed: Manually triggered sendWeeklyBriefing() via docker exec with WEEKLY_BRIEFING_RECIPIENTS override = "ali@colaberry.com,rlandry@landjet.com" so Ryan sees the briefing for the first time before Friday morning. No code change.
+  - Verification: Mandrill ID 72e5e7ca-63d8-179e-eb6a-83a626ebf645@colaberry.com delivered to Ali + Ryan; 6 charts rasterized; BC comment auto-posted on todo 10008641010.
+  - Notes: This was a one-off smoke fire. The recurring Friday 9:15 AM CT schedule is independent and still fires to ali + rlandry + pkapadia on 2026-06-19.
+
+- [x] **LinkedIn 4-step flow regression test (extension v1.0.22)**
+  - Date: 2026-06-17
+  - What changed: Built Playwright test harness at tests/linkedin-flow/. Two files: mock-linkedin-profile.html (mocks the LinkedIn profile DOM including the messaging-widget false-match case that ate v1.0.19/20), and four-step-flow.spec.js (3 tests). Loads the production extension/ folder via persistent chromium context with a baked-in config.js pointing at a local mock backend. Added npm script `test:linkedin-flow`. Added @playwright/test as devDependency.
+  - Verification: 3/3 tests pass: (1) all 4 user clicks execute end-to-end (panel injects, extension auto-clicks Connect, Add-a-note + Ctrl+V fills textarea, Send click hits backend advance endpoint); (2) v1.0.20 regression: paste correctly targets the Connect-dialog textarea, not the persistent messaging widget; (3) negative case: no panel on non-matching profile. 3 consecutive runs all green at ~14s each. No flakes.
+  - Notes: Runs headed (Playwright's chrome-headless-shell does not support extensions). The test harness mocks both linkedin.com and the LandJet backend so it can run anywhere without internet. Future regression: extending the extension or LinkedIn's DOM changes will trigger this test if it breaks the 4-click flow.
+
+- [x] **Bumped Friday briefing fire time to 9:45 AM CT**
+  - Date: 2026-06-17
+  - What changed: The recurring Friday call moved from 9:30 to 10:00 AM CT. Updated BRIEFING_MIN_LOCAL in pipelineAutoRunner.ts from 15 to 45.
+  - Verification: msUntilNextFridayBriefing() returns Fri 9:45 AM CT; deployed via commit 13af088; backend boot log shows new fire time.
+
+- [x] **Ryan + Percy update emails sent (BC 10008900149)**
+  - Date: 2026-06-17
+  - What changed: Drafted + sent two emails on Ali's behalf via Mandrill kit. Ryan email: status update + 3 asks (vertical lead approval, investor list refresh, Iowa territory owner) + LinkedIn flow simplification note. Percy email: re-engagement + 4 asks to unlock TX (login confirm, sender address, OAuth grant, vertical priorities). Ryan email to him only; Percy email cc'd Ryan. Both BCC'd Ali per standing rule.
+  - Verification: Mandrill IDs eb77726d-5b07-9f0d-b32e-63b7f9d1364c@colaberry.com (Ryan), 333ac566-0bc1-d9e8-e64a-d4808737fd9d@colaberry.com (Percy); BC comments auto-posted on todo 10008900149.
+  - Notes: Confirmed Percy already has a working login (last 2026-05-18), so dropped the "send credentials" branch and offered password reset on request.
+
+- [x] **Decision map email sent to Ali (BC 10008701640)**
+  - Date: 2026-06-17
+  - What changed: Built scripts/send-decision-map.js. Generates a 3-column flowchart (NEED, FROM, DELIVERS) of the 7 open paths blocking the LandJet Growth Engine momentum, color-coded by urgency: 3 HIGH (sequence stepper, inbox-match, BC token rotation handler), 3 MED (per-vertical lead approval, investor refresh, Percy login), 1 LOW (Iowa territory owner). Each row maps an ask to its source and outcome so Ali can route.
+  - Verification: Mandrill ID 345e86ba-240e-e3f9-5a84-9fcd99f13458@colaberry.com delivered to Ali only; 1 flowchart SVG rasterized to PNG; BC comment auto-posted on todo 10008701640.
+  - Notes: All 3 HIGH-urgency items are buildable by Claude on green light. Decision map artifact at docs/updates/2026-06-17-decision-map.html.
 
 ---
 

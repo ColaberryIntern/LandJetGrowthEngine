@@ -68,6 +68,8 @@ function arg(name, fallback) {
   const ticketId = Number(arg('ticket'));
   const bucketId = Number(arg('bucket', '46699826'));
   const to = arg('to', 'ali@colaberry.com');
+  const ccRaw = arg('cc', '');
+  const cc = ccRaw ? ccRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined;
   const summary = arg('summary', '<p>Internal report.</p>');
   const textFallback = arg('text-fallback', `${subject}\n\nOpen the HTML version for the full report.`);
 
@@ -84,13 +86,18 @@ function arg(name, fallback) {
   const { html: rasterizedHtml, attachments: chartAttachments } = await rasterizeSvgs(reportHtml);
   console.log(`  ${chartAttachments.length} chart(s) converted; total size ${chartAttachments.reduce((a, b) => a + b.content.length, 0)} bytes`);
 
+  const signedHtml = rasterizedHtml.includes('</body>')
+    ? rasterizedHtml.replace('</body>', SIG_HTML + '</body>')
+    : rasterizedHtml + SIG_HTML;
+
   const result = await sendWithBcAttach({
     ticketId,
     bucketId,
     to,
+    cc,
     bcc: 'ali@colaberry.com',
     subject,
-    html: rasterizedHtml + SIG_HTML,
+    html: signedHtml,
     text: textFallback + '\n\n' + SIG_TEXT,
     attachments: chartAttachments,
     bcSummary: summary,

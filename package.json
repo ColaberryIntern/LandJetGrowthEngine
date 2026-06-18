@@ -8,6 +8,7 @@
     "dev": "ts-node src/server.ts",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
+    "test:linkedin-flow": "playwright test tests/linkedin-flow/four-step-flow.spec.js --reporter=line",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -49,6 +50,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
