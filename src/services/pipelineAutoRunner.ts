@@ -41,9 +41,9 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_WEEK_MS = 7 * ONE_DAY_MS;
 const PULSE_TZ = 'America/Chicago';
 const PULSE_HOUR_LOCAL = 7;
-// Friday pre-call briefing: 9:15 AM CT, 15 min before the recurring 9:30 call.
+// Friday pre-call briefing: 9:45 AM CT, 15 min before the recurring 10 AM call.
 const BRIEFING_HOUR_LOCAL = 9;
-const BRIEFING_MIN_LOCAL = 15;
+const BRIEFING_MIN_LOCAL = 45;
 const BRIEFING_DOW_NAME = 'Fri';
 
 const running = { ingest: false, scheduler: false, pulse: false, briefing: false };
