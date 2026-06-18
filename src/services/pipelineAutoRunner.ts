@@ -41,8 +41,10 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_WEEK_MS = 7 * ONE_DAY_MS;
 const PULSE_TZ = 'America/Chicago';
 const PULSE_HOUR_LOCAL = 7;
-// Friday pre-call briefing: 9:45 AM CT, 15 min before the recurring 10 AM call.
-const BRIEFING_HOUR_LOCAL = 9;
+// Friday pre-call briefing: normally 9:45 AM CT, 15 min before the recurring 10 AM call.
+// One-week override for 2026-06-19: bumped to 1:45 PM CT because the call moved to
+// 2 PM CT that week only. Revert to 9 / 45 on Monday 2026-06-22 after the 6/19 fire.
+const BRIEFING_HOUR_LOCAL = 13;
 const BRIEFING_MIN_LOCAL = 45;
 const BRIEFING_DOW_NAME = 'Fri';
 
