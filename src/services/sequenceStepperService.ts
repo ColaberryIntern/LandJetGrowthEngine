@@ -94,25 +94,34 @@ export function nextStepIndex(pipelineStage: string): number | null {
  * campaign so the caller can compute previews.
  */
 async function findOverdueLeads(limit: number): Promise<Array<{ lead: Lead; campaign: Campaign }>> {
-  const overdue = await Lead.findAll({
-    where: {
-      next_action_at: { [Op.lte]: new Date() },
-      campaign_id: { [Op.ne]: null },
-      pipeline_stage: { [Op.in]: ['new_lead', 'contacted'] },
-      status: 'active',
-    },
-    order: [['next_action_at', 'ASC']], // oldest overdue first
-    limit,
-  });
-  if (overdue.length === 0) return [];
+  // Raw SQL for the discovery query -- the rest of the service touches Sequelize
+  // models normally. This sidesteps a Sequelize attribute-mapping issue on the
+  // Lead model in this codebase and matches the pattern in usageStatsService.
+  const sequelize = getSequelize();
+  const rows = await sequelize.query<{ id: number }>(
+    `SELECT id FROM leads
+     WHERE next_action_at <= now()
+       AND campaign_id IS NOT NULL
+       AND pipeline_stage IN ('new_lead', 'contacted')
+       AND status = 'active'
+     ORDER BY next_action_at ASC
+     LIMIT :limit`,
+    { type: QueryTypes.SELECT, replacements: { limit } },
+  );
+  if (rows.length === 0) return [];
 
-  const campaignIds = [...new Set(overdue.map(l => l.campaign_id).filter(Boolean) as string[])];
+  const leadIds = rows.map(r => r.id);
+  const leads = await Lead.findAll({ where: { id: { [Op.in]: leadIds } } });
+  const leadMap = new Map(leads.map(l => [l.id, l]));
+
+  const campaignIds = [...new Set(leads.map(l => l.campaign_id).filter(Boolean) as string[])];
   const campaigns = await Campaign.findAll({ where: { id: { [Op.in]: campaignIds } } });
   const campaignMap = new Map(campaigns.map(c => [c.id, c]));
 
   const pairs: Array<{ lead: Lead; campaign: Campaign }> = [];
-  for (const lead of overdue) {
-    if (!lead.campaign_id) continue;
+  for (const id of leadIds) {
+    const lead = leadMap.get(id);
+    if (!lead || !lead.campaign_id) continue;
     const campaign = campaignMap.get(lead.campaign_id);
     if (!campaign) continue;
     pairs.push({ lead, campaign });
