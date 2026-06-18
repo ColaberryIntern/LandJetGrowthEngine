@@ -21,8 +21,7 @@
  *    Other stages need manual review.
  */
 
-import { Op, QueryTypes, WhereOptions } from 'sequelize';
-import { ScheduledEmail, ScheduledEmailAttributes, ScheduledEmailCreationAttributes } from '../models/ScheduledEmail';
+import { QueryTypes } from 'sequelize';
 import { getSequelize } from '../config/database';
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
@@ -160,15 +159,18 @@ function daysOverdue(nextActionAt: Date | null | undefined): number {
  */
 async function isAlreadyQueuedOrSent(leadId: number, campaignId: string, stepIndex: number): Promise<boolean> {
   const since = new Date(Date.now() - 7 * 86_400_000);
-  const where: WhereOptions<ScheduledEmailAttributes> = {
-    lead_id: leadId,
-    campaign_id: campaignId,
-    step_index: stepIndex,
-    status: { [Op.in]: ['pending', 'approved', 'processing', 'sent'] },
-    created_at: { [Op.gte]: since },
-  } as WhereOptions<ScheduledEmailAttributes>;
-  const existing = await ScheduledEmail.findOne({ where });
-  return !!existing;
+  const sequelize = getSequelize();
+  const rows = await sequelize.query<{ id: string }>(
+    `SELECT id FROM scheduled_emails
+     WHERE lead_id = :leadId
+       AND campaign_id = :campaignId
+       AND step_index = :stepIndex
+       AND status IN ('pending','approved','processing','sent')
+       AND created_at >= :since
+     LIMIT 1`,
+    { type: QueryTypes.SELECT, replacements: { leadId, campaignId, stepIndex, since } },
+  );
+  return rows.length > 0;
 }
 
 function previewForPair(lead: LeadLite, campaign: CampaignLite, step: SequenceStep, stepIndex: number): StepperPreview {
@@ -284,30 +286,36 @@ export async function runStepperCycle(opts: { dryRun?: boolean; limit?: number }
         // following step's delay (so this lead surfaces again when the next
         // follow-up is due).
         const nextStepDelay = steps[stepIdx + 1]?.delay_days ?? 0;
-        const createPayload: ScheduledEmailCreationAttributes = {
-          lead_id: lead.id,
-          campaign_id: campaign.id,
-          sequence_id: campaign.sequence_id,
-          step_index: stepIdx,
-          channel: step.channel,
-          subject: step.subject || null,
-          body: null, // dispatcher generates at send time
-          to_email: step.channel === 'email' ? lead.email : null,
-          to_phone: null,
-          voice_agent_type: null,
-          max_attempts: 1,
-          fallback_channel: null,
-          scheduled_for: new Date(), // fire on next scheduler tick
-          status: 'pending',
-          ai_instructions: step.prompt || null,
-          is_test_action: false,
-          metadata: {
-            step_number: stepIdx + 1,
-            step_goal: step.step_goal,
-            ai_tone: step.ai_tone,
+        const metadata = JSON.stringify({
+          step_number: stepIdx + 1,
+          step_goal: step.step_goal,
+          ai_tone: step.ai_tone,
+        });
+        await sequelize.query(
+          `INSERT INTO scheduled_emails
+             (id, lead_id, campaign_id, sequence_id, step_index, channel, subject, body,
+              to_email, to_phone, voice_agent_type, max_attempts, attempts_made,
+              fallback_channel, scheduled_for, status, ai_instructions, ai_generated,
+              is_test_action, metadata, created_at)
+           VALUES
+             (gen_random_uuid(), :leadId, :campaignId, :sequenceId, :stepIdx, :channel,
+              :subject, NULL, :toEmail, NULL, NULL, 1, 0, NULL, now(), 'pending',
+              :aiInstr, false, false, :metadata::jsonb, now())`,
+          {
+            type: QueryTypes.INSERT,
+            replacements: {
+              leadId: lead.id,
+              campaignId: campaign.id,
+              sequenceId: campaign.sequence_id,
+              stepIdx,
+              channel: step.channel,
+              subject: step.subject || null,
+              toEmail: step.channel === 'email' ? lead.email : null,
+              aiInstr: step.prompt || null,
+              metadata,
+            },
           },
-        };
-        await ScheduledEmail.create(createPayload);
+        );
 
         const nextActionAt = nextStepDelay > 0
           ? new Date(Date.now() + nextStepDelay * 86_400_000)
