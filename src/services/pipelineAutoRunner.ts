@@ -48,7 +48,9 @@ const BRIEFING_HOUR_LOCAL = 13;
 const BRIEFING_MIN_LOCAL = 45;
 const BRIEFING_DOW_NAME = 'Fri';
 
-const running = { ingest: false, scheduler: false, pulse: false, briefing: false };
+const STEPPER_INTERVAL_MS = 5 * 60 * 1000;
+
+const running = { ingest: false, scheduler: false, pulse: false, briefing: false, stepper: false };
 const timers: ReturnType<typeof setInterval>[] = [];
 const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -162,6 +164,34 @@ async function runScheduler(): Promise<void> {
   }
 }
 
+async function runStepper(): Promise<void> {
+  if (running.stepper) {
+    logger.info('pipeline.stepper skipped: previous cycle still running');
+    return;
+  }
+  if (process.env.PIPELINE_DISABLE_STEPPER === 'true') return;
+  running.stepper = true;
+  const start = Date.now();
+  try {
+    const { runStepperCycle, isStepperEnabled } = await import('./sequenceStepperService');
+    const result = await runStepperCycle();
+    logger.info('pipeline.stepper complete', {
+      duration_ms: Date.now() - start,
+      dry_run: result.dry_run,
+      total_overdue: result.total_overdue,
+      considered: result.considered,
+      queued: result.queued,
+      skipped: result.skipped,
+      errors: result.errors.length,
+      enabled: isStepperEnabled(),
+    });
+  } catch (e) {
+    logger.error('pipeline.stepper failed (non-fatal)', { error: (e as Error).message });
+  } finally {
+    running.stepper = false;
+  }
+}
+
 async function runWeeklyBriefing(): Promise<void> {
   if (running.briefing) {
     logger.info('pipeline.briefing skipped: previous cycle still running');
@@ -233,8 +263,10 @@ export function startPipelineAutoRunner(): void {
   logger.info('pipeline auto-runner starting', {
     ingest_interval_ms: INGEST_INTERVAL_MS,
     scheduler_interval_ms: SCHEDULER_INTERVAL_MS,
+    stepper_interval_ms: STEPPER_INTERVAL_MS,
     pulse_first_fire_ms: msUntilNextPulse(),
     briefing_first_fire_ms: msUntilNextFridayBriefing(),
+    stepper_enabled: process.env.PIPELINE_ENABLE_STEPPER === 'true',
   });
 
   // Inbound ingest. Initial 0-30s jitter so multiple restarts don't fire at once.
@@ -264,6 +296,15 @@ export function startPipelineAutoRunner(): void {
     void runWeeklyBriefing();
     timers.push(setInterval(() => { void runWeeklyBriefing(); }, ONE_WEEK_MS));
   }, untilBriefing));
+
+  // Sequence stepper. Every 5 min, runs in dry-run mode unless
+  // PIPELINE_ENABLE_STEPPER=true. Even in dry-run, logs the overdue queue
+  // depth so the diagnostic surfaces in prod logs every cycle.
+  const stepperStartIn = jitter(45_000);
+  timeouts.push(setTimeout(() => {
+    void runStepper();
+    timers.push(setInterval(() => { void runStepper(); }, STEPPER_INTERVAL_MS));
+  }, stepperStartIn));
 
   process.on('SIGTERM', stopPipelineAutoRunner);
   process.on('SIGINT', stopPipelineAutoRunner);
