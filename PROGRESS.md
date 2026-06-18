@@ -37,6 +37,12 @@ Last updated: 2026-06-17
   - Verification: 3/3 tests pass: (1) all 4 user clicks execute end-to-end (panel injects, extension auto-clicks Connect, Add-a-note + Ctrl+V fills textarea, Send click hits backend advance endpoint); (2) v1.0.20 regression: paste correctly targets the Connect-dialog textarea, not the persistent messaging widget; (3) negative case: no panel on non-matching profile. 3 consecutive runs all green at ~14s each. No flakes.
   - Notes: Runs headed (Playwright's chrome-headless-shell does not support extensions). The test harness mocks both linkedin.com and the LandJet backend so it can run anywhere without internet. Future regression: extending the extension or LinkedIn's DOM changes will trigger this test if it breaks the 4-click flow.
 
+- [x] **LinkedIn 4-step flow real-profile smoke-check doc**
+  - Date: 2026-06-17
+  - What changed: Added docs/linkedin-flow-smoke-check.md. Two-minute checklist Ali (or anyone) can run against a real LinkedIn profile to catch the failure surface the mocked Playwright test cannot reach: LinkedIn's own DOM changing. Pre-flight + 4 numbered clicks + per-step pass/fail signals + diagnostic-dump path on failure.
+  - Verification: User-facing doc; rendered cleanly in browser preview.
+  - Notes: Together with the Playwright suite this covers both regression surfaces (extension code + LinkedIn DOM). Recommended re-run cadence documented in the file.
+
 - [x] **Bumped Friday briefing fire time to 9:45 AM CT**
   - Date: 2026-06-17
   - What changed: The recurring Friday call moved from 9:30 to 10:00 AM CT. Updated BRIEFING_MIN_LOCAL in pipelineAutoRunner.ts from 15 to 45.
