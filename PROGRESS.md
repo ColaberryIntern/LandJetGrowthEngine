@@ -41,6 +41,12 @@ Last updated: 2026-06-19
   - Verification: `npx tsc --noEmit` clean. Prod DB confirmed the splits (51 email sends, 50 distinct emailed, 151 touched, 101 LinkedIn-only, 0 comm_logs inbound). Graph probe of rlandry@ inbox returned real replies (e.g. UHY "Connect Monday", summitconcrete "Re: LandJet Q2 Travel Guide", EDC "RE: next steps"). Post-deploy in-container `fc-list` + chart rasterization to be confirmed.
   - Notes: Did NOT re-send the email (goes to Ryan + Ram; needs Ali approval). The real remaining gap surfaced in the pipeline section: replies arrive but nothing writes them back to lead pipeline_stage, so touched leads stay at "contacted" -- that write-back/ingestion job is the next piece.
 
+- [x] **Briefing: email-vs-LinkedIn channel split across charts 1/3/4/5 + blocker findings**
+  - Date: 2026-06-19
+  - What changed: Applied the blue=email / teal=LinkedIn color style (shared legend) to charts 1 (campaign), 3 (cadence), 4 (pipeline), 5 (timing) in [weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts), backed by new per-channel SQL splits in [weeklyBriefingService.ts](src/services/weeklyBriefingService.ts) (campaign, pipeline, daily, hourly). Fixed a SQL bug where `l.${TOUCHED}` expanded to invalid `l.(...)`.
+  - Verification: `tsc --noEmit` clean; in-container render produced 7 charts with no errors (`VDONE charts=7`); DejaVu fonts confirmed so no squares; sent to ali@colaberry.com only via Mandrill (messageId 3f13145b..., chartCount 7), confirmed UNREAD in inbox.
+  - Notes: TWO requested items BLOCKED on inputs only Ali can provide, NOT faked: (1) Outreach map -- `state`/`city` empty on all 7,888 leads AND no APOLLO_API_KEY in the prod container or host .env, so location can't be backfilled; (2) LinkedIn connection % -- zero linkedin.com notifications in rlandry@ M365; they go to Ryan's personal inbox which isn't connected. Report footer notes both as in-progress. Separately CONFIRMED via Graph: 22 distinct known leads have replied (Spike Capital, Deloitte, UBS, Infusion Equity, AssuredPartners, EDC, KFM, Summit Concrete, etc.); briefing still shows "0 replies" because the matcher only checks the 51 logged sends -- recommend flipping it to match the leads table (pending Ali decision).
+
 ## Session: 2026-06-17
 
 - [x] **Auto-runner queue diagnosis (BC 10008606590)**
