@@ -32,6 +32,15 @@ Last updated: 2026-06-19
   - Verification: doc-only change; the corrected commands are exactly what was used to deploy c0e4260 and run the sweep this session.
   - Notes: Following the wrong documented path earlier caused a one-off rebuild/recreate (~40s restart) of the unrelated `accelerator-backend`; its `git pull` failed so no code of theirs changed. Correct path also saved to session memory.
 
+- [x] **Fixed Friday briefing email: squares, fake "0 replies", and email-vs-LinkedIn split**
+  - Date: 2026-06-19
+  - What changed: Three issues Ali flagged on the live briefing.
+    1. **Squares**: the `node:22-alpine` backend image had ZERO fonts (`fc-list` count 0), so sharp/librsvg rasterized every chart's text as tofu boxes. [Dockerfile.backend](Dockerfile.backend) now `apk add --no-cache fontconfig ttf-dejavu && fc-cache -f`; [weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts) `svgWrap` font-family now leads with `'DejaVu Sans'`.
+    2. **"0 replies" was wrong**: comm_logs has 0 inbound rows because nothing ingests inbound mail -- but rlandry@landjet.com's inbox has real replies (verified via Graph). [weeklyBriefingService.ts](src/services/weeklyBriefingService.ts) now reads the outreach mailbox via Graph (client-credentials, Mail.Read) and counts replies by matching inbound senders against people we emailed; falls back to comm_logs and flags `replySource` if the read fails. Removed the "inbox-match pointed at wrong mailbox" caveat.
+    3. **Email vs LinkedIn**: LinkedIn touches are never in comm_logs (model is email/sms/voice only); they only stamp `last_contacted_at`. Added a channel-split query (emailed vs LinkedIn-only) + a new "Email vs LinkedIn" section and KPI sublabel. Of 151 reached: 50 emailed, 101 LinkedIn-only.
+  - Verification: `npx tsc --noEmit` clean. Prod DB confirmed the splits (51 email sends, 50 distinct emailed, 151 touched, 101 LinkedIn-only, 0 comm_logs inbound). Graph probe of rlandry@ inbox returned real replies (e.g. UHY "Connect Monday", summitconcrete "Re: LandJet Q2 Travel Guide", EDC "RE: next steps"). Post-deploy in-container `fc-list` + chart rasterization to be confirmed.
+  - Notes: Did NOT re-send the email (goes to Ryan + Ram; needs Ali approval). The real remaining gap surfaced in the pipeline section: replies arrive but nothing writes them back to lead pipeline_stage, so touched leads stay at "contacted" -- that write-back/ingestion job is the next piece.
+
 ## Session: 2026-06-17
 
 - [x] **Auto-runner queue diagnosis (BC 10008606590)**

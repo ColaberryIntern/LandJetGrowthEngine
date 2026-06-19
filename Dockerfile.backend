@@ -1,5 +1,12 @@
 FROM node:22-alpine
 
+# Fonts for server-side SVG->PNG chart rasterization (sharp/librsvg). Without a
+# font package, Alpine has zero fonts and librsvg renders every text label as
+# tofu squares -- which is exactly what showed up in the Friday briefing charts.
+# DejaVu covers Latin + digits + the symbols our charts use; fontconfig is the
+# resolver librsvg queries.
+RUN apk add --no-cache fontconfig ttf-dejavu && fc-cache -f
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

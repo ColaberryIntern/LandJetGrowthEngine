@@ -16,6 +16,9 @@ export interface BriefingData {
   totalReachable: number;
   uniqueRecipients: number;
   uniqueRespondedRecipients: number;
+  replySource: 'graph_inbox' | 'comm_logs' | 'unavailable';
+  leadsEmailed: number;
+  leadsLinkedInOnly: number;
   activeCampaigns: number;
   firstSend: string;
   lastSend: string;
@@ -58,7 +61,11 @@ function escXml(s: unknown): string {
 }
 function fmtNumber(n: number): string { return Number(n).toLocaleString('en-US'); }
 function svgWrap(width: number, height: number, inner: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" preserveAspectRatio="xMinYMid meet" font-family="-apple-system,'Segoe UI',Arial,sans-serif">${inner}</svg>`;
+  // 'DejaVu Sans' is the font installed in the backend container (see
+  // Dockerfile.backend). It MUST be listed first so librsvg resolves a real
+  // font during rasterization; the others are only honored if this ever renders
+  // somewhere with richer fonts. Without a resolvable font, text became squares.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" preserveAspectRatio="xMinYMid meet" font-family="'DejaVu Sans',-apple-system,'Segoe UI',Arial,sans-serif">${inner}</svg>`;
 }
 
 function kpiTile(label: string, value: string, sublabel: string, accent: string): string {
@@ -107,6 +114,31 @@ function campaignBars(campaigns: BriefingData['campaigns']): string {
     svg += `<text x="${left + w + 10}" y="${y + 24}" font-size="13" font-weight="700" fill="${PAL.text}">${c.sends}</text>`;
     svg += `<text x="${left + w + 38}" y="${y + 24}" font-size="11" fill="${PAL.textDim}">(${c.recipients} unique)</text>`;
     svg += `<text x="${left + barMaxW + 60}" y="${y + 24}" font-size="11" fill="${PAL.textMuted}">${c.firstSend} to ${c.lastSend}</text>`;
+  }
+  return svgWrap(width, height, svg);
+}
+
+// ----- chart: channel mix (emailed vs LinkedIn-only) -----
+function channelMixBars(emailed: number, linkedinOnly: number): string {
+  const total = emailed + linkedinOnly;
+  const rows = [
+    { label: 'Emailed', sub: 'received an email send', count: emailed, color: PAL.navyLight },
+    { label: 'LinkedIn only', sub: 'touched via LinkedIn, never emailed', count: linkedinOnly, color: PAL.teal },
+  ];
+  const max = Math.max(emailed, linkedinOnly, 1);
+  const left = 150, top = 28, barMaxW = 480, rowH = 56, width = 820;
+  const height = top + rows.length * rowH + 16;
+  let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const y = top + i * rowH;
+    const w = Math.max(3, (r.count / max) * barMaxW);
+    const pct = total > 0 ? (r.count / total) * 100 : 0;
+    svg += `<text x="${left - 14}" y="${y + 22}" text-anchor="end" font-size="13" font-weight="700" fill="${PAL.text}">${escXml(r.label)}</text>`;
+    svg += `<rect x="${left}" y="${y + 6}" width="${w}" height="24" rx="3" fill="${r.color}"/>`;
+    svg += `<text x="${left + w + 10}" y="${y + 24}" font-size="14" font-weight="800" fill="${PAL.text}">${r.count}</text>`;
+    svg += `<text x="${left + w + 44}" y="${y + 24}" font-size="11" fill="${PAL.textDim}">${pct.toFixed(0)}% of reached</text>`;
+    svg += `<text x="${left - 14}" y="${y + 40}" text-anchor="end" font-size="10" fill="${PAL.textDim}">${escXml(r.sub)}</text>`;
   }
   return svgWrap(width, height, svg);
 }
@@ -277,6 +309,19 @@ function senderBars(senders: BriefingData['senders']): string {
   return svgWrap(width, height, svg);
 }
 
+function replyTileSub(d: BriefingData): string {
+  if (d.replySource === 'unavailable') return 'inbox read unavailable this run';
+  if (d.totalInbound === 0) return d.replySource === 'graph_inbox' ? 'no replies matched in Ryan inbox' : 'none in comm_logs yet';
+  return d.replySource === 'graph_inbox' ? 'matched against Ryan inbox (live)' : 'from comm_logs';
+}
+
+function respondedRateSub(d: BriefingData): string {
+  const base = `${fmtNumber(d.uniqueRespondedRecipients)} of ${fmtNumber(d.uniqueRecipients)} emailed recipients have replied`;
+  if (d.replySource === 'graph_inbox') return `${base} | matched live against rlandry@landjet.com inbox (replies from people we emailed)`;
+  if (d.replySource === 'unavailable') return `${base} | inbox read was unavailable this run, so this reflects comm_logs only`;
+  return `${base} | source: comm_logs inbound rows`;
+}
+
 export function renderBriefingHtml(d: BriefingData, now: Date): string {
   const touchRatePct = d.totalReachable > 0 ? ((d.uniqueRecipients / d.totalReachable) * 100).toFixed(2) : '0.00';
   const investor = d.campaigns.find(c => c.name.includes('Investor')) || { sends: 0 };
@@ -298,9 +343,9 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
   </td></tr></table>
 
   <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:14px"><tr>
-    <td width="33%" style="padding-right:6px;vertical-align:top">${kpiTile('Logged sends', fmtNumber(d.totalSends), `since ${d.firstSend} (comm_logs began 5/14)`, PAL.navy)}</td>
-    <td width="34%" style="padding:0 6px;vertical-align:top">${kpiTile('Total leads touched', fmtNumber(d.totalTouchedLeads), `incl. pre-log touches via last_contacted_at`, PAL.purple)}</td>
-    <td width="33%" style="padding-left:6px;vertical-align:top">${kpiTile('Replies received', fmtNumber(d.totalInbound), `${d.totalInbound > 0 ? 'tracked via inbox-match' : 'none in comm_logs yet'}`, d.totalInbound > 0 ? PAL.green : PAL.red)}</td>
+    <td width="33%" style="padding-right:6px;vertical-align:top">${kpiTile('Emails sent (logged)', fmtNumber(d.totalSends), `since ${d.firstSend} (comm_logs began 5/14)`, PAL.navy)}</td>
+    <td width="34%" style="padding:0 6px;vertical-align:top">${kpiTile('Total leads reached', fmtNumber(d.totalTouchedLeads), `${fmtNumber(d.leadsEmailed)} emailed, ${fmtNumber(d.leadsLinkedInOnly)} LinkedIn-only`, PAL.purple)}</td>
+    <td width="33%" style="padding-left:6px;vertical-align:top">${kpiTile('Replies received', fmtNumber(d.totalInbound), replyTileSub(d), d.totalInbound > 0 ? PAL.green : PAL.red)}</td>
   </tr></table>
 
   <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:14px"><tr>
@@ -311,9 +356,9 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:24px"><tr>
     <td width="100%" style="vertical-align:top">${kpiTile(
-      'Responded rate (unique recipients who replied / unique recipients we sent to)',
+      'Responded rate (emailed recipients who replied / emailed recipients)',
       d.uniqueRecipients > 0 ? `${((d.uniqueRespondedRecipients / d.uniqueRecipients) * 100).toFixed(2)}%` : 'n/a',
-      `${fmtNumber(d.uniqueRespondedRecipients)} of ${fmtNumber(d.uniqueRecipients)} recipients have replied | inbox-match config still pointed at the wrong mailbox; real number arrives once OAuth on rlandry@landjet.com is wired`,
+      respondedRateSub(d),
       d.uniqueRespondedRecipients > 0 ? PAL.green : PAL.red,
     )}</td>
   </tr></table>
@@ -323,33 +368,38 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
     campaignBars(d.campaigns),
     `<strong>Portfolio balance check.</strong> Investor Outreach is the only campaign with sustained activity; the vertical campaigns together total <strong>${verticalSends} sends</strong>. Either the vertical campaigns are not being scheduled, or the system is concentrating budget on the investor list while the vertical lists wait.`)}
 
-  ${section('02', 'Outreach cadence',
+  ${section('02', 'Email vs LinkedIn: who actually got which touch',
+    `Of ${d.totalTouchedLeads} leads reached, ${d.leadsEmailed} received an email and ${d.leadsLinkedInOnly} were touched on LinkedIn only (never emailed). LinkedIn touches are not logged in communication_logs; they are inferred from last_contacted_at on leads that have no email send.`,
+    channelMixBars(d.leadsEmailed, d.leadsLinkedInOnly),
+    `<strong>Channel reality.</strong> Yes, real emails went out -- to <strong>${d.leadsEmailed}</strong> people. But <strong>${d.leadsLinkedInOnly}</strong> of the ${d.totalTouchedLeads} reached (${d.totalTouchedLeads > 0 ? ((d.leadsLinkedInOnly / d.totalTouchedLeads) * 100).toFixed(0) : '0'}%) were LinkedIn-only. That matters because email replies are tracked automatically while LinkedIn replies are not, so the "responded rate" below only covers the ${d.leadsEmailed} we emailed. If the intent is measurable, trackable outreach, the email share needs to grow.`)}
+
+  ${section('03', 'Outreach cadence',
     `${d.daysSinceLastSend} days since last send. The historical footprint via last_contacted_at extends back to 2026-04-16; comm_logs only started populating 5/14.`,
     dailyTimeline(d.dailyCommLogs, d.dailyLeadTouches),
     `<strong>Cadence reading.</strong> A real cadence would show daily activity at some baseline volume. If this chart still looks like spikes rather than a flat baseline, the scheduler is not feeding the queue, or the queue is empty.`)}
 
-  ${section('03', 'Every touched lead is parked at "contacted"',
+  ${section('04', 'Every touched lead is parked at "contacted"',
     `${d.touchedPipeline.find(p => p.stage === 'contacted')?.count || 0} of ${d.totalTouchedLeads} touched leads sit at the "contacted" stage. Replies should advance leads to "replied" or beyond.`,
     pipelineDonut(d.touchedPipeline),
-    `<strong>Pipeline forward motion.</strong> Replies advance a lead from contacted to replied. If this chart still shows everything at contacted weeks from now, the issue is either outreach not generating responses, or inbox-match still not matching replies back to leads.`)}
+    `<strong>Pipeline forward motion.</strong> Replies should advance a lead from contacted to replied. We now know replies ARE coming in (the replies metric above is matched live from Ryan's inbox), but touched leads still sit at "contacted" because nothing writes those replies back to the lead's pipeline stage yet. The missing piece is reply write-back, not the responses themselves.`)}
 
-  ${section('04', 'Send timing',
+  ${section('05', 'Send timing',
     `${businessHours} of ${d.totalSends} sends land between 9 and 11 AM Central. ${afterHours > 0 ? `${afterHours} after-hours sends to inspect.` : 'No after-hours sends this period.'}`,
     hourBars(d.hourCT),
     `<strong>Timing health.</strong> The mid-morning peak is when recipients are at their desks, which is the right window for an opener. After-hours sends usually indicate a job that ran with a stale or wrong timezone setting; worth checking the scheduler logs to confirm.`)}
 
-  ${section('05', 'Pool utilization',
+  ${section('06', 'Pool utilization',
     `${d.uniqueRecipients} unique recipients out of ${fmtNumber(d.totalReachable)} active leads with email. That is ${touchRatePct}% pool reach.`,
     reachGauge(d.uniqueRecipients, d.totalReachable),
     `<strong>Inventory vs activity.</strong> ${fmtNumber(d.totalReachable - d.uniqueRecipients)} leads with email addresses have never been contacted. The question for the call: are the right 100 going first, or are we just sending to whoever was loaded first?`)}
 
-  ${section('06', 'Sender alignment',
+  ${section('07', 'Sender alignment',
     `Of ${d.totalSends} total sends, ${d.senders.find(s => s.from === 'rlandry@landjet.com')?.count || 0} fired from the canonical address. The ${d.senders.filter(s => s.from !== 'rlandry@landjet.com').reduce((a, s) => a + s.count, 0)} from other addresses are pre-6/2 patch leaks.`,
     senderBars(d.senders),
     `<strong>Alignment status.</strong> The 6/2 sender alignment patch keeps inbound replies routing consistently to rlandry@. If any new pre-fix-style sends show up here, a regression has been introduced.`)}
 
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-radius:8px;margin-top:18px"><tr><td style="padding:16px;font-size:11px;color:${PAL.textMuted};line-height:1.6">
-    <div><strong style="color:${PAL.text}">Data sources:</strong> communication_logs (${d.totalSends} outbound rows, ${d.totalInbound} inbound), leads (${fmtNumber(d.totalActive)} active, ${d.totalTouchedLeads} touched), campaigns (${d.activeCampaigns} live).</div>
+    <div><strong style="color:${PAL.text}">Data sources:</strong> communication_logs (${d.totalSends} outbound email rows; LinkedIn touches are not logged here), leads (${fmtNumber(d.totalActive)} active, ${d.totalTouchedLeads} reached: ${fmtNumber(d.leadsEmailed)} emailed + ${fmtNumber(d.leadsLinkedInOnly)} LinkedIn-only), campaigns (${d.activeCampaigns} live), replies (${d.totalInbound} ${d.replySource === 'graph_inbox' ? 'matched live from rlandry@landjet.com inbox' : d.replySource === 'unavailable' ? 'inbox read unavailable' : 'from comm_logs'}).</div>
     <div style="margin-top:6px"><strong style="color:${PAL.text}">Generated:</strong> ${now.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Chicago' })} CT via weeklyBriefingService.ts</div>
   </td></tr></table>
 
