@@ -18,7 +18,19 @@ Last updated: 2026-06-19
     - New typed error `CategoryMismatchError` in [errors.ts](src/middleware/errors.ts).
     - New backstop script [reconcileLeadVerticals.ts](src/scripts/reconcileLeadVerticals.ts): idempotent, dry-run by default (`--apply` to persist), schedulable.
   - Verification: `npx tsc --noEmit` clean (exit 0); `npx jest leadClassification leadRouting outreachSender` = 78/78 pass (includes existing sender suite, confirming the pre-send gate is non-breaking); new tests cover happy/mismatch/unknown, auto-route/kept/flagged/unclassified/manual-skip, dry-run, and idempotency (re-run reports 'kept').
-  - Notes: Ali decision 2026-06-19 chose auto-route + hard pre-send gate. Refinement applied: auto-route governs MACHINE ingestion (Apollo/import); a manual reassign by Ryan stays authoritative. The reconciliation sweep has NOT been run against prod yet (dry-run via `docker exec landjet-backend npx tsx /app/src/scripts/reconcileLeadVerticals.ts` first). Reported the separate "campaign done with steps left" item to Ali as most likely an expectation mismatch (cold campaigns are 3 steps), not a code bug; no change made there pending Ryan's desired step count.
+  - Notes: Ali decision 2026-06-19 chose auto-route + hard pre-send gate. Refinement applied: auto-route governs MACHINE ingestion (Apollo/import); a manual reassign by Ryan stays authoritative. Reported the separate "campaign done with steps left" item to Ali as most likely an expectation mismatch (cold campaigns are 3 steps), not a code bug; no change made there pending Ryan's desired step count.
+
+- [x] **Deployed + ran reconciliation sweep against prod**
+  - Date: 2026-06-19
+  - What changed: Deployed commit c0e4260 to prod (`/opt/landjet-growth-engine`, backend rebuilt + booted clean). Ran `reconcileLeadVerticals.ts --apply`: of 7885 active leads, 962 re-routed to the campaign matching their real industry, 72 already correct, 6851 left in place (no Apollo `industry` value to classify), 0 manual, 0 flagged.
+  - Verification: second dry-run pass reports routed=0, kept=1034 (962+72), unclassified=6851 -- confirms the apply persisted and the sweep is idempotent. Backend boot log clean (DB connected, port 3001).
+  - Notes: ~87% of active leads have no `industry` value, so auto-route + the badge fix fully cover only the ~13% with industry data plus all FUTURE Apollo pulls; the pre-send gate cannot block the unclassified backlog (it only blocks a proven mismatch). Industry enrichment of the backlog is a separate data-quality effort.
+
+- [x] **Corrected CLAUDE.md prod deploy path**
+  - Date: 2026-06-19
+  - What changed: CLAUDE.md said deploy LandJet at `/opt/colaberry-accelerator` -- that is a DIFFERENT app (ColaberryEnterprise_AI_LeadershipAccelerator). Corrected the Tooling Assumptions line to the real LandJet path `/opt/landjet-growth-engine` (containers landjet-backend/frontend/db), the --autostash pull, the backend-only build, and the `docker exec landjet-backend npx tsx` script-run pattern. Added a warning not to deploy LandJet to the accelerator path.
+  - Verification: doc-only change; the corrected commands are exactly what was used to deploy c0e4260 and run the sweep this session.
+  - Notes: Following the wrong documented path earlier caused a one-off rebuild/recreate (~40s restart) of the unrelated `accelerator-backend`; its `git pull` failed so no code of theirs changed. Correct path also saved to session memory.
 
 ## Session: 2026-06-17
 

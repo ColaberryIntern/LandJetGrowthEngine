@@ -573,7 +573,7 @@ Claude may assume:
 - VS Code / VSCodium / Cursor may be used
 - Git is present
 - CI runs automated tests where they exist (manual testing is the current default for most surfaces)
-- Production VPS access is via `ssh root@95.216.199.47` to the stack at `/opt/colaberry-accelerator`. Deploys are `git pull origin main && docker compose -f docker-compose.production.yml up -d --build [service]`.
+- Production VPS access is via `ssh root@95.216.199.47`. The VPS is multi-tenant (it hosts ~30 containers across several apps). The **LandJet** stack lives at `/opt/landjet-growth-engine` (containers `landjet-backend`, `landjet-frontend`, `landjet-db`). Deploy LandJet with `cd /opt/landjet-growth-engine && git pull --rebase --autostash origin main && docker compose -f docker-compose.production.yml up -d --build backend`. Run TS ops scripts via `docker exec landjet-backend npx tsx /app/src/scripts/<name>.ts`. NOTE: `/opt/colaberry-accelerator` is a DIFFERENT app (ColaberryEnterprise_AI_LeadershipAccelerator) — do not deploy LandJet there.
 
 Claude must NOT assume:
 - Moltbot exists
