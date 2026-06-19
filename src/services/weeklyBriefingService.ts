@@ -212,7 +212,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
        COUNT(*) FILTER (WHERE l.${EMAILED})::text AS emailed,
        COUNT(*) FILTER (WHERE l.${LINKEDIN_ONLY})::text AS linkedin_only
      FROM leads l LEFT JOIN campaigns c ON c.id = l.campaign_id
-     WHERE l.${TOUCHED}
+     WHERE ${TOUCHED}
      GROUP BY c.name ORDER BY COUNT(*) DESC LIMIT 12`,
     { type: QueryTypes.SELECT },
   );
@@ -221,7 +221,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
     `SELECT pipeline_stage::text AS stage,
        COUNT(*) FILTER (WHERE ${EMAILED})::text AS emailed,
        COUNT(*) FILTER (WHERE ${LINKEDIN_ONLY})::text AS linkedin_only
-     FROM leads l WHERE l.${TOUCHED}
+     FROM leads l WHERE ${TOUCHED}
      GROUP BY pipeline_stage ORDER BY COUNT(*) DESC`,
     { type: QueryTypes.SELECT },
   );
