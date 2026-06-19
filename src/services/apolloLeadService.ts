@@ -12,6 +12,8 @@ import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 import { logger } from '../config/logger';
+import { classifyVertical, campaignVertical } from './leadClassification';
+import { buildVerticalCampaignMap, routeLeadToCorrectCampaign } from './leadRoutingService';
 
 const APOLLO_KEY = process.env.APOLLO_API_KEY || '';
 
@@ -162,6 +164,14 @@ export async function pullLeadsForCampaign(
 
   const stats = { created: 0, credits_used: 0, errors: 0, duplicates: 0, unverified: 0, details: [] as string[] };
 
+  // Deterministic categorization (Ali decision 2026-06-19): a lead's vertical
+  // comes from its REAL industry, not the campaign name. After creating each
+  // lead we auto-route it to the campaign matching that vertical, so an
+  // off-target Apollo result (e.g. a remodeling exec returned on a Banking
+  // pull) lands in the right campaign instead of getting banking messaging.
+  // Built once here so we do not re-query campaigns per lead.
+  const campaignMap = await buildVerticalCampaignMap();
+
   // Distribute target count across markets evenly (with slight rounding)
   const totalWeight = config.markets.reduce((sum, m) => sum + (m.weight || 1), 0);
   const perMarket = config.markets.map(m => ({
@@ -206,23 +216,14 @@ export async function pullLeadsForCampaign(
         existing.add(email.toLowerCase().trim());
 
         try {
-          // Ryan 2026-06-08: combined "Real Estate, Construction and Engineering" into a single
-          // vertical. The keyword set (construction | real estate | engineering) all map to one
-          // label so contacts like Century Communities (real estate) and Waterton (property mgmt)
-          // bucket alongside construction firms instead of getting mis-routed to insurance/banking.
-          const lowerName = campaign.name.toLowerCase();
-          const verticalGuess = (lowerName.includes('construction') || lowerName.includes('real estate') || lowerName.includes('engineering'))
-            ? 'Real Estate, Construction and Engineering'
-            : lowerName.includes('technology') || lowerName.includes('staffing') ? 'Technology'
-            : lowerName.includes('manufacturing') ? 'Manufacturing'
-            : lowerName.includes('insurance') ? 'Insurance'
-            : lowerName.includes('banking') || lowerName.includes('finance') ? 'Banking'
-            : lowerName.includes('healthcare') ? 'Healthcare'
-            : lowerName.includes('legal') ? 'Legal'
-            : lowerName.includes('sports') || lowerName.includes('events') ? 'Sports & Events'
-            : null;
+          // Categorize from the company's REAL industry (Apollo data), falling
+          // back to the pull campaign's vertical only when the industry is
+          // unclassifiable. The auto-route step below then moves the lead to the
+          // campaign matching its true vertical if the pull landed it elsewhere.
+          const leadIndustry = enriched.organization?.industry || p.organization?.industry || null;
+          const verticalGuess = classifyVertical(leadIndustry) || campaignVertical(campaign.name);
 
-          await Lead.create({
+          const created = await Lead.create({
             first_name: enriched.first_name || p.first_name || 'Unknown',
             last_name: enriched.last_name || (p.last_name_obfuscated || '').replace(/\*/g, '') || '',
             email: email,
@@ -231,7 +232,7 @@ export async function pullLeadsForCampaign(
             linkedin_url: enriched.linkedin_url || p.linkedin_url || null,
             state: enriched.state || p.state || null,
             city: enriched.city || p.city || null,
-            industry: enriched.organization?.industry || p.organization?.industry || null,
+            industry: leadIndustry,
             company_size: enriched.organization?.estimated_num_employees || p.organization?.estimated_num_employees || null,
             vertical: verticalGuess,
             lead_source: 'api',
@@ -247,6 +248,20 @@ export async function pullLeadsForCampaign(
             status: 'active',
             notes: { apollo_id: p.id, apollo_pulled_at: new Date().toISOString(), source: 'apollo', market: market.name },
           } as any);
+
+          // Auto-route to the campaign matching the lead's real industry. Safe
+          // to fail soft: a routing error must not lose the lead we just saved.
+          try {
+            const routed = await routeLeadToCorrectCampaign(created, { campaignMap });
+            if (routed.action === 'routed') {
+              stats.details.push(`  ~ re-routed to matching campaign (${routed.leadVertical})`);
+            }
+          } catch (routeErr) {
+            logger.warn('Auto-route after Apollo create failed (lead kept)', {
+              lead_id: created.id, error: (routeErr as Error).message,
+            });
+          }
+
           stats.created++;
           collected++;
           stats.details.push(`+ ${enriched.first_name} ${enriched.last_name} | ${enriched.title} | ${enriched.organization?.name}`);

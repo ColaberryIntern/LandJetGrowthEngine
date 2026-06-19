@@ -10,6 +10,9 @@
 
 import { logger } from '../config/logger';
 import { CommunicationLog } from '../models/CommunicationLog';
+import { Lead } from '../models/Lead';
+import { Campaign } from '../models/Campaign';
+import { categoryMatches } from './leadClassification';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
@@ -211,6 +214,50 @@ async function getGraphToken(): Promise<string> {
 }
 
 /**
+ * Pre-send category guard. Returns `ok: false` ONLY when we can positively
+ * prove the lead's real industry contradicts its campaign (a confirmed
+ * mismatch). It fails OPEN on every other condition -- missing lead, missing
+ * campaign, unclassifiable industry, or any infrastructure error -- because a
+ * send must not be blocked on a check we could not complete. Manual
+ * reassignments (`notes.category_source === 'manual'`) are authoritative and
+ * always pass: Ryan's deliberate placement wins over Apollo's industry data.
+ */
+async function checkCategoryGuard(
+  leadId: number,
+  campaignId?: string | null,
+): Promise<{ ok: boolean; status?: string; reason?: string }> {
+  try {
+    const lead = await Lead.findByPk(leadId, { attributes: ['industry', 'notes', 'campaign_id'] });
+    if (!lead) return { ok: true };
+
+    if ((lead.notes as any)?.category_source === 'manual') {
+      return { ok: true, status: 'manual_override' };
+    }
+
+    const effectiveCampaignId = campaignId || lead.campaign_id;
+    if (!effectiveCampaignId) return { ok: true };
+
+    const campaign = await Campaign.findByPk(effectiveCampaignId, { attributes: ['name'] });
+    if (!campaign) return { ok: true };
+
+    const check = categoryMatches(lead.industry, campaign.name);
+    if (check.status === 'mismatch') {
+      return {
+        ok: false,
+        status: 'mismatch',
+        reason: `lead industry "${lead.industry}" (${check.leadVertical}) does not match campaign "${campaign.name}" (${check.campaignVertical}). Re-assign the lead to the correct campaign before sending.`,
+      };
+    }
+    return { ok: true, status: check.status };
+  } catch (err) {
+    logger.warn('Category guard could not be evaluated; allowing send', {
+      lead_id: leadId, error: (err as Error).message,
+    });
+    return { ok: true, status: 'guard_error' };
+  }
+}
+
+/**
  * Send an outreach email via Microsoft Graph API.
  *
  * Sender guard: if the resolved `from` address is not in ALLOWED_SENDERS,
@@ -230,6 +277,25 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
       logger.warn('comm log write failed (sender_guard)', { err: e.message }),
     );
     return { success: false, error, from: fromEmail };
+  }
+
+  // Category guard (Ali decision 2026-06-19): a lead whose real industry
+  // contradicts its campaign must never receive a wrong-vertical message --
+  // the recurring failure Ryan keeps catching. Same philosophy as the sender
+  // guard above: even a misconfigured campaign cannot quietly send the wrong
+  // thing. Only enforced for lead-tied sends; ops emails (no lead_id) skip it.
+  if (input.lead_id) {
+    const guard = await checkCategoryGuard(input.lead_id, input.campaign_id);
+    if (!guard.ok) {
+      const error = `Category guard: ${guard.reason}`;
+      logger.error('Outreach send blocked by category guard', {
+        lead_id: input.lead_id, campaign_id: input.campaign_id, ...guard,
+      });
+      await writeCommLog(input, fromEmail, 'failed', null, { error, category_guard: true }).catch(e =>
+        logger.warn('comm log write failed (category_guard)', { err: e.message }),
+      );
+      return { success: false, error, from: fromEmail };
+    }
   }
 
   if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {

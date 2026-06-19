@@ -1,9 +1,24 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-06-17
+Last updated: 2026-06-19
 
 ---
+
+## Session: 2026-06-19
+
+- [x] **Deterministic lead categorization (stops Ryan's recurring wrong-campaign bug)**
+  - Date: 2026-06-19
+  - What changed: Root cause was that a lead's `vertical` badge + messaging were derived from the CAMPAIGN NAME, never validated against the company's real industry (already on `lead.industry` from Apollo, unused). Built a deterministic fix:
+    - New pure module [leadClassification.ts](src/services/leadClassification.ts): `classifyVertical(industry)` (single source of truth, ordered keyword table, first-match-wins), `campaignVertical(name)`, `categoryMatches(industry, campaignName)`. No I/O, no clock, no randomness.
+    - New [leadRoutingService.ts](src/services/leadRoutingService.ts): `routeLeadToCorrectCampaign()` auto-routes machine-ingested leads to the campaign matching their real industry; idempotent; flags unclassifiable / no-campaign cases for review instead of guessing.
+    - [apolloLeadService.ts](src/services/apolloLeadService.ts): vertical now comes from real industry; each created lead is auto-routed (fail-soft).
+    - [outreachRoutes.ts](src/routes/admin/outreachRoutes.ts) `/:id/campaign`: manual reassign is now AUTHORITATIVE (sets truthful badge, stamps `notes.category_source='manual'`) so the system never fights Ryan correcting bad Apollo data.
+    - [outreachEmailService.ts](src/services/outreachEmailService.ts): hard pre-send category gate (mirrors the sender guard) blocks any lead-tied send whose industry contradicts its campaign; fails open on infra error, closed on confirmed mismatch; manual overrides pass.
+    - New typed error `CategoryMismatchError` in [errors.ts](src/middleware/errors.ts).
+    - New backstop script [reconcileLeadVerticals.ts](src/scripts/reconcileLeadVerticals.ts): idempotent, dry-run by default (`--apply` to persist), schedulable.
+  - Verification: `npx tsc --noEmit` clean (exit 0); `npx jest leadClassification leadRouting outreachSender` = 78/78 pass (includes existing sender suite, confirming the pre-send gate is non-breaking); new tests cover happy/mismatch/unknown, auto-route/kept/flagged/unclassified/manual-skip, dry-run, and idempotency (re-run reports 'kept').
+  - Notes: Ali decision 2026-06-19 chose auto-route + hard pre-send gate. Refinement applied: auto-route governs MACHINE ingestion (Apollo/import); a manual reassign by Ryan stays authoritative. The reconciliation sweep has NOT been run against prod yet (dry-run via `docker exec landjet-backend npx tsx /app/src/scripts/reconcileLeadVerticals.ts` first). Reported the separate "campaign done with steps left" item to Ali as most likely an expectation mismatch (cold campaigns are 3 steps), not a code bug; no change made there pending Ryan's desired step count.
 
 ## Session: 2026-06-17
 

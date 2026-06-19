@@ -57,3 +57,14 @@ export class ServiceUnavailableError extends AppError {
     super(message, 503, 'SERVICE_UNAVAILABLE');
   }
 }
+
+/**
+ * Raised when a lead's real industry contradicts the campaign it is assigned
+ * to (e.g. a remodeling firm in the Banking campaign). Used by the pre-send
+ * category gate so a wrong-vertical message can never quietly go out.
+ */
+export class CategoryMismatchError extends AppError {
+  constructor(message = 'Lead category does not match its campaign') {
+    super(message, 409, 'CATEGORY_MISMATCH');
+  }
+}

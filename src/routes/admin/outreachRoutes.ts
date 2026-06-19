@@ -9,6 +9,7 @@ import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
 import { sendOutreachEmail, testConnection, loadAttachmentFromPath, resolveSender } from '../../services/outreachEmailService';
 import { recordAgentRun } from '../../intelligence/agents/agentRegistry';
+import { campaignVertical } from '../../services/leadClassification';
 import { logger } from '../../config/logger';
 
 const router = Router();
@@ -1071,10 +1072,11 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
 
     lead.campaign_id = campaign_id || null;
     if (movingToNewCampaign) {
+      // Clamp to the new campaign's max so we never exceed its sequence_steps,
+      // and read its name so we can set a truthful vertical badge.
+      const newCampaign = await Campaign.findByPk(campaign_id, { attributes: ['name', 'sequence_steps'] });
+      const newMaxSteps = (newCampaign?.sequence_steps as any[] | null)?.length || 3;
       if (shouldPreserveStage) {
-        // Clamp to the new campaign's max so we never exceed its sequence_steps.
-        const newCampaign = await Campaign.findByPk(campaign_id, { attributes: ['sequence_steps'] });
-        const newMaxSteps = (newCampaign?.sequence_steps as any[] | null)?.length || 3;
         lead.sequence_stage = Math.min(previousStage, newMaxSteps);
         // Reset the timer so they show up today in the new campaign's queue
         // instead of waiting on the old next_action_at.
@@ -1083,6 +1085,19 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
         lead.sequence_stage = 1;
         lead.next_action_at = null;
       }
+
+      // Manual reassignment is AUTHORITATIVE (Ali decision 2026-06-19). Ryan is
+      // frequently correcting bad Apollo industry data, so we trust his campaign
+      // choice over the industry-derived vertical: set the badge to match the
+      // chosen campaign and stamp the lead as manually categorized. That stamp
+      // tells the auto-route sweep and the pre-send category gate to leave this
+      // lead alone instead of bouncing it back to the industry's campaign.
+      const manualVertical = campaignVertical(newCampaign?.name);
+      if (manualVertical) lead.vertical = manualVertical;
+      const notes = { ...(lead.notes as Record<string, unknown> || {}) };
+      notes.category_source = 'manual';
+      delete notes.category_review;
+      lead.notes = notes;
     }
     await lead.save();
 
