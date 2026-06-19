@@ -200,6 +200,46 @@ export async function collectBriefingData(): Promise<BriefingData> {
   );
   const recipientEmails = new Set(recipientRows.map(r => r.to_address));
 
+  // --- Per-channel splits (blue=email / teal=LinkedIn across all charts) ---
+  // "emailed" = lead got an outbound email; "LinkedIn-only" = touched (advanced
+  // via LinkedIn, stamping last_contacted_at) but never emailed.
+  const EMAILED = `email IN (SELECT to_address FROM communication_logs WHERE direction='outbound' AND channel='email')`;
+  const LINKEDIN_ONLY = `last_contacted_at IS NOT NULL AND email NOT IN (SELECT to_address FROM communication_logs WHERE direction='outbound')`;
+  const TOUCHED = `(last_contacted_at IS NOT NULL OR email IN (SELECT to_address FROM communication_logs WHERE direction='outbound'))`;
+
+  const campaignChannel = await sequelize.query<{ name: string; emailed: string; linkedin_only: string }>(
+    `SELECT COALESCE(c.name, '(no campaign)') AS name,
+       COUNT(*) FILTER (WHERE l.${EMAILED})::text AS emailed,
+       COUNT(*) FILTER (WHERE l.${LINKEDIN_ONLY})::text AS linkedin_only
+     FROM leads l LEFT JOIN campaigns c ON c.id = l.campaign_id
+     WHERE l.${TOUCHED}
+     GROUP BY c.name ORDER BY COUNT(*) DESC LIMIT 12`,
+    { type: QueryTypes.SELECT },
+  );
+
+  const pipelineChannel = await sequelize.query<{ stage: string; emailed: string; linkedin_only: string }>(
+    `SELECT pipeline_stage::text AS stage,
+       COUNT(*) FILTER (WHERE ${EMAILED})::text AS emailed,
+       COUNT(*) FILTER (WHERE ${LINKEDIN_ONLY})::text AS linkedin_only
+     FROM leads l WHERE l.${TOUCHED}
+     GROUP BY pipeline_stage ORDER BY COUNT(*) DESC`,
+    { type: QueryTypes.SELECT },
+  );
+
+  const dailyLinkedIn = await sequelize.query<{ day: string; count: string }>(
+    `SELECT (last_contacted_at AT TIME ZONE 'America/Chicago')::date::text AS day, COUNT(*)::text AS count
+     FROM leads l WHERE l.${LINKEDIN_ONLY}
+     GROUP BY day ORDER BY day`,
+    { type: QueryTypes.SELECT },
+  );
+
+  const hourLinkedIn = await sequelize.query<{ hour: number; count: string }>(
+    `SELECT EXTRACT(HOUR FROM last_contacted_at AT TIME ZONE 'America/Chicago')::int AS hour, COUNT(*)::text AS count
+     FROM leads l WHERE l.${LINKEDIN_ONLY}
+     GROUP BY hour ORDER BY hour`,
+    { type: QueryTypes.SELECT },
+  );
+
   const [totalsRow] = await sequelize.query<{
     total_sends: string; total_inbound: string; total_active: string;
     total_reachable: string; unique_recipients: string; unique_responded: string;
@@ -250,6 +290,12 @@ export async function collectBriefingData(): Promise<BriefingData> {
     hourCT: hourCT.map(r => ({ hour: r.hour, count: +r.count })),
     touchedPipeline: touchedPipeline.map(r => ({ stage: r.stage, count: +r.count })),
     senders: senders.map(r => ({ from: r.from_address, count: +r.count })),
+    campaignChannel: campaignChannel.map(r => ({ name: r.name, emailed: +r.emailed, linkedinOnly: +r.linkedin_only })),
+    pipelineChannel: pipelineChannel.map(r => ({ stage: r.stage, emailed: +r.emailed, linkedinOnly: +r.linkedin_only })),
+    dailyEmail: dailyCommLogs.map(r => ({ day: r.day, count: +r.count })),
+    dailyLinkedIn: dailyLinkedIn.map(r => ({ day: r.day, count: +r.count })),
+    hourEmail: hourCT.map(r => ({ hour: r.hour, count: +r.count })),
+    hourLinkedIn: hourLinkedIn.map(r => ({ hour: r.hour, count: +r.count })),
   };
 }
 

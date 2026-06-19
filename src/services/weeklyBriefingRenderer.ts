@@ -29,6 +29,23 @@ export interface BriefingData {
   hourCT: Array<{ hour: number; count: number }>;
   touchedPipeline: Array<{ stage: string; count: number }>;
   senders: Array<{ from: string; count: number }>;
+  // Per-channel splits (blue=email / teal=LinkedIn) used across charts 1,3,4,5.
+  campaignChannel: Array<{ name: string; emailed: number; linkedinOnly: number }>;
+  pipelineChannel: Array<{ stage: string; emailed: number; linkedinOnly: number }>;
+  dailyEmail: Array<{ day: string; count: number }>;
+  dailyLinkedIn: Array<{ day: string; count: number }>;
+  hourEmail: Array<{ hour: number; count: number }>;
+  hourLinkedIn: Array<{ hour: number; count: number }>;
+}
+
+// Shared channel palette + legend so every chart reads the same way.
+const CH_EMAIL = '#2B6CB0';   // blue  = email   (PAL.navyLight)
+const CH_LINKEDIN = '#319795'; // teal  = LinkedIn (PAL.teal)
+function channelLegend(x: number, y: number): string {
+  return `<rect x="${x}" y="${y - 9}" width="11" height="11" rx="2" fill="${CH_EMAIL}"/>`
+    + `<text x="${x + 16}" y="${y}" font-size="11" fill="#4A5568">Email</text>`
+    + `<rect x="${x + 70}" y="${y - 9}" width="11" height="11" rx="2" fill="${CH_LINKEDIN}"/>`
+    + `<text x="${x + 86}" y="${y}" font-size="11" fill="#4A5568">LinkedIn</text>`;
 }
 
 const PAL = {
@@ -94,26 +111,27 @@ function section(num: string, headline: string, subhead: string, chart: string, 
   </td></tr></table>`;
 }
 
-// ----- chart 1: campaign bars -----
-function campaignBars(campaigns: BriefingData['campaigns']): string {
-  if (campaigns.length === 0) return '<div style="padding:20px;color:#666;text-align:center">No campaigns have sent in this window.</div>';
-  const maxSends = Math.max(...campaigns.map(c => c.sends), 1);
-  const rowH = 44, top = 30, left = 240, barMaxW = 440, width = 820;
-  const height = top + campaigns.length * rowH + 20;
+// ----- chart 1: campaign bars, split email (blue) vs LinkedIn (teal) -----
+function campaignBars(rows: BriefingData['campaignChannel']): string {
+  if (rows.length === 0) return '<div style="padding:20px;color:#666;text-align:center">No campaigns have reached anyone in this window.</div>';
+  const maxTotal = Math.max(...rows.map(c => c.emailed + c.linkedinOnly), 1);
+  const rowH = 40, top = 40, left = 250, barMaxW = 430, width = 820;
+  const height = top + rows.length * rowH + 28;
   let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
-  svg += `<text x="${left}" y="${top - 12}" font-size="10" font-weight="700" fill="${PAL.textDim}" letter-spacing="0.6">SENDS</text>`;
-  svg += `<text x="${left + barMaxW + 60}" y="${top - 12}" font-size="10" font-weight="700" fill="${PAL.textDim}" letter-spacing="0.6">DATE RANGE</text>`;
-  for (let i = 0; i < campaigns.length; i++) {
-    const c = campaigns[i];
+  svg += channelLegend(left, top - 16);
+  svg += `<text x="${left + barMaxW + 50}" y="${top - 16}" font-size="10" font-weight="700" fill="${PAL.textDim}" letter-spacing="0.6">LEADS REACHED</text>`;
+  for (let i = 0; i < rows.length; i++) {
+    const c = rows[i];
+    const total = c.emailed + c.linkedinOnly;
     const y = top + i * rowH;
-    const w = Math.max(3, (c.sends / maxSends) * barMaxW);
-    const color = c.name.includes('Investor') ? PAL.gold : PAL.navyLight;
+    const we = (c.emailed / maxTotal) * barMaxW;
+    const wl = (c.linkedinOnly / maxTotal) * barMaxW;
     const label = c.name.replace('Cold Outreach - ', '');
-    svg += `<text x="${left - 14}" y="${y + 22}" text-anchor="end" font-size="12" font-weight="600" fill="${PAL.text}">${escXml(label)}</text>`;
-    svg += `<rect x="${left}" y="${y + 8}" width="${w}" height="22" rx="3" fill="${color}"/>`;
-    svg += `<text x="${left + w + 10}" y="${y + 24}" font-size="13" font-weight="700" fill="${PAL.text}">${c.sends}</text>`;
-    svg += `<text x="${left + w + 38}" y="${y + 24}" font-size="11" fill="${PAL.textDim}">(${c.recipients} unique)</text>`;
-    svg += `<text x="${left + barMaxW + 60}" y="${y + 24}" font-size="11" fill="${PAL.textMuted}">${c.firstSend} to ${c.lastSend}</text>`;
+    svg += `<text x="${left - 14}" y="${y + 20}" text-anchor="end" font-size="12" font-weight="600" fill="${PAL.text}">${escXml(label)}</text>`;
+    if (c.emailed > 0) svg += `<rect x="${left}" y="${y + 6}" width="${Math.max(2, we)}" height="22" rx="2" fill="${CH_EMAIL}"/>`;
+    if (c.linkedinOnly > 0) svg += `<rect x="${left + we}" y="${y + 6}" width="${Math.max(2, wl)}" height="22" rx="2" fill="${CH_LINKEDIN}"/>`;
+    svg += `<text x="${left + we + wl + 10}" y="${y + 22}" font-size="12" font-weight="700" fill="${PAL.text}">${total}</text>`;
+    svg += `<text x="${left + we + wl + 34}" y="${y + 22}" font-size="10" fill="${PAL.textDim}">${c.emailed}e / ${c.linkedinOnly}li</text>`;
   }
   return svgWrap(width, height, svg);
 }
@@ -143,13 +161,13 @@ function channelMixBars(emailed: number, linkedinOnly: number): string {
   return svgWrap(width, height, svg);
 }
 
-// ----- chart 2: daily timeline -----
-function dailyTimeline(commLogs: BriefingData['dailyCommLogs'], leadTouches: BriefingData['dailyLeadTouches']): string {
-  const all = new Map<string, { day: string; leads: number; comms: number }>();
-  for (const r of leadTouches) all.set(r.day, { day: r.day, leads: r.count, comms: 0 });
-  for (const r of commLogs) {
-    const ex = all.get(r.day) || { day: r.day, leads: 0, comms: 0 };
-    ex.comms = r.count;
+// ----- chart 3: daily timeline, email (blue) vs LinkedIn (teal) -----
+function dailyTimeline(emailByDay: BriefingData['dailyEmail'], linkedinByDay: BriefingData['dailyLinkedIn']): string {
+  const all = new Map<string, { day: string; email: number; li: number }>();
+  for (const r of emailByDay) all.set(r.day, { day: r.day, email: r.count, li: 0 });
+  for (const r of linkedinByDay) {
+    const ex = all.get(r.day) || { day: r.day, email: 0, li: 0 };
+    ex.li = r.count;
     all.set(r.day, ex);
   }
   let days = [...all.values()].sort((a, b) => a.day.localeCompare(b.day));
@@ -159,15 +177,16 @@ function dailyTimeline(commLogs: BriefingData['dailyCommLogs'], leadTouches: Bri
     const filled = [];
     for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
       const dd = new Date(t).toISOString().slice(0, 10);
-      filled.push(all.get(dd) || { day: dd, leads: 0, comms: 0 });
+      filled.push(all.get(dd) || { day: dd, email: 0, li: 0 });
     }
     days = filled;
   }
   if (days.length === 0) return '<div style="padding:20px;color:#666;text-align:center">No activity recorded.</div>';
-  const max = Math.max(...days.map(d => Math.max(d.leads, d.comms)), 1);
+  const max = Math.max(...days.map(d => Math.max(d.email, d.li)), 1);
   const left = 50, top = 30, bottom = 50, right = 30, width = 820, height = 280;
   const plotW = width - left - right, plotH = height - top - bottom;
-  const barW = Math.max(2, Math.floor(plotW / days.length) - 2);
+  const slot = plotW / days.length;
+  const barW = Math.max(2, Math.floor(slot / 2) - 1);
   let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
   for (let i = 0; i <= 4; i++) {
     const v = Math.round((max * i) / 4);
@@ -176,68 +195,64 @@ function dailyTimeline(commLogs: BriefingData['dailyCommLogs'], leadTouches: Bri
     svg += `<text x="${left - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="${PAL.textDim}">${v}</text>`;
   }
   for (let i = 0; i < days.length; i++) {
-    const x = left + i * (plotW / days.length);
+    const x = left + i * slot;
     const dy = days[i];
-    const hLeads = (dy.leads / max) * plotH;
-    const hComms = (dy.comms / max) * plotH;
-    if (dy.leads > 0) svg += `<rect x="${x}" y="${top + plotH - hLeads}" width="${barW}" height="${hLeads}" fill="${PAL.navyLight}" fill-opacity="0.45" rx="1.5"/>`;
-    if (dy.comms > 0) svg += `<rect x="${x}" y="${top + plotH - hComms}" width="${barW}" height="${hComms}" fill="${PAL.gold}" rx="1.5"/>`;
+    const he = (dy.email / max) * plotH;
+    const hl = (dy.li / max) * plotH;
+    if (dy.email > 0) svg += `<rect x="${x}" y="${top + plotH - he}" width="${barW}" height="${he}" fill="${CH_EMAIL}" rx="1.5"/>`;
+    if (dy.li > 0) svg += `<rect x="${x + barW + 1}" y="${top + plotH - hl}" width="${barW}" height="${hl}" fill="${CH_LINKEDIN}" rx="1.5"/>`;
   }
   const labelStep = Math.max(1, Math.floor(days.length / 8));
   for (let i = 0; i < days.length; i += labelStep) {
-    const x = left + i * (plotW / days.length) + barW / 2;
+    const x = left + i * slot + barW;
     svg += `<text x="${x}" y="${top + plotH + 14}" text-anchor="middle" font-size="10" fill="${PAL.textMuted}">${days[i].day.slice(5)}</text>`;
   }
-  const legY = height - 18;
-  svg += `<rect x="${left}" y="${legY - 9}" width="11" height="11" fill="${PAL.navyLight}" fill-opacity="0.45" rx="2"/>`;
-  svg += `<text x="${left + 16}" y="${legY}" font-size="11" fill="${PAL.textMuted}">Leads with last_contacted_at on this day (historical footprint)</text>`;
-  svg += `<rect x="${left + 380}" y="${legY - 9}" width="11" height="11" fill="${PAL.gold}" rx="2"/>`;
-  svg += `<text x="${left + 396}" y="${legY}" font-size="11" fill="${PAL.textMuted}">Logged sends in communication_logs (since 2026-05-14)</text>`;
+  svg += channelLegend(left, height - 14);
   return svgWrap(width, height, svg);
 }
 
-// ----- chart 3: pipeline stage bars -----
-function pipelineDonut(stages: BriefingData['touchedPipeline']): string {
-  const stageMap = new Map(stages.map(s => [s.stage, s.count]));
+// ----- chart 4: pipeline stage bars, stacked email (blue) vs LinkedIn (teal) -----
+function pipelineDonut(stages: BriefingData['pipelineChannel']): string {
+  const stageMap = new Map(stages.map(s => [s.stage, s]));
   const STAGE_ORDER = ['new_lead', 'contacted', 'replied', 'meeting_scheduled', 'proposal_sent', 'negotiation', 'enrolled', 'lost'];
-  const colors: Record<string, string> = {
-    new_lead: PAL.textDim, contacted: PAL.navyLight, replied: PAL.green,
-    meeting_scheduled: PAL.purple, proposal_sent: PAL.gold, negotiation: PAL.red,
-    enrolled: PAL.greenDark, lost: '#A0AEC0',
-  };
-  const rows = STAGE_ORDER.map(s => ({ stage: s, count: stageMap.get(s) || 0 }));
-  const totalShown = rows.reduce((a, b) => a + b.count, 0);
-  const left = 200, top = 30, barMaxW = 480, rowH = 32, width = 820;
+  const rows = STAGE_ORDER.map(s => stageMap.get(s) || { stage: s, emailed: 0, linkedinOnly: 0 });
+  const left = 200, top = 40, barMaxW = 470, rowH = 32, width = 820;
   const height = top + rows.length * rowH + 20;
-  const maxCount = Math.max(...rows.map(r => r.count), 1);
+  const maxCount = Math.max(...rows.map(r => r.emailed + r.linkedinOnly), 1);
   let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
+  svg += channelLegend(left, top - 16);
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    const total = r.emailed + r.linkedinOnly;
     const y = top + i * rowH;
-    const pct = totalShown > 0 ? (r.count / totalShown) * 100 : 0;
-    const w = Math.max(2, (r.count / maxCount) * barMaxW);
-    const c = colors[r.stage];
+    const we = (r.emailed / maxCount) * barMaxW;
+    const wl = (r.linkedinOnly / maxCount) * barMaxW;
     svg += `<text x="${left - 14}" y="${y + 22}" text-anchor="end" font-size="13" font-weight="600" fill="${PAL.text}">${escXml(r.stage.replace(/_/g, ' '))}</text>`;
-    svg += `<rect x="${left}" y="${y + 4}" width="${w}" height="24" rx="3" fill="${c}" fill-opacity="${r.count > 0 ? 0.95 : 0.25}"/>`;
-    if (r.count > 0) {
-      svg += `<text x="${left + w + 10}" y="${y + 22}" font-size="13" font-weight="700" fill="${PAL.text}">${r.count}</text>`;
-      svg += `<text x="${left + w + 40}" y="${y + 22}" font-size="11" fill="${PAL.textDim}">${pct.toFixed(0)}%</text>`;
-    } else {
-      svg += `<text x="${left + w + 10}" y="${y + 22}" font-size="11" fill="${PAL.textDim}">0</text>`;
+    if (total === 0) {
+      svg += `<rect x="${left}" y="${y + 4}" width="3" height="24" rx="2" fill="${PAL.textDim}" fill-opacity="0.25"/>`;
+      svg += `<text x="${left + 12}" y="${y + 22}" font-size="11" fill="${PAL.textDim}">0</text>`;
+      continue;
     }
+    if (r.emailed > 0) svg += `<rect x="${left}" y="${y + 4}" width="${Math.max(2, we)}" height="24" rx="2" fill="${CH_EMAIL}"/>`;
+    if (r.linkedinOnly > 0) svg += `<rect x="${left + we}" y="${y + 4}" width="${Math.max(2, wl)}" height="24" rx="2" fill="${CH_LINKEDIN}"/>`;
+    svg += `<text x="${left + we + wl + 10}" y="${y + 22}" font-size="13" font-weight="700" fill="${PAL.text}">${total}</text>`;
+    svg += `<text x="${left + we + wl + 36}" y="${y + 22}" font-size="10" fill="${PAL.textDim}">${r.emailed}e / ${r.linkedinOnly}li</text>`;
   }
   return svgWrap(width, height, svg);
 }
 
-// ----- chart 4: hour-of-day bars -----
-function hourBars(hours: BriefingData['hourCT']): string {
-  const map = new Map(hours.map(h => [h.hour, h.count]));
-  const data = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: map.get(h) || 0 }));
-  const max = Math.max(...data.map(d => d.count), 1);
-  const left = 40, top = 30, bottom = 50, right = 20, width = 820, height = 240;
+// ----- chart 5: hour-of-day bars, email (blue) vs LinkedIn (teal) grouped -----
+function hourBars(emailHours: BriefingData['hourEmail'], linkedinHours: BriefingData['hourLinkedIn']): string {
+  const em = new Map(emailHours.map(h => [h.hour, h.count]));
+  const li = new Map(linkedinHours.map(h => [h.hour, h.count]));
+  const data = Array.from({ length: 24 }, (_, h) => ({ hour: h, email: em.get(h) || 0, li: li.get(h) || 0 }));
+  const max = Math.max(...data.map(d => Math.max(d.email, d.li)), 1);
+  const left = 40, top = 40, bottom = 50, right = 20, width = 820, height = 250;
   const plotW = width - left - right, plotH = height - top - bottom;
-  const barW = Math.floor(plotW / 24) - 4;
+  const slot = plotW / 24;
+  const barW = Math.max(2, Math.floor(slot / 2) - 1);
   let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
+  svg += channelLegend(left, top - 16);
   for (let i = 0; i <= 4; i++) {
     const v = Math.round((max * i) / 4);
     const y = top + plotH - (i / 4) * plotH;
@@ -245,22 +260,19 @@ function hourBars(hours: BriefingData['hourCT']): string {
     svg += `<text x="${left - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="${PAL.textDim}">${v}</text>`;
   }
   for (let h = 0; h < 24; h++) {
-    const x = left + h * (plotW / 24) + 2;
-    const v = data[h].count;
-    const hgt = v === 0 ? 1 : (v / max) * plotH;
-    const inBiz = h >= 8 && h < 18;
-    const color = inBiz ? PAL.navy : PAL.textDim;
-    svg += `<rect x="${x}" y="${top + plotH - hgt}" width="${barW}" height="${hgt}" rx="2" fill="${color}" fill-opacity="${v === 0 ? 0.15 : 0.95}"/>`;
-    if (v > 0) svg += `<text x="${x + barW / 2}" y="${top + plotH - hgt - 4}" text-anchor="middle" font-size="10" font-weight="700" fill="${PAL.text}">${v}</text>`;
+    const x = left + h * slot;
+    const he = data[h].email === 0 ? 0 : (data[h].email / max) * plotH;
+    const hl = data[h].li === 0 ? 0 : (data[h].li / max) * plotH;
+    if (he > 0) svg += `<rect x="${x}" y="${top + plotH - he}" width="${barW}" height="${he}" rx="2" fill="${CH_EMAIL}"/>`;
+    if (hl > 0) svg += `<rect x="${x + barW + 1}" y="${top + plotH - hl}" width="${barW}" height="${hl}" rx="2" fill="${CH_LINKEDIN}"/>`;
     if (h % 3 === 0) {
       const label = h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
-      svg += `<text x="${x + barW / 2}" y="${top + plotH + 14}" text-anchor="middle" font-size="10" fill="${PAL.textMuted}">${label}</text>`;
+      svg += `<text x="${x + barW}" y="${top + plotH + 14}" text-anchor="middle" font-size="10" fill="${PAL.textMuted}">${label}</text>`;
     }
   }
-  const bizStart = left + 8 * (plotW / 24);
-  const bizEnd = left + 18 * (plotW / 24);
-  svg += `<rect x="${bizStart}" y="${top - 6}" width="${bizEnd - bizStart}" height="3" fill="${PAL.gold}"/>`;
-  svg += `<text x="${(bizStart + bizEnd) / 2}" y="${top - 12}" text-anchor="middle" font-size="10" font-weight="700" fill="${PAL.gold}">BUSINESS HOURS (CT)</text>`;
+  const bizStart = left + 8 * slot;
+  const bizEnd = left + 18 * slot;
+  svg += `<rect x="${bizStart}" y="${top - 4}" width="${bizEnd - bizStart}" height="3" fill="${PAL.gold}"/>`;
   return svgWrap(width, height, svg);
 }
 
@@ -365,7 +377,7 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   ${section('01', 'One campaign is doing the work',
     `Investor Outreach has fired ${investor.sends} of ${d.totalSends} logged sends (${investorShareTxt}). The vertical cold-outreach campaigns are at single-digit touches each.`,
-    campaignBars(d.campaigns),
+    campaignBars(d.campaignChannel),
     `<strong>Portfolio balance check.</strong> Investor Outreach is the only campaign with sustained activity; the vertical campaigns together total <strong>${verticalSends} sends</strong>. Either the vertical campaigns are not being scheduled, or the system is concentrating budget on the investor list while the vertical lists wait.`)}
 
   ${section('02', 'Email vs LinkedIn: who actually got which touch',
@@ -375,17 +387,17 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   ${section('03', 'Outreach cadence',
     `${d.daysSinceLastSend} days since last send. The historical footprint via last_contacted_at extends back to 2026-04-16; comm_logs only started populating 5/14.`,
-    dailyTimeline(d.dailyCommLogs, d.dailyLeadTouches),
+    dailyTimeline(d.dailyEmail, d.dailyLinkedIn),
     `<strong>Cadence reading.</strong> A real cadence would show daily activity at some baseline volume. If this chart still looks like spikes rather than a flat baseline, the scheduler is not feeding the queue, or the queue is empty.`)}
 
   ${section('04', 'Every touched lead is parked at "contacted"',
     `${d.touchedPipeline.find(p => p.stage === 'contacted')?.count || 0} of ${d.totalTouchedLeads} touched leads sit at the "contacted" stage. Replies should advance leads to "replied" or beyond.`,
-    pipelineDonut(d.touchedPipeline),
+    pipelineDonut(d.pipelineChannel),
     `<strong>Pipeline forward motion.</strong> Replies should advance a lead from contacted to replied. We now know replies ARE coming in (the replies metric above is matched live from Ryan's inbox), but touched leads still sit at "contacted" because nothing writes those replies back to the lead's pipeline stage yet. The missing piece is reply write-back, not the responses themselves.`)}
 
   ${section('05', 'Send timing',
     `${businessHours} of ${d.totalSends} sends land between 9 and 11 AM Central. ${afterHours > 0 ? `${afterHours} after-hours sends to inspect.` : 'No after-hours sends this period.'}`,
-    hourBars(d.hourCT),
+    hourBars(d.hourEmail, d.hourLinkedIn),
     `<strong>Timing health.</strong> The mid-morning peak is when recipients are at their desks, which is the right window for an opener. After-hours sends usually indicate a job that ran with a stale or wrong timezone setting; worth checking the scheduler logs to confirm.`)}
 
   ${section('06', 'Pool utilization',
@@ -400,6 +412,7 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-radius:8px;margin-top:18px"><tr><td style="padding:16px;font-size:11px;color:${PAL.textMuted};line-height:1.6">
     <div><strong style="color:${PAL.text}">Data sources:</strong> communication_logs (${d.totalSends} outbound email rows; LinkedIn touches are not logged here), leads (${fmtNumber(d.totalActive)} active, ${d.totalTouchedLeads} reached: ${fmtNumber(d.leadsEmailed)} emailed + ${fmtNumber(d.leadsLinkedInOnly)} LinkedIn-only), campaigns (${d.activeCampaigns} live), replies (${d.totalInbound} ${d.replySource === 'graph_inbox' ? 'matched live from rlandry@landjet.com inbox' : d.replySource === 'unavailable' ? 'inbox read unavailable' : 'from comm_logs'}).</div>
+    <div style="margin-top:6px"><strong style="color:${PAL.text}">In progress:</strong> outreach geography map (needs lead location backfilled from Apollo) and LinkedIn connection-acceptance rate (needs Ryan's LinkedIn notification inbox connected). Both arrive once those data sources are wired.</div>
     <div style="margin-top:6px"><strong style="color:${PAL.text}">Generated:</strong> ${now.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Chicago' })} CT via weeklyBriefingService.ts</div>
   </td></tr></table>
 
