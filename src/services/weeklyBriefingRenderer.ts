@@ -15,6 +15,7 @@ export interface BriefingData {
   totalActive: number;
   totalReachable: number;
   uniqueRecipients: number;
+  uniqueRespondedRecipients: number;
   activeCampaigns: number;
   firstSend: string;
   lastSend: string;
@@ -302,10 +303,19 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
     <td width="33%" style="padding-left:6px;vertical-align:top">${kpiTile('Replies received', fmtNumber(d.totalInbound), `${d.totalInbound > 0 ? 'tracked via inbox-match' : 'none in comm_logs yet'}`, d.totalInbound > 0 ? PAL.green : PAL.red)}</td>
   </tr></table>
 
-  <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:24px"><tr>
+  <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:14px"><tr>
     <td width="33%" style="padding-right:6px;vertical-align:top">${kpiTile('Live campaigns', fmtNumber(d.activeCampaigns), `${d.campaigns.length} have actually sent`, PAL.teal)}</td>
     <td width="34%" style="padding:0 6px;vertical-align:top">${kpiTile('Pool reach', `${touchRatePct}%`, `${fmtNumber(d.uniqueRecipients)} of ${fmtNumber(d.totalReachable)} reachable leads`, PAL.gold)}</td>
     <td width="33%" style="padding-left:6px;vertical-align:top">${kpiTile('Days since last send', fmtNumber(d.daysSinceLastSend), `last send ${d.lastSend}`, d.daysSinceLastSend > 3 ? PAL.red : PAL.green)}</td>
+  </tr></table>
+
+  <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:24px"><tr>
+    <td width="100%" style="vertical-align:top">${kpiTile(
+      'Responded rate (unique recipients who replied / unique recipients we sent to)',
+      d.uniqueRecipients > 0 ? `${((d.uniqueRespondedRecipients / d.uniqueRecipients) * 100).toFixed(2)}%` : 'n/a',
+      `${fmtNumber(d.uniqueRespondedRecipients)} of ${fmtNumber(d.uniqueRecipients)} recipients have replied | inbox-match config still pointed at the wrong mailbox; real number arrives once OAuth on rlandry@landjet.com is wired`,
+      d.uniqueRespondedRecipients > 0 ? PAL.green : PAL.red,
+    )}</td>
   </tr></table>
 
   ${section('01', 'One campaign is doing the work',

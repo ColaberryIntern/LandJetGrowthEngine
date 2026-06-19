@@ -100,8 +100,9 @@ export async function collectBriefingData(): Promise<BriefingData> {
 
   const [totalsRow] = await sequelize.query<{
     total_sends: string; total_inbound: string; total_active: string;
-    total_reachable: string; unique_recipients: string; active_campaigns: string;
-    total_touched: string; first_send: string | null; last_send: string | null;
+    total_reachable: string; unique_recipients: string; unique_responded: string;
+    active_campaigns: string; total_touched: string;
+    first_send: string | null; last_send: string | null;
   }>(
     `SELECT
        (SELECT COUNT(*)::text FROM communication_logs WHERE direction='outbound') AS total_sends,
@@ -109,6 +110,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
        (SELECT COUNT(*)::text FROM leads WHERE status='active') AS total_active,
        (SELECT COUNT(*)::text FROM leads WHERE status='active' AND email IS NOT NULL) AS total_reachable,
        (SELECT COUNT(DISTINCT to_address)::text FROM communication_logs WHERE direction='outbound') AS unique_recipients,
+       (SELECT COUNT(DISTINCT from_address)::text FROM communication_logs WHERE direction='inbound' AND from_address IN (SELECT to_address FROM communication_logs WHERE direction='outbound')) AS unique_responded,
        (SELECT COUNT(*)::text FROM campaigns WHERE approval_status='live') AS active_campaigns,
        (SELECT COUNT(*)::text FROM leads WHERE last_contacted_at IS NOT NULL OR email IN (SELECT to_address FROM communication_logs WHERE direction='outbound')) AS total_touched,
        (SELECT MIN(created_at)::date::text FROM communication_logs WHERE direction='outbound') AS first_send,
@@ -125,6 +127,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
     totalActive: +totalsRow.total_active,
     totalReachable: +totalsRow.total_reachable,
     uniqueRecipients: +totalsRow.unique_recipients,
+    uniqueRespondedRecipients: +totalsRow.unique_responded,
     totalTouchedLeads: +totalsRow.total_touched,
     activeCampaigns: +totalsRow.active_campaigns,
     firstSend: totalsRow.first_send || lastSend,
@@ -198,7 +201,9 @@ export async function sendWeeklyBriefing(now: Date = new Date()): Promise<{ mess
   const data = await collectBriefingData();
   const html = stripEmDashes(renderBriefingHtml(data, now));
   const { html: htmlWithCids, attachments } = await rasterizeSvgs(html);
-  const finalHtml = htmlWithCids + SIG_HTML;
+  const finalHtml = htmlWithCids.includes('</body>')
+    ? htmlWithCids.replace('</body>', SIG_HTML + '</body>')
+    : htmlWithCids + SIG_HTML;
 
   const recipients = (process.env.WEEKLY_BRIEFING_RECIPIENTS || DEFAULT_RECIPIENTS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 
