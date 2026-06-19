@@ -39,8 +39,8 @@ export interface BriefingData {
 }
 
 // Shared channel palette + legend so every chart reads the same way.
-const CH_EMAIL = '#2B6CB0';   // blue  = email   (PAL.navyLight)
-const CH_LINKEDIN = '#319795'; // teal  = LinkedIn (PAL.teal)
+const CH_EMAIL = '#38A169';   // green = email    (PAL.green)
+const CH_LINKEDIN = '#2B6CB0'; // blue  = LinkedIn (PAL.navyLight)
 function channelLegend(x: number, y: number): string {
   return `<rect x="${x}" y="${y - 9}" width="11" height="11" rx="2" fill="${CH_EMAIL}"/>`
     + `<text x="${x + 16}" y="${y}" font-size="11" fill="#4A5568">Email</text>`
@@ -140,8 +140,8 @@ function campaignBars(rows: BriefingData['campaignChannel']): string {
 function channelMixBars(emailed: number, linkedinOnly: number): string {
   const total = emailed + linkedinOnly;
   const rows = [
-    { label: 'Emailed', sub: 'received an email send', count: emailed, color: PAL.navyLight },
-    { label: 'LinkedIn only', sub: 'touched via LinkedIn, never emailed', count: linkedinOnly, color: PAL.teal },
+    { label: 'Emailed', sub: 'received an email send', count: emailed, color: CH_EMAIL },
+    { label: 'LinkedIn only', sub: 'touched via LinkedIn, never emailed', count: linkedinOnly, color: CH_LINKEDIN },
   ];
   const max = Math.max(emailed, linkedinOnly, 1);
   const left = 150, top = 28, barMaxW = 480, rowH = 56, width = 820;
