@@ -1010,3 +1010,17 @@ export function sendReservationQuote(id: number) {
   return request<{ sent: boolean; dry: boolean; to: string | null; draft: { subject: string; text: string } }>(
     `/admin/quotes/reservations/${id}/send`, { method: 'POST' });
 }
+
+export interface ReservationMetrics {
+  by_status: { status: string; n: number; avg_conf: number; value: number }[];
+  by_source: { source: string; n: number }[];
+  by_market: { market: string; n: number }[];
+  by_service: { service_type: string; n: number }[];
+  funnel: { total: number; quoted: number; sent: number; replied: number; total_value: number };
+  confidence: { high: number; mid: number; low: number; none: number };
+  autosend_threshold: number;
+}
+
+export function getReservationMetrics() {
+  return request<ReservationMetrics>(`/admin/quotes/reservations/metrics`);
+}

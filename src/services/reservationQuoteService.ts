@@ -182,6 +182,43 @@ export function autoSendEligible(rq: { status: string; confidence: string | numb
   return rq.status === 'auto_ready' && Number(rq.confidence) >= AUTOSEND_MIN_CONFIDENCE;
 }
 
+/**
+ * Aggregate metrics for the quote-engine dashboard (GOALS - Observability).
+ * All counts come from reservation_quotes; no user input, fixed SQL.
+ */
+export async function getReservationMetrics(): Promise<Record<string, unknown>> {
+  const seq = ReservationQuote.sequelize!;
+  const q = async (sql: string) => (await seq.query(sql))[0] as any[];
+
+  const [byStatus, bySource, byMarket, byService, funnelRows, confRows] = await Promise.all([
+    q(`SELECT status, count(*)::int n, round(avg(confidence),2)::float avg_conf, coalesce(round(sum(quote_total),2),0)::float value FROM reservation_quotes GROUP BY status ORDER BY n DESC`),
+    q(`SELECT coalesce(result->>'source','unparsed') source, count(*)::int n FROM reservation_quotes GROUP BY 1 ORDER BY n DESC`),
+    q(`SELECT coalesce(market,'(unknown)') market, count(*)::int n FROM reservation_quotes GROUP BY 1 ORDER BY n DESC LIMIT 8`),
+    q(`SELECT coalesce(result->'quote'->>'service_type','(n/a)') service_type, count(*)::int n FROM reservation_quotes GROUP BY 1 ORDER BY n DESC`),
+    q(`SELECT count(*)::int total,
+              count(*) FILTER (WHERE result->'prepared' IS NOT NULL OR result->'sent' IS NOT NULL)::int quoted,
+              count(*) FILTER (WHERE result->'sent' IS NOT NULL)::int sent,
+              count(responded_at)::int replied,
+              coalesce(round(sum(quote_total),2),0)::float total_value
+       FROM reservation_quotes`),
+    q(`SELECT count(*) FILTER (WHERE confidence >= 0.9)::int high,
+              count(*) FILTER (WHERE confidence >= 0.5 AND confidence < 0.9)::int mid,
+              count(*) FILTER (WHERE confidence > 0 AND confidence < 0.5)::int low,
+              count(*) FILTER (WHERE confidence = 0)::int none
+       FROM reservation_quotes`),
+  ]);
+
+  return {
+    by_status: byStatus,
+    by_source: bySource,
+    by_market: byMarket,
+    by_service: byService,
+    funnel: funnelRows[0] || { total: 0, quoted: 0, sent: 0, replied: 0, total_value: 0 },
+    confidence: confRows[0] || { high: 0, mid: 0, low: 0, none: 0 },
+    autosend_threshold: AUTOSEND_MIN_CONFIDENCE,
+  };
+}
+
 export interface IngestCounts {
   fetched: number; created: number; skipped_existing: number;
   auto_ready: number; needs_review: number; forward: number; manual: number; errors: number;

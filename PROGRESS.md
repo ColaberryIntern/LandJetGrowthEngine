@@ -47,6 +47,12 @@ Last updated: 2026-06-19
   - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
   - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
 
+- [x] **Quote Engine dashboard (GOALS-Observability)**
+  - Date: 2026-06-20
+  - What changed: New getReservationMetrics() aggregates reservation_quotes (by status w/ avg confidence + value, by source bookrides/nl, by market, by service type, the quoted/sent/replied funnel, confidence distribution vs the 0.90 line) behind GET /api/admin/quotes/reservations/metrics. New [/reservations/dashboard](frontend/app/reservations/dashboard/page.tsx) renders KPI cards + bars + a confidence-distribution panel that calls out the trust-before-intelligence auto-send threshold and that auto-send is OFF (all human-reviewed). Linked from the queue header.
+  - Verification: backend + frontend tsc --noEmit clean (exit 0). Deploy + endpoint/page check this session.
+  - Notes: directly fills the GOALS-Observability gap noted in the TBI alignment doc (monitoring/metrics + explainability of the confidence posture).
+
 - [x] **TBI framework alignment: read the actual INPACT/GOALS, encoded the Lexicon 0.90 auto-send gate, wrote the mapping doc**
   - Date: 2026-06-20
   - What changed: Read the real frameworks from the public repo (manuscript ch.2 INPACT, ch.7 GOALS, quick reference). Mapped the quote engine to each tenet in [docs/trust-before-intelligence-quote-engine.md](docs/trust-before-intelligence-quote-engine.md). Encoded the one autonomy rule we were missing -- GOALS-Lexicon "below the confidence threshold, do not guess, hand to a human": new  +  in [reservationQuoteService.ts](src/services/reservationQuoteService.ts) so any future auto-send may only fire on auto_ready AND confidence >= 0.90; everything else stays human-reviewed.

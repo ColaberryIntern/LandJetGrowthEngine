@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { getReservations, ingestReservations, sendReservationQuote, type ReservationQuoteRow } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
 
@@ -158,10 +159,15 @@ export default function ReservationsPage() {
             Nothing is sent to a customer automatically. (Trust before intelligence.)
           </p>
         </div>
-        <button onClick={refreshFromMailbox} disabled={refreshing}
-          className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
-          {refreshing ? 'Checking mailbox...' : 'Refresh from mailbox'}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/reservations/dashboard" className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            &#128202; Dashboard
+          </Link>
+          <button onClick={refreshFromMailbox} disabled={refreshing}
+            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+            {refreshing ? 'Checking mailbox...' : 'Refresh from mailbox'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
