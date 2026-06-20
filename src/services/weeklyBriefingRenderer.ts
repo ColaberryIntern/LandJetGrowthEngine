@@ -37,7 +37,7 @@ export interface BriefingData {
   hourEmail: Array<{ hour: number; count: number }>;
   hourLinkedIn: Array<{ hour: number; count: number }>;
   // Distinct leads who replied (validated by replyIngestionService), newest first.
-  responders: Array<{ name: string; company: string | null; subject: string | null; day: string }>;
+  responders: Array<{ name: string; company: string | null; subject: string | null; body: string | null; day: string }>;
 }
 
 // Shared channel palette + legend so every chart reads the same way.
@@ -337,12 +337,15 @@ function respondedRateSub(d: BriefingData): string {
 // responders so the reply number is not just a count but names you can act on.
 function respondersCard(responders: BriefingData['responders']): string {
   if (responders.length === 0) return '';
-  const rows = responders.slice(0, 20).map((r) => `<tr>
-      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:13px;font-weight:600;color:${PAL.text};white-space:nowrap">${escXml(r.name)}</td>
-      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:12px;color:${PAL.textMuted}">${escXml(r.company || '')}</td>
-      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:12px;color:${PAL.textDim}">${escXml((r.subject || '').slice(0, 64))}</td>
-      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:11px;color:${PAL.textDim};white-space:nowrap">${escXml(r.day)}</td>
-    </tr>`).join('');
+  const rows = responders.slice(0, 20).map((r) => {
+    const snippet = (r.body || '').replace(/\s+/g, ' ').trim();
+    const shown = snippet.slice(0, 240);
+    return `<tr><td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder}">
+      <div style="font-size:13px"><span style="font-weight:700;color:${PAL.text}">${escXml(r.name)}</span>${r.company ? `<span style="color:${PAL.textMuted}"> &middot; ${escXml(r.company)}</span>` : ''}<span style="color:${PAL.textDim};font-size:11px"> &middot; ${escXml(r.day)}</span></div>
+      ${r.subject ? `<div style="font-size:12px;color:${PAL.textMuted};margin-top:3px">${escXml(r.subject)}</div>` : ''}
+      ${shown ? `<div style="font-size:12px;color:${PAL.text};margin-top:5px;line-height:1.5">${escXml(shown)}${snippet.length > 240 ? '&hellip;' : ''}</div>` : ''}
+    </td></tr>`;
+  }).join('');
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-top:4px solid ${PAL.green};border-radius:8px;margin-bottom:24px">
     <tr><td style="padding:14px 16px 4px">
       <div style="font-size:10px;font-weight:700;color:${PAL.green};text-transform:uppercase;letter-spacing:.08em">Who replied (${responders.length})</div>

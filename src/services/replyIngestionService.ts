@@ -74,7 +74,7 @@ async function getGraphToken(): Promise<string | null> {
   } catch { return null; }
 }
 
-interface InboxMsg { id: string; from: string; subject: string; conversationId: string; received: string; }
+interface InboxMsg { id: string; from: string; subject: string; conversationId: string; received: string; body: string; }
 
 async function graphJson(url: string, token: string): Promise<any> {
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -136,7 +136,7 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
   // pull inbox messages since `since`
   const msgs: InboxMsg[] = [];
   let url: string | null = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(REPLY_MAILBOX)}/mailFolders/inbox/messages`
-    + `?$top=100&$select=id,from,subject,conversationId,receivedDateTime&$filter=${encodeURIComponent(`receivedDateTime ge ${since}T00:00:00Z`)}`;
+    + `?$top=100&$select=id,from,subject,conversationId,receivedDateTime,bodyPreview&$filter=${encodeURIComponent(`receivedDateTime ge ${since}T00:00:00Z`)}`;
   let pages = 0;
   try {
     while (url && pages < 10) {
@@ -148,6 +148,7 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
           subject: m.subject || '',
           conversationId: m.conversationId,
           received: m.receivedDateTime || '',
+          body: (m.bodyPreview || '').trim(),
         });
       }
       url = j['@odata.nextLink'] || null;
@@ -165,8 +166,9 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
     result.candidates++;
     try {
       // dedup: already ingested this message?
-      const existing = await CommunicationLog.findOne({ where: { provider_message_id: m.id, direction: 'inbound' }, attributes: ['id'] });
+      const existing = await CommunicationLog.findOne({ where: { provider_message_id: m.id, direction: 'inbound' }, attributes: ['id', 'body'] });
       const already = !!existing;
+      const bodyText = m.body ? m.body.slice(0, 2000) : null;
 
       const valid = await weReachedFirst(m.conversationId, m.from, m.received, token);
       if (!valid) continue;
@@ -189,7 +191,7 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
             to_address: REPLY_MAILBOX,
             from_address: m.from,
             subject: m.subject.slice(0, 255),
-            body: null,
+            body: bodyText,
             provider: 'microsoft_graph',
             provider_message_id: m.id,
             provider_response: null,
@@ -198,6 +200,9 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
           } as any);
           detail.persisted = true;
         }
+      } else if (persist && bodyText && !(existing as any).body) {
+        // Backfill the body on a row recorded before we captured message bodies.
+        await CommunicationLog.update({ body: bodyText }, { where: { id: (existing as any).id } });
       }
 
       // 2) Advance the lead to 'replied' at most once per run (never demote).
