@@ -987,8 +987,8 @@ export interface ReservationQuoteRow {
   conversation_id?: string | null;
   responded_at?: string | null;
   result: {
-    trip?: { passenger_name?: string; pickup_address?: string; dropoff_address?: string; service_type?: string; date_of_service?: string; passengers?: number };
-    quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string };
+    trip?: { passenger_name?: string; pickup_address?: string; dropoff_address?: string; service_type?: string; date_of_service?: string; start_time?: string; passengers?: number };
+    quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string; service_type?: string; customer_category?: string; market?: string; approvals_needed?: string[] };
     manual_reason?: string;
     source?: 'bookrides' | 'nl';
     sent?: { at: string; to: string | null };

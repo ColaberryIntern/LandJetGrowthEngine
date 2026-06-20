@@ -34,6 +34,66 @@ function mapSrc(pickup?: string, dropoff?: string): string | null {
   return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&z=7&output=embed`;
 }
 
+// Relative time to the APPOINTMENT (the trip), color-coded by urgency.
+function apptRelative(dateStr?: string, startTime?: string): { text: string; cls: string } | null {
+  if (!dateStr) return null;
+  const m = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return null;
+  const d = new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]), 12, 0, 0);
+  if (startTime) {
+    const t = startTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (t) { let h = Number(t[1]) % 12; if (/pm/i.test(t[3] || '')) h += 12; d.setHours(h, Number(t[2]), 0, 0); }
+  }
+  const diff = d.getTime() - Date.now();
+  const hrs = diff / 3600000;
+  const days = Math.round(hrs / 24);
+  if (diff < 0) return { text: 'Trip passed', cls: 'bg-rose-100 text-rose-700' };
+  if (hrs < 24) { const h = Math.max(1, Math.round(hrs)); return { text: `Trip in ${h} hr${h === 1 ? '' : 's'}`, cls: 'bg-rose-100 text-rose-700' }; }
+  if (hrs < 48) return { text: 'Trip tomorrow', cls: 'bg-amber-100 text-amber-800' };
+  if (days <= 7) return { text: `Trip in ${days} days`, cls: 'bg-amber-50 text-amber-700' };
+  return { text: `Trip in ${days} days`, cls: 'bg-gray-100 text-gray-600' };
+}
+
+// At-a-glance tags so the team instantly knows what kind of ride it is and which
+// groups it falls into. Conditional colors by category.
+function tagsFor(r: ReservationQuoteRow): { label: string; cls: string }[] {
+  const out: { label: string; cls: string }[] = [];
+  const q = r.result?.quote || {};
+  const trip = r.result?.trip || {};
+  const svc = q.service_type || trip.service_type;
+  if (svc) {
+    const map: Record<string, [string, string]> = {
+      one_way: ['One way', 'bg-sky-100 text-sky-700'],
+      round_trip: ['Round trip', 'bg-indigo-100 text-indigo-700'],
+      hourly: ['Hourly', 'bg-teal-100 text-teal-700'],
+      hourly_local: ['Hourly', 'bg-teal-100 text-teal-700'],
+    };
+    const [label, cls] = map[svc] || [String(svc).replace(/_/g, ' '), 'bg-gray-100 text-gray-600'];
+    out.push({ label, cls });
+  }
+  const mkt = q.market || r.market;
+  if (mkt) out.push({ label: `\u{1F4CD} ${mkt.replace(/_/g, ' ')}`, cls: 'bg-slate-100 text-slate-600' });
+  const cat = q.customer_category;
+  if (cat && cat !== 'standard') {
+    const nice: Record<string, string> = { jd_employee: 'JD Employee', jd_shuttle: 'JD Shuttle', lockton_employee: 'Lockton', investor: 'Investor', lj_member: 'LJ Member' };
+    out.push({ label: `★ ${nice[cat] || cat}`, cls: 'bg-emerald-100 text-emerald-700' }); // special incentive / rate
+  }
+  const warns = (q.warnings || []).join(' ').toLowerCase();
+  if (/overnight/.test(warns)) out.push({ label: 'Overnight', cls: 'bg-amber-100 text-amber-800' });
+  if (/dead\s?leg/.test(warns)) out.push({ label: 'Dead leg', cls: 'bg-amber-100 text-amber-800' });
+  if (/second driver|2nd driver|over\s?10|per diem/.test(warns)) out.push({ label: 'Long / 2-driver', cls: 'bg-amber-100 text-amber-800' });
+  if ((q.approvals_needed || []).length > 0 || /approval/.test(warns)) out.push({ label: 'Needs approval', cls: 'bg-rose-100 text-rose-700' });
+  if (r.status === 'forward') out.push({ label: 'Forward to local team', cls: 'bg-rose-100 text-rose-700' });
+  if (r.result?.source === 'nl') out.push({ label: '\u{1F916} AI-extracted · verify', cls: 'bg-purple-100 text-purple-700' });
+  return out;
+}
+
+function confCls(c: number): string {
+  if (c >= 0.7) return 'text-emerald-600';
+  if (c >= 0.5) return 'text-blue-600';
+  return 'text-amber-600';
+}
+
 export default function ReservationsPage() {
   const [rows, setRows] = useState<ReservationQuoteRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +151,10 @@ export default function ReservationsPage() {
           <p className="text-sm text-gray-500 mt-1">
             Emails from ljreservations@landjet.com, priced automatically. Review the quote and send it back in one click.
           </p>
+          <p className="text-xs text-gray-400 mt-1">
+            &#128737;&#65039; The AI prepares and explains every quote with a confidence score; a person reviews and sends.
+            Nothing is sent to a customer automatically. (Trust before intelligence.)
+          </p>
         </div>
         <button onClick={refreshFromMailbox} disabled={refreshing}
           className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
@@ -127,18 +191,27 @@ export default function ReservationsPage() {
             const quotedAt = r.result?.sent?.at || r.result?.prepared?.at || null;
             const quotedKind = r.result?.sent?.at ? 'sent' : 'prepared';
             const route = mapSrc(trip?.pickup_address, trip?.dropoff_address);
+            const appt = apptRelative(trip?.date_of_service, (trip as { start_time?: string })?.start_time);
+            const tg = tagsFor(r);
             return (
               <div key={r.id} className="rounded-lg border border-gray-200 bg-white">
                 <div className="flex items-stretch gap-3 px-4 py-3">
                   <button onClick={() => setOpenId(open ? null : r.id)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
-                      <span className="text-xs text-gray-400">conf {Number(r.confidence).toFixed(2)}</span>
-                      {r.market && <span className="text-xs text-gray-400">&middot; {r.market.replace(/_/g, ' ')}</span>}
-                      <span className="text-xs text-gray-400">&middot; in {timeAgo(r.received_at)}</span>
+                      {appt && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${appt.cls}`}>{appt.text}</span>}
+                      <span className={`text-xs font-medium ${confCls(Number(r.confidence))}`}>conf {Number(r.confidence).toFixed(2)}</span>
+                      <span className="text-xs text-gray-400">&middot; received {timeAgo(r.received_at)}</span>
                     </div>
                     <div className="mt-1 truncate font-medium text-gray-900">{r.subject || '(no subject)'}</div>
                     <div className="truncate text-sm text-gray-500">{r.from_email}</div>
+                    {tg.length > 0 && (
+                      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                        {tg.map((t, i) => (
+                          <span key={i} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${t.cls}`}>{t.label}</span>
+                        ))}
+                      </div>
+                    )}
                     <div className="mt-1.5 flex items-center gap-2 flex-wrap text-xs">
                       {r.responded_at ? (
                         <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">&#9989; Replied {timeAgo(r.responded_at)}</span>
