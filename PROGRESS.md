@@ -5,6 +5,14 @@ Last updated: 2026-06-19
 
 ---
 
+## Session: 2026-06-20
+
+- [x] **LinkedIn message stale after campaign move (Ryan WhatsApp 2026-06-20)**
+  - Date: 2026-06-20
+  - What changed: Moving a contact to a new campaign kept showing the OLD campaign's LinkedIn message after refresh (e.g. a contact moved Sports -> Business Services still showed sports messaging). Root cause: `notes.linkedin_draft` cache ([outreachQueryService.ts:696](src/services/outreachQueryService.ts#L696)) is keyed only by `sequence_stage`, so a same-stage campaign move never invalidated it; the `POST /:id/campaign` reassign endpoint regenerated a message for its response but never wrote it back to the cache. Fix: on move, `delete notes.linkedin_draft` and `writeCachedLinkedInDraft()` the freshly generated new-campaign message ([outreachRoutes.ts](src/routes/admin/outreachRoutes.ts)).
+  - Verification: `tsc --noEmit` clean; deployed; one-time reset cleared 70 stale AI drafts on active leads (`UPDATE leads SET notes = notes - 'linkedin_draft' WHERE ... source='ai' AND status='active'`) so already-moved contacts regenerate for their current campaign.
+  - Notes: This was NOT covered by the 2026-06-19 categorization fix -- that governs the lead's vertical/campaign (badge, routing, gate), a separate layer from the cached message TEXT. The categorization move worked (badge updated, stamped manual); the message cache was the gap. Self-strengthening: the cache is now invalidated on every campaign move.
+
 ## Session: 2026-06-19
 
 - [x] **Deterministic lead categorization (stops Ryan's recurring wrong-campaign bug)**
