@@ -28,10 +28,12 @@ function money(v: string | number | null | undefined): string {
   return Number.isFinite(n) ? `$${n.toFixed(2)}` : '--';
 }
 
-// No-key Google Maps embed showing the from -> to route ("kinda sorta").
+// No-key Google Maps embed showing the from -> to route. No fixed zoom so the
+// embed auto-fits each route's bounds -- otherwise every Midwest trip looked
+// identical at a fixed regional zoom even though the routes differ.
 function mapSrc(pickup?: string, dropoff?: string): string | null {
   if (!pickup || !dropoff) return null;
-  return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&z=7&output=embed`;
+  return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&output=embed`;
 }
 
 // Relative time to the APPOINTMENT (the trip), color-coded by urgency.

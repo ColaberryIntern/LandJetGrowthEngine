@@ -15,10 +15,19 @@ import { authorize } from '../../middleware/authorize';
 import { getSequelize } from '../../config/database';
 import { Lead, PIPELINE_STAGES } from '../../models/Lead';
 import { classifyReply } from '../../services/replyClassification';
+import { analyzeReply } from '../../services/replyAnalysisService';
 import { ValidationError, NotFoundError } from '../../middleware/errors';
 
 const router = Router();
 router.use(authenticate);
+
+// Reply Intelligence: their reply vs our proposed reply vs Ryan's actual reply.
+router.get('/:leadId/reply-analysis', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const analysis = await analyzeReply(Number(req.params.leadId));
+    res.json(analysis);
+  } catch (error) { next(error); }
+});
 
 router.get('/', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
   try {
