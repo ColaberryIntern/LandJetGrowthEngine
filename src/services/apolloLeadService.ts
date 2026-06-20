@@ -14,6 +14,7 @@ import { SystemSetting } from '../models/SystemSetting';
 import { logger } from '../config/logger';
 import { classifyVertical, campaignVertical } from './leadClassification';
 import { buildVerticalCampaignMap, buildStrategicCampaignIds, routeLeadToCorrectCampaign } from './leadRoutingService';
+import { resolveLeadLocation } from './leadLocation';
 
 const APOLLO_KEY = process.env.APOLLO_API_KEY || '';
 
@@ -226,15 +227,40 @@ export async function pullLeadsForCampaign(
           const leadIndustry = enriched.organization?.industry || p.organization?.industry || null;
           const verticalGuess = classifyVertical(leadIndustry) || campaignVertical(campaign.name);
 
+          // Location is part of categorization going forward: prefer Apollo's own
+          // state/city; when Apollo gives none, resolve from phone area code, then
+          // a company HQ lookup. Fail-soft -- a resolution error must never lose
+          // the lead. Provenance is stamped in notes.location.
+          const companyName = enriched.organization?.name || p.organization?.name || '';
+          const phone = enriched.phone_numbers?.[0]?.sanitized_number || enriched.sanitized_phone || p.sanitized_phone || null;
+          let leadState: string | null = enriched.state || p.state || null;
+          let leadCity: string | null = enriched.city || p.city || null;
+          let locationMeta: Record<string, unknown> = leadState ? { state: leadState, city: leadCity, source: 'apollo', confidence: 0.9 } : { source: 'none' };
+          if (!leadState) {
+            try {
+              const resolved = await resolveLeadLocation(
+                { phone, company: companyName, domain: email.split('@')[1] || null },
+                { useLLM: true },
+              );
+              if (resolved.state) {
+                leadState = resolved.state;
+                leadCity = leadCity || resolved.city;
+                locationMeta = { state: resolved.state, city: resolved.city, source: resolved.source, confidence: resolved.confidence };
+              }
+            } catch (locErr) {
+              logger.warn('Location resolution failed at ingest (lead kept)', { email, error: (locErr as Error).message });
+            }
+          }
+
           const created = await Lead.create({
             first_name: enriched.first_name || p.first_name || 'Unknown',
             last_name: enriched.last_name || (p.last_name_obfuscated || '').replace(/\*/g, '') || '',
             email: email,
-            company: enriched.organization?.name || p.organization?.name || '',
+            company: companyName,
             title: enriched.title || p.title || '',
             linkedin_url: enriched.linkedin_url || p.linkedin_url || null,
-            state: enriched.state || p.state || null,
-            city: enriched.city || p.city || null,
+            state: leadState,
+            city: leadCity,
             industry: leadIndustry,
             company_size: enriched.organization?.estimated_num_employees || p.organization?.estimated_num_employees || null,
             vertical: verticalGuess,
@@ -249,7 +275,7 @@ export async function pullLeadsForCampaign(
             lead_score: 50,
             priority_score: 0,
             status: 'active',
-            notes: { apollo_id: p.id, apollo_pulled_at: new Date().toISOString(), source: 'apollo', market: market.name },
+            notes: { apollo_id: p.id, apollo_pulled_at: new Date().toISOString(), source: 'apollo', market: market.name, location: locationMeta },
           } as any);
 
           // Auto-route to the campaign matching the lead's real industry. Safe
