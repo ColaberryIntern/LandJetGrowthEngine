@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Deal-tracking Phase 2: Conversations tracker + booking tags**
+  - Date: 2026-06-20
+  - What changed: (1) "Who replied" redesigned -- dropped the conversation text for deterministic colored category tags via [replyClassification.ts](src/services/replyClassification.ts) (Wants to meet / Interested / Question / Not now / Auto-reply) plus a green "Booking" icon when the lead's email matches a `reservation_quotes` row (trip-quote request). (2) New [conversationsRoutes.ts](src/routes/admin/conversationsRoutes.ts) (`/api/admin/conversations` GET list + PATCH stage/next_action) and a [/conversations admin page](frontend/app/conversations/page.tsx) -- the interactive tracker to move responders replied -> meeting_scheduled -> proposal_sent -> ... with a next-action note. Navbar link added. (3) Activated the booking signal by running `ingestReservationQuotes` (read-only).
+  - Verification: backend + frontend `tsc --noEmit` clean; classifyReply unit test 7/7; deployed backend+frontend; reservation_quotes now has 6 rows (4 match leads).
+  - Notes: Booking icon = "requested a trip quote" (the reachable LandJet booking signal via ljreservations@); a TRUE confirmed/paid booking needs LandJet's booking backend (not connected). Current 9 responders are investors so 0 overlap with quote-requesters today; 4 separate leads DID request quotes but haven't replied to outreach (a booking-intent set worth surfacing). Phase 3 (Deal model + funnel reached->replied->meeting->closed $) still pending; its "closed" gate needs outcome capture.
+
 - [x] **Deal-tracking Phase 1: see the reply messages**
   - Date: 2026-06-20
   - What changed: [replyIngestionService.ts](src/services/replyIngestionService.ts) now captures each reply's `bodyPreview` from Graph into `communication_logs.body` (backfilling rows recorded before body capture). The briefing "Who replied" section ([weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts)) now shows each responder's name, company, subject, and a ~240-char preview of what they said. Also restored the investor campaign on the chart and reassigned 5 investor responders (Spike/UBS/Infusion/Casepoint/Thornburg) to Investor Outreach.
