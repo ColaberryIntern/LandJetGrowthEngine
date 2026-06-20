@@ -49,8 +49,11 @@ const BRIEFING_MIN_LOCAL = 45;
 const BRIEFING_DOW_NAME = 'Fri';
 
 const STEPPER_INTERVAL_MS = 5 * 60 * 1000;
+// Reservation auto-quote: poll the booking mailbox every 10 min so quotes are
+// produced around the clock (Percy's #1 ask). Disable with PIPELINE_DISABLE_RESERVATIONS=true.
+const RESERVATIONS_INTERVAL_MS = 10 * 60 * 1000;
 
-const running = { ingest: false, scheduler: false, pulse: false, briefing: false, stepper: false };
+const running = { ingest: false, scheduler: false, pulse: false, briefing: false, stepper: false, reservations: false };
 const timers: ReturnType<typeof setInterval>[] = [];
 const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -137,6 +140,27 @@ async function runIngest(): Promise<void> {
     logger.error('pipeline.ingest failed (non-fatal)', { error: (e as Error).message });
   } finally {
     running.ingest = false;
+  }
+}
+
+async function runReservations(): Promise<void> {
+  if (running.reservations) {
+    logger.info('pipeline.reservations skipped: previous cycle still running');
+    return;
+  }
+  if (process.env.PIPELINE_DISABLE_RESERVATIONS === 'true') return;
+  running.reservations = true;
+  const start = Date.now();
+  try {
+    const { ingestReservationQuotes } = await import('./reservationQuoteService');
+    const r = await ingestReservationQuotes({ lookbackHours: 24 });
+    if (r.created > 0 || r.errors > 0) {
+      logger.info('pipeline.reservations complete', { duration_ms: Date.now() - start, ...r });
+    }
+  } catch (e) {
+    logger.error('pipeline.reservations failed (non-fatal)', { error: (e as Error).message });
+  } finally {
+    running.reservations = false;
   }
 }
 
@@ -305,6 +329,13 @@ export function startPipelineAutoRunner(): void {
     void runStepper();
     timers.push(setInterval(() => { void runStepper(); }, STEPPER_INTERVAL_MS));
   }, stepperStartIn));
+
+  // Reservation auto-quote: poll the booking mailbox every 10 min, 0-60s jitter.
+  const reservationsStartIn = jitter(60_000);
+  timeouts.push(setTimeout(() => {
+    void runReservations();
+    timers.push(setInterval(() => { void runReservations(); }, RESERVATIONS_INTERVAL_MS));
+  }, reservationsStartIn));
 
   process.on('SIGTERM', stopPipelineAutoRunner);
   process.on('SIGINT', stopPipelineAutoRunner);

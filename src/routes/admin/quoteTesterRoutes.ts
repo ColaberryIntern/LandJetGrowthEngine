@@ -479,4 +479,32 @@ router.get('/samples', authorize('campaigns:read'), async (_req: Request, res: R
   ]);
 });
 
+// ---------------------------------------------------------------------------
+// Reservation auto-quotes -- priced reservation emails from ljreservations@.
+// GET lists them (newest first), POST /ingest triggers a manual pull.
+// ---------------------------------------------------------------------------
+router.get('/reservations', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ReservationQuote } = await import('../../models/ReservationQuote');
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const where: Record<string, unknown> = {};
+    if (req.query.status) where.status = req.query.status as string;
+    const rows = await ReservationQuote.findAll({
+      where,
+      order: [['received_at', 'DESC'], ['id', 'DESC']],
+      limit,
+    });
+    res.json({ reservations: rows, total: rows.length });
+  } catch (error) { next(error); }
+});
+
+router.post('/reservations/ingest', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ingestReservationQuotes } = await import('../../services/reservationQuoteService');
+    const lookbackHours = Math.min(Math.max(Number(req.body?.lookback_hours) || 72, 1), 720);
+    const result = await ingestReservationQuotes({ lookbackHours });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 export default router;

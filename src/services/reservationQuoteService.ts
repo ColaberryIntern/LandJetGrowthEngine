@@ -1,0 +1,177 @@
+/**
+ * reservationQuoteService.ts
+ * Auto-ingest the booking mailbox (ljreservations@landjet.com) and price every
+ * inbound BookRides reservation email with the existing quote engine, 24/7.
+ *
+ * This is Percy's #1 ask: tie the quote engine to the mailbox so it runs around
+ * the clock and removes the manual-quoting FTE. Each email becomes a
+ * ReservationQuote row (the quote that WOULD have gone out), scored by
+ * confidence so simple trips can auto-send and complex ones route to a human.
+ *
+ * FAILURE MODES (BUILD-BREAK-HARDEN):
+ *  - Graph/token down -> fetch throws; the caller (cron) logs non-fatal, no rows lost.
+ *  - One malformed email -> caught per-email; the batch continues (counts.errors++).
+ *  - Same email seen twice (retry / overlapping cron) -> deduped by graph_message_id (idempotent).
+ *  - Unparseable / non-BookRides email -> stored as mode='manual', confidence 0, status='manual'.
+ *  - Unknown market / missing miles -> stored as needs_review so a human prices it.
+ * No outbound is sent here; this only reads + prices + persists.
+ */
+import { logger } from '../config/logger';
+import { ReservationQuote, ReservationQuoteStatus } from '../models/ReservationQuote';
+import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine';
+
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
+const OAUTH_TENANT_ID = process.env.OAUTH_TENANT_ID || '';
+const DEFAULT_MAILBOX = process.env.RESERVATION_MAILBOX || 'ljreservations@landjet.com';
+
+export interface RawReservationEmail {
+  id: string;
+  subject: string | null;
+  from: string | null;
+  receivedDateTime: string | null;
+  body: string;
+}
+
+async function getGraphToken(): Promise<string> {
+  if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {
+    throw new Error('Microsoft Graph OAuth env not configured (OAUTH_CLIENT_ID/SECRET/TENANT_ID)');
+  }
+  const resp = await fetch(`https://login.microsoftonline.com/${OAUTH_TENANT_ID}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: OAUTH_CLIENT_ID,
+      client_secret: OAUTH_CLIENT_SECRET,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials',
+    }),
+  });
+  const data = (await resp.json()) as { access_token?: string };
+  if (!data.access_token) throw new Error('Failed to get Graph token');
+  return data.access_token;
+}
+
+/** Strip an HTML email body down to plain text the BookRides parser can read. */
+export function htmlToText(html: string): string {
+  return (html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Pull recent messages (full body) from the reservation mailbox via Graph. */
+export async function fetchReservationEmails(
+  lookbackHours = 72,
+  mailbox = DEFAULT_MAILBOX,
+  top = 50,
+): Promise<RawReservationEmail[]> {
+  const token = await getGraphToken();
+  const sinceIso = new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString();
+  const url =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders/inbox/messages` +
+    `?$top=${top}&$select=id,subject,from,receivedDateTime,body&$orderby=receivedDateTime desc` +
+    `&$filter=receivedDateTime ge ${sinceIso}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`Graph fetch ${r.status}: ${(await r.text()).slice(0, 160)}`);
+  const data = (await r.json()) as { value?: any[] };
+  return (data.value || []).map((m) => ({
+    id: m.id,
+    subject: m.subject || null,
+    from: m.from?.emailAddress?.address || null,
+    receivedDateTime: m.receivedDateTime || null,
+    body: m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || ''),
+  }));
+}
+
+/**
+ * Confidence + status from a pricing result. Encodes Percy's rule: simple trips
+ * score high (auto-send candidates); incomplete/complex ones go to a human.
+ *  - forward-only market           -> forward (0)
+ *  - not a parseable quote         -> manual (0)
+ *  - flat-rate route, no flags     -> 0.90 auto_ready (deterministic price)
+ *  - priced, total>0, no flags     -> 0.70 auto_ready
+ *  - incomplete (miles unknown) or complex (overnight/dead leg/approval/...) -> needs_review
+ */
+export function deriveConfidenceAndStatus(
+  result: InboundProcessResult,
+): { confidence: number; status: ReservationQuoteStatus } {
+  if (result.mode === 'forward_only') return { confidence: 0, status: 'forward' };
+  if (result.mode !== 'priced' || !result.quote) return { confidence: 0, status: 'manual' };
+
+  const q = result.quote;
+  const warns = (q.warnings || []).join(' ').toLowerCase();
+  // Engine appends a warning when miles are unknown (concierge must fill in) and
+  // for DOT/approval/overnight/dead-leg complications.
+  const needsHuman = /mile|concierge|approval|overnight|dead\s?leg|second driver|2nd driver|compliance|over\s?10|per diem/.test(warns);
+
+  if (q.pricing_mode === 'flat_rate' && !needsHuman) return { confidence: 0.9, status: 'auto_ready' };
+  if (!needsHuman && q.grand_total > 0) return { confidence: 0.7, status: 'auto_ready' };
+  return { confidence: needsHuman ? 0.4 : 0.5, status: 'needs_review' };
+}
+
+export interface IngestCounts {
+  fetched: number; created: number; skipped_existing: number;
+  auto_ready: number; needs_review: number; forward: number; manual: number; errors: number;
+}
+
+/**
+ * Fetch -> price -> persist. Idempotent by Graph message id. `fetcher` is
+ * injectable for tests; defaults to the live Graph fetch.
+ */
+export async function ingestReservationQuotes(opts: {
+  lookbackHours?: number;
+  mailbox?: string;
+  fetcher?: (lookbackHours: number, mailbox: string) => Promise<RawReservationEmail[]>;
+} = {}): Promise<IngestCounts> {
+  const lookbackHours = opts.lookbackHours ?? 72;
+  const mailbox = opts.mailbox ?? DEFAULT_MAILBOX;
+  const fetcher = opts.fetcher ?? fetchReservationEmails;
+
+  const emails = await fetcher(lookbackHours, mailbox);
+  const counts: IngestCounts = { fetched: emails.length, created: 0, skipped_existing: 0, auto_ready: 0, needs_review: 0, forward: 0, manual: 0, errors: 0 };
+
+  for (const e of emails) {
+    try {
+      const existing = await ReservationQuote.findOne({ where: { graph_message_id: e.id }, attributes: ['id'] });
+      if (existing) { counts.skipped_existing++; continue; }
+
+      const result = processInboundEmail(e.body, e.from || undefined);
+      const { confidence, status } = deriveConfidenceAndStatus(result);
+      const total = result.quote ? result.quote.grand_total : null;
+
+      await ReservationQuote.create({
+        graph_message_id: e.id,
+        mailbox,
+        subject: e.subject,
+        from_email: e.from,
+        received_at: e.receivedDateTime ? new Date(e.receivedDateTime) : null,
+        raw_body: e.body,
+        mode: result.mode,
+        market: result.market || null,
+        quote_total: total,
+        confidence,
+        status,
+        result: result as unknown as Record<string, unknown>,
+      } as any);
+
+      counts.created++;
+      counts[status]++;
+    } catch (err) {
+      counts.errors++;
+      logger.error('reservation ingest failed for one email (non-fatal)', { id: e.id, error: (err as Error).message });
+    }
+  }
+
+  logger.info('reservation quote ingest complete', { mailbox, ...counts });
+  return counts;
+}
