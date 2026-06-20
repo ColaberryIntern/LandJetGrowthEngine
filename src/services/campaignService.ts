@@ -1,4 +1,7 @@
+import { Op } from 'sequelize';
 import { Campaign, CampaignCreationAttributes, ApprovalStatus } from '../models/Campaign';
+import { Lead } from '../models/Lead';
+import { buildStatesPattern } from './leadService';
 import { ValidationError, NotFoundError } from '../middleware/errors';
 import { logger } from '../config/logger';
 
@@ -143,11 +146,26 @@ export async function listCampaigns(filters: {
   approval_status?: string;
   limit?: number;
   offset?: number;
+  // Territory scope: when set, restrict to campaigns that have at least one
+  // lead in these states, so a territory rep (Percy=TX, Grant=IA) only sees the
+  // campaigns relevant to their location. Empty/undefined = all campaigns.
+  states?: string[];
 }) {
   const where: Record<string, unknown> = {};
   if (filters.status) where.status = filters.status;
   if (filters.type) where.type = filters.type;
   if (filters.approval_status) where.approval_status = filters.approval_status;
+
+  if (filters.states && filters.states.length > 0) {
+    const rows = await Lead.findAll({
+      attributes: ['campaign_id'],
+      where: { campaign_id: { [Op.ne]: null }, state: { [Op.iRegexp]: buildStatesPattern(filters.states) } },
+      group: ['campaign_id'],
+    });
+    const ids = rows.map((r) => (r as unknown as { campaign_id: string }).campaign_id).filter(Boolean);
+    // No campaigns have leads in this territory -> return an empty set rather than all.
+    where.id = ids.length ? { [Op.in]: ids } : { [Op.in]: ['00000000-0000-0000-0000-000000000000'] };
+  }
 
   const limit = Math.min(Math.max(filters.limit || 25, 1), 100);
   const offset = Math.max(filters.offset || 0, 0);

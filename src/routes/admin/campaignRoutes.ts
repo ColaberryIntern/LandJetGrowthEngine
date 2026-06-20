@@ -11,6 +11,7 @@ import {
 import { getTemplates } from '../../services/campaignBuilderService';
 import { enrollLead, enrollBulk, getCampaignLeads } from '../../services/enrollmentService';
 import { createAuditLog } from '../../services/auditLogService';
+import { User } from '../../models/User';
 import { logger } from '../../config/logger';
 
 const router = Router();
@@ -36,12 +37,18 @@ router.post('/', authorize('campaigns:write'), async (req: Request, res: Respons
 
 router.get('/', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Territory scope: a rep with a state scope on their profile (Percy=TX,
+    // Grant=IA) only sees campaigns that have leads in their state. Unscoped
+    // users (global admins) see all campaigns.
+    const me = await User.findByPk(req.user!.userId, { attributes: ['default_filters'] });
+    const states = ((me?.default_filters as Record<string, unknown> | null)?.states as string[] | undefined) || [];
     const result = await listCampaigns({
       status: req.query.status as string,
       type: req.query.type as string,
       approval_status: req.query.approval_status as string,
       limit: req.query.limit ? Number(req.query.limit) : 25,
       offset: req.query.offset ? Number(req.query.offset) : 0,
+      states,
     });
     res.json({ campaigns: result.rows, total: result.count });
   } catch (error) {
