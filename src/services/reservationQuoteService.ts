@@ -175,3 +175,54 @@ export async function ingestReservationQuotes(opts: {
   logger.info('reservation quote ingest complete', { mailbox, ...counts });
   return counts;
 }
+
+/** Compose the customer-facing quote reply from a stored ReservationQuote. */
+export function composeQuoteReply(rq: ReservationQuote): { subject: string; text: string } {
+  const r = (rq.result || {}) as { trip?: any; quote?: any };
+  const trip = r.trip || {};
+  const q = r.quote || {};
+  const total = q.grand_total != null ? `$${Number(q.grand_total).toFixed(2)}` : 'to be confirmed';
+  const name = (trip.passenger_name || '').split(' ')[0] || 'there';
+  const route = [trip.pickup_address, trip.dropoff_address].filter(Boolean).join(' to ');
+  const subject = rq.subject ? (/^re:/i.test(rq.subject) ? rq.subject : `Re: ${rq.subject}`) : 'Your LandJet quote';
+  const text =
+    `Hi ${name},\n\n` +
+    `Thank you for your reservation request${route ? ` (${route})` : ''}. ` +
+    `Your estimated quote is ${total}.\n\n` +
+    `Reply to confirm and we will get you booked.\n\nLandJet Reservations`;
+  return { subject, text };
+}
+
+/**
+ * Send (or, by default, DRY-prepare) the quote reply for a reservation.
+ * SAFETY: real customer sends only fire when RESERVATION_SEND_ENABLED=true.
+ * Until Percy/Lorie validate the quotes, this returns the draft without
+ * emailing anyone (sent=false, dry=true) so the 1-click UX is safe to demo.
+ */
+export async function sendReservationQuote(id: number): Promise<{ sent: boolean; dry: boolean; to: string | null; draft: { subject: string; text: string } }> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  if (rq.status === 'manual' || rq.status === 'forward') {
+    throw new Error(`Cannot send a ${rq.status} reservation (no priced quote)`);
+  }
+  const draft = composeQuoteReply(rq);
+  const live = process.env.RESERVATION_SEND_ENABLED === 'true';
+  const to = rq.from_email;
+
+  if (!live) {
+    const result = { ...((rq.result as Record<string, unknown>) || {}), prepared: { at: new Date().toISOString(), to } };
+    await rq.update({ result } as any);
+    return { sent: false, dry: true, to, draft };
+  }
+
+  const token = await getGraphToken();
+  const resp = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(rq.mailbox)}/messages/${rq.graph_message_id}/reply`,
+    { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: draft.text }) },
+  );
+  if (!resp.ok) throw new Error(`Graph reply ${resp.status}: ${(await resp.text()).slice(0, 160)}`);
+  const result = { ...((rq.result as Record<string, unknown>) || {}), sent: { at: new Date().toISOString(), to } };
+  await rq.update({ result } as any);
+  logger.info('reservation quote sent', { id, to });
+  return { sent: true, dry: false, to, draft };
+}

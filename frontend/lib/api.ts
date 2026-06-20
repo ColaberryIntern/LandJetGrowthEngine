@@ -971,3 +971,39 @@ export function exportLeads(format: 'json' | 'csv' = 'json', filters?: { status?
   if (filters?.temperature) params.set('temperature', filters.temperature);
   return request<{ leads: any[]; total: number; exported_at: string }>(`/admin/leads/export?${params.toString()}`);
 }
+
+// --- Reservation auto-quotes (booking mailbox -> priced) ---
+export interface ReservationQuoteRow {
+  id: number;
+  subject: string | null;
+  from_email: string | null;
+  received_at: string | null;
+  mode: string;
+  market: string | null;
+  quote_total: string | null;
+  confidence: string;
+  status: 'auto_ready' | 'needs_review' | 'forward' | 'manual';
+  raw_body: string | null;
+  result: {
+    trip?: { passenger_name?: string; pickup_address?: string; dropoff_address?: string; service_type?: string; date_of_service?: string; passengers?: number };
+    quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string };
+    manual_reason?: string;
+    sent?: { at: string; to: string | null };
+    prepared?: { at: string; to: string | null };
+  } | null;
+}
+
+export function getReservations(status?: string) {
+  const q = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
+  return request<{ reservations: ReservationQuoteRow[]; total: number }>(`/admin/quotes/reservations${q}`);
+}
+
+export function ingestReservations(lookback_hours = 72) {
+  return request<{ fetched: number; created: number; skipped_existing: number; auto_ready: number; needs_review: number; forward: number; manual: number; errors: number }>(
+    `/admin/quotes/reservations/ingest`, { method: 'POST', body: JSON.stringify({ lookback_hours }) });
+}
+
+export function sendReservationQuote(id: number) {
+  return request<{ sent: boolean; dry: boolean; to: string | null; draft: { subject: string; text: string } }>(
+    `/admin/quotes/reservations/${id}/send`, { method: 'POST' });
+}

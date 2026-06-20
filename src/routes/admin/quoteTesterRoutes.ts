@@ -507,4 +507,14 @@ router.post('/reservations/ingest', authorize('campaigns:write'), async (req: Re
   } catch (error) { next(error); }
 });
 
+// Send (or DRY-prepare) the quote reply for one reservation. Dry by default --
+// real customer sends require RESERVATION_SEND_ENABLED=true on the server.
+router.post('/reservations/:id/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { sendReservationQuote } = await import('../../services/reservationQuoteService');
+    const result = await sendReservationQuote(Number(req.params.id));
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 export default router;
