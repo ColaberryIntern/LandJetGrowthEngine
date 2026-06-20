@@ -16,6 +16,7 @@ import mandrillWebhook from './routes/webhooks/mandrillWebhook';
 import ceoIntroRoutes from './routes/admin/ceoIntroRoutes';
 import communicationRoutes from './routes/admin/communicationRoutes';
 import outreachRoutes from './routes/admin/outreachRoutes';
+import conversationsRoutes from './routes/admin/conversationsRoutes';
 import uncategorizedRequirementsRoutes from './routes/admin/uncategorizedRequirementsRoutes';
 import jobManagementRoutes from './routes/admin/jobManagementRoutes';
 import userManagementRoutes from './routes/admin/userManagementRoutes';
@@ -96,6 +97,7 @@ export function createApp() {
   app.use('/api/admin/ceo-intro', ceoIntroRoutes);
   app.use('/api/admin/communication', communicationRoutes);
   app.use('/api/admin/outreach', outreachRoutes);
+  app.use('/api/admin/conversations', conversationsRoutes);
   app.use('/api/admin/uncategorized-requirements', uncategorizedRequirementsRoutes);
   app.use('/api/admin/jobs', jobManagementRoutes);
   app.use('/api/admin/user-management', userManagementRoutes);
