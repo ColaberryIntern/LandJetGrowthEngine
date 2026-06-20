@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { testConnection } from './config/database';
 import { requestIdMiddleware } from './middleware/requestId';
+import { requestContextMiddleware } from './middleware/requestContext';
 import { apiLimiter } from './middleware/rateLimiter';
 import { requestTimingMiddleware } from './middleware/requestTiming';
 import { errorHandler } from './middleware/errorHandler';
@@ -51,6 +52,7 @@ export function createApp() {
 
   // Request ID tracking
   app.use(requestIdMiddleware);
+  app.use(requestContextMiddleware);
 
   // Body parsing
   app.use(express.json({ limit: '10mb' }));

@@ -11,6 +11,7 @@ import { initScheduledEmailModel, ScheduledEmail } from './ScheduledEmail';
 import { initCommunicationLogModel, CommunicationLog } from './CommunicationLog';
 import { initInteractionOutcomeModel, InteractionOutcome } from './InteractionOutcome';
 import { initReservationQuoteModel, ReservationQuote } from './ReservationQuote';
+import { initAiCostLogModel, AiCostLog } from './AiCostLog';
 import { initUnsubscribeModel, Unsubscribe } from './Unsubscribe';
 import { initDncListModel, DncList } from './DncList';
 import { initAiAgentModel, AiAgent } from './AiAgent';
@@ -77,6 +78,7 @@ export function initModels(sequelize: Sequelize) {
   initEtlPipelineModel(sequelize);
   initAgentRunModel(sequelize);
   initReservationQuoteModel(sequelize);
+  initAiCostLogModel(sequelize);
 
   // Associations
   Campaign.belongsTo(FollowUpSequence, { foreignKey: 'sequence_id', as: 'sequence' });
@@ -97,7 +99,7 @@ export function initModels(sequelize: Sequelize) {
 }
 
 export {
-  ReservationQuote,
+  ReservationQuote, AiCostLog,
   User, SystemSetting, AuditLog, Notification, Lead,
   Campaign, FollowUpSequence, CampaignLead,
   ScheduledEmail, CommunicationLog, InteractionOutcome,

@@ -9,6 +9,7 @@
  */
 
 import { logger } from '../config/logger';
+import { auditAction } from './auditLogService';
 import { CommunicationLog } from '../models/CommunicationLog';
 import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
@@ -360,6 +361,9 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
       await writeCommLog(input, fromEmail, 'sent', messageId, null).catch(e =>
         logger.warn('comm log write failed (sent)', { err: e.message }),
       );
+      await auditAction('email.send', 'lead', (input as { lead_id?: number }).lead_id ?? null, {
+        newValue: { to: input.to, from: fromEmail, subject: input.subject, messageId },
+      });
       return { success: true, messageId, from: fromEmail };
     }
 

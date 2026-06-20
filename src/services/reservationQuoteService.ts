@@ -18,7 +18,8 @@
  */
 import { logger } from '../config/logger';
 import { ReservationQuote, ReservationQuoteStatus } from '../models/ReservationQuote';
-import { processInboundEmailNL, InboundProcessResult } from './inboundQuoteEngine';
+import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
+import { roadMilesBetween } from './googleDistance';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -219,6 +220,24 @@ export async function getReservationMetrics(): Promise<Record<string, unknown>> 
   };
 }
 
+/**
+ * If a priced trip used distance pricing with no miles (concierge-fill), look up
+ * real road miles (Google Distance Matrix, gated on the key) and re-price. Turns
+ * "needs_review (miles unknown)" into a complete quote that can clear the 0.90
+ * auto-send bar. No-op when no key / no addresses / not a distance trip.
+ */
+async function enrichWithDistance(result: InboundProcessResult, emailBody: string, senderEmail?: string): Promise<InboundProcessResult> {
+  if (result.mode !== 'priced' || !result.quote || !result.trip) return result;
+  if (result.quote.pricing_mode !== 'distance') return result; // flat/hourly/forward need no miles
+  const trip = result.trip;
+  if (!trip.pickup_address || !trip.dropoff_address) return result;
+  const oneWay = await roadMilesBetween(trip.pickup_address, trip.dropoff_address);
+  if (!oneWay || oneWay <= 0) return result;
+  const miles = /round/i.test(trip.service_type || '') ? oneWay * 2 : oneWay;
+  const repriced = priceTripResult(trip, emailBody, senderEmail, result.source || 'bookrides', { passengerMiles: miles });
+  return repriced.mode === 'priced' ? repriced : result;
+}
+
 export interface IngestCounts {
   fetched: number; created: number; skipped_existing: number;
   auto_ready: number; needs_review: number; forward: number; manual: number; errors: number;
@@ -245,7 +264,8 @@ export async function ingestReservationQuotes(opts: {
       const existing = await ReservationQuote.findOne({ where: { graph_message_id: e.id }, attributes: ['id'] });
       if (existing) { counts.skipped_existing++; continue; }
 
-      const result = await processInboundEmailNL(e.body, e.from || undefined);
+      let result = await processInboundEmailNL(e.body, e.from || undefined);
+      result = await enrichWithDistance(result, e.body, e.from || undefined);
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 

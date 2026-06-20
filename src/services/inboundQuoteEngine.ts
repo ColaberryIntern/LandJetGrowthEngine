@@ -203,6 +203,7 @@ export function priceTripResult(
   emailBody: string,
   senderEmail: string | undefined,
   source: 'bookrides' | 'nl',
+  opts: { passengerMiles?: number } = {},
 ): InboundProcessResult {
   const market = detectMarketForTrip(emailBody, trip);
   if (!market) {
@@ -229,7 +230,7 @@ export function priceTripResult(
       market,
       customer_category,
       service_type,
-      passenger_miles: 0, // distance lookup is a future feature; concierge fills in
+      passenger_miles: opts.passengerMiles && opts.passengerMiles > 0 ? opts.passengerMiles : 0, // real miles when distance lookup succeeds; else concierge fills in
       stops,
       payment: 'credit_card',
       customer_email: customerEmail,

@@ -1,4 +1,5 @@
 import { AuditLog } from '../models/AuditLog';
+import { getContext } from '../middleware/requestContext';
 import { logger } from '../config/logger';
 
 export interface AuditLogInput {
@@ -37,6 +38,31 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
     // Audit logging should never crash the main flow
     logger.error('Failed to create audit log', { action: input.action, entityType: input.entityType, error: (error as Error).message });
   }
+}
+
+/**
+ * Convenience for service-layer actions (audit gap G5): auto-fills userId +
+ * traceId from the request context and never throws. Use for consequential AI
+ * actions that previously left no audit trail (sends, routing, progression).
+ */
+export async function auditAction(
+  action: string,
+  entityType: string,
+  entityId: string | number | null,
+  fields: { oldValue?: object | null; newValue?: object | null; metadata?: object } = {},
+): Promise<void> {
+  try {
+    const ctx = getContext();
+    await createAuditLog({
+      userId: ctx.userId || null,
+      action,
+      entityType,
+      entityId: entityId != null ? String(entityId) : null,
+      oldValue: fields.oldValue || null,
+      newValue: fields.newValue || null,
+      metadata: { ...(fields.metadata || {}), traceId: ctx.traceId || null },
+    });
+  } catch { /* fail-soft */ }
 }
 
 export async function getAuditLogs(filters: {

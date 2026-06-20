@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthenticationError } from './errors';
 import { User } from '../models/User';
+import { setContext } from './requestContext';
 
 export interface JwtPayload {
   userId: string;
@@ -35,6 +36,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       if (!user) return next(new AuthenticationError('Invalid API token'));
       if (user.status !== 'active') return next(new AuthenticationError('User not active'));
       req.user = { userId: user.id, email: user.email, role: user.role };
+      setContext({ userId: user.id });
       return next();
     } catch (e) {
       return next(new AuthenticationError('API token lookup failed'));
@@ -57,6 +59,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
 
     const decoded = jwt.verify(token, secret) as JwtPayload;
     req.user = decoded;
+    setContext({ userId: decoded.userId });
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {

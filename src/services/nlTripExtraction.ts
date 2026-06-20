@@ -8,6 +8,7 @@
  * caller falls back to manual. Never throws.
  */
 import { logger } from '../config/logger';
+import { recordLlmUsage } from './aiCost';
 
 export interface ExtractedTrip {
   is_booking_request: boolean;
@@ -55,6 +56,7 @@ export async function extractTripFromText(body: string): Promise<ExtractedTrip |
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as any;
+    recordLlmUsage({ source: 'nl_extraction', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const p = JSON.parse(cleaned);

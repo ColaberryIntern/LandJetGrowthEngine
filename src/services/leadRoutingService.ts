@@ -33,6 +33,7 @@
 import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { classifyVertical, campaignVertical, Vertical } from './leadClassification';
+import { auditAction } from './auditLogService';
 import { logger } from '../config/logger';
 
 export type RouteAction = 'kept' | 'routed' | 'flagged' | 'unclassified' | 'manual_skip' | 'protected';
@@ -209,6 +210,10 @@ export async function routeLeadToCorrectCampaign(
 
   logger.info('Lead auto-routed to matching campaign', {
     lead_id: lead.id, vertical: leadVertical, from: fromCampaignId, to: target.id,
+  });
+  await auditAction('lead.route', 'lead', lead.id, {
+    oldValue: { campaign_id: fromCampaignId },
+    newValue: { campaign_id: target.id, vertical: leadVertical },
   });
   return {
     action: 'routed',

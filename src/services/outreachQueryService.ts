@@ -6,6 +6,8 @@
 
 import { Op } from 'sequelize';
 import { Lead } from '../models/Lead';
+import { recordLlmUsage } from './aiCost';
+import { auditAction } from './auditLogService';
 import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
@@ -287,6 +289,7 @@ async function generateAIDraft(
     if (!response.ok) return null;
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'email_draft', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -499,6 +502,7 @@ export async function advanceLead(leadId: string): Promise<Lead | null> {
   }
 
   await lead.save();
+  auditAction('lead.advance', 'lead', lead.id, { newValue: { stage: lead.sequence_stage, status: lead.outreach_status, pipeline_stage: lead.pipeline_stage } }).catch(() => {});
   recordAgentRun('sequence_engine', { lead_id: lead.id, stage: lead.sequence_stage }).catch(() => {});
   recordAgentRun('communication_safety').catch(() => {});
   return lead;
@@ -793,6 +797,7 @@ STYLE (very important):
     }
 
     const aiData = (await aiResp.json()) as any;
+    recordLlmUsage({ source: 'linkedin_draft', usage: aiData.usage });
     let body = (aiData.choices?.[0]?.message?.content || '').trim();
     if (body.length > maxChars) body = body.slice(0, maxChars).trim();
     if (!body) return { body: '', error: 'AI returned an empty response.', source: 'ai' };

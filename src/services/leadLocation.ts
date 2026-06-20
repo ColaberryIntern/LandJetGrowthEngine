@@ -20,6 +20,8 @@
  *  This module performs NO writes; callers own persistence + idempotency.
  */
 
+import { recordLlmUsage } from './aiCost';
+
 export const US_STATES: ReadonlySet<string> = new Set([
   'AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA',
   'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM',
@@ -157,6 +159,7 @@ export async function stateFromCompanyLLM(
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as any;
+    recordLlmUsage({ source: 'company_location', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned);

@@ -1,5 +1,6 @@
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { recordLlmUsage } from './aiCost';
 
 export interface MessageGenerationInput {
   channel: 'email' | 'sms' | 'voice';
@@ -195,6 +196,7 @@ export async function generateMessage(
     }
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'ai_message', usage: data.usage });
     const rawContent = data.choices?.[0]?.message?.content || '';
     const tokensUsed = data.usage?.total_tokens || 0;
 

@@ -12,6 +12,7 @@
  */
 import { getSequelize } from '../config/database';
 import { SystemSetting } from '../models/SystemSetting';
+import { getCostSummary } from './aiCost';
 import { logger } from '../config/logger';
 
 // Latest manual audit result (docs/trust-audit). Update when the audit is re-run.
@@ -89,8 +90,8 @@ export async function getTrustOverview(): Promise<Record<string, unknown>> {
       reservation_confidence: conf,
       autosend_threshold: 0.9,
       decisions,
-      cost: { instrumented: false, note: 'LLM token capture is partial and USD is not computed (audit gap G4).', tokens_24h_partial: (runs24.tokens as number) || 0 },
-      tracing: { instrumented: false, note: 'No end-to-end traceId yet (audit gap G6); requestId is per-HTTP only.' },
+      cost: await getCostSummary(24).catch(() => ({ instrumented: false })),
+      tracing: { instrumented: true, note: 'traceId + userId propagated via AsyncLocalStorage; carried on cost logs and audit entries.' },
     },
     business_impact: {
       reservations: resv,

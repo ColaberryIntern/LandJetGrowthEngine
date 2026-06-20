@@ -105,9 +105,16 @@ export default function TrustCenter() {
           <Bar label="High (≥0.90) auto-send eligible" n={obs.reservation_confidence?.high || 0} max={confMax} cls="bg-emerald-500" />
           <Bar label="Mid (0.50–0.89)" n={obs.reservation_confidence?.mid || 0} max={confMax} cls="bg-blue-500" />
           <Bar label="Low (<0.50)" n={obs.reservation_confidence?.low || 0} max={confMax} cls="bg-amber-500" />
-          <div className="mt-2 space-y-1">
-            <div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">⚠ Cost: {obs.cost?.note}</div>
-            <div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">⚠ Tracing: {obs.tracing?.note}</div>
+          <div className="mt-3 space-y-1 text-xs">
+            {obs.cost?.instrumented ? (
+              <div className="rounded bg-emerald-50 px-2 py-1 text-emerald-800">
+                💲 LLM spend (24h): <b>${Number(obs.cost.totals?.usd || 0).toFixed(2)}</b> · {obs.cost.totals?.calls || 0} calls · {Number(obs.cost.totals?.tokens || 0).toLocaleString()} tokens
+                {obs.cost.daily_budget_usd ? ` · budget $${obs.cost.daily_budget_usd}${obs.cost.over_budget ? ' ⚠ OVER' : ''}` : ' · no budget set'}
+              </div>
+            ) : (
+              <div className="rounded bg-amber-50 px-2 py-1 text-amber-800">⚠ Cost not yet instrumented</div>
+            )}
+            <div className="rounded bg-emerald-50 px-2 py-1 text-emerald-800">🧵 Tracing on: {obs.tracing?.note}</div>
           </div>
         </Card>
 
