@@ -15,6 +15,7 @@ interface Responder {
   company: string | null;
   pipeline_stage: string;
   next_action: string;
+  deal_amount: number | null;
   tag: string;
   tone: 'meet' | 'interested' | 'question' | 'negative' | 'auto' | 'neutral';
   booked: boolean;
@@ -57,7 +58,7 @@ export default function ConversationsPage() {
     })();
   }, []);
 
-  async function save(id: number, patch: { pipeline_stage?: string; next_action?: string }) {
+  async function save(id: number, patch: { pipeline_stage?: string; next_action?: string; deal_amount?: number | null }) {
     setSavingId(id);
     setResponders(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r)); // optimistic
     try {
@@ -69,6 +70,7 @@ export default function ConversationsPage() {
   }
 
   const counts = stages.map(s => ({ s, n: responders.filter(r => r.pipeline_stage === s).length })).filter(x => x.n > 0);
+  const wonTotal = responders.filter(r => r.pipeline_stage === 'enrolled').reduce((a, r) => a + (r.deal_amount || 0), 0);
 
   return (
     <div>
@@ -82,6 +84,9 @@ export default function ConversationsPage() {
           {counts.map(c => (
             <span key={c.s} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">{c.s.replace(/_/g, ' ')}: {c.n}</span>
           ))}
+          {wonTotal > 0 && (
+            <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white">Won: ${wonTotal.toLocaleString()}</span>
+          )}
         </div>
       )}
 
@@ -98,6 +103,7 @@ export default function ConversationsPage() {
                 <th className="px-5 py-2 font-medium">Lead</th>
                 <th className="px-5 py-2 font-medium">Reply</th>
                 <th className="px-5 py-2 font-medium">Stage</th>
+                <th className="px-5 py-2 font-medium">Deal $</th>
                 <th className="px-5 py-2 font-medium">Next action</th>
                 <th className="px-5 py-2 font-medium">Last reply</th>
               </tr>
@@ -119,6 +125,12 @@ export default function ConversationsPage() {
                       className="rounded border border-gray-300 bg-white px-2 py-1 text-xs">
                       {stages.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
                     </select>
+                  </td>
+                  <td className="px-5 py-3">
+                    <input type="number" min="0" defaultValue={r.deal_amount ?? ''} disabled={savingId === r.id}
+                      onBlur={e => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== (r.deal_amount ?? null)) save(r.id, { deal_amount: v }); }}
+                      placeholder="$"
+                      className="w-24 rounded border border-gray-300 px-2 py-1 text-xs focus:border-gray-400 focus:outline-none" />
                   </td>
                   <td className="px-5 py-3">
                     <input type="text" defaultValue={r.next_action} disabled={savingId === r.id}

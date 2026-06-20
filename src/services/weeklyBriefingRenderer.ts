@@ -40,6 +40,8 @@ export interface BriefingData {
   hourLinkedIn: Array<{ hour: number; count: number }>;
   // Distinct leads who replied (validated by replyIngestionService), newest first.
   responders: Array<{ name: string; company: string | null; subject: string | null; body: string | null; day: string; booked: boolean }>;
+  // Outreach funnel: reached -> replied -> meeting -> proposal -> won/lost (+ $).
+  funnel: { reached: number; replied: number; meeting: number; proposal: number; won: number; lost: number; wonAmount: number };
 }
 
 // Shared channel palette + legend so every chart reads the same way.
@@ -367,6 +369,34 @@ function respondersCard(responders: BriefingData['responders']): string {
   </table>`;
 }
 
+// ----- outreach funnel: reached -> replied -> meeting -> proposal -> won ($) -----
+function funnelChart(f: BriefingData['funnel']): string {
+  const steps = [
+    { label: 'Reached', n: f.reached, color: PAL.navy },
+    { label: 'Replied', n: f.replied, color: PAL.navyLight },
+    { label: 'Meeting', n: f.meeting, color: PAL.teal },
+    { label: 'Proposal', n: f.proposal, color: PAL.gold },
+    { label: 'Won', n: f.won, color: PAL.green },
+  ];
+  const max = Math.max(f.reached, 1);
+  const left = 130, top = 26, barMaxW = 520, rowH = 46, width = 820;
+  const height = top + steps.length * rowH + 24;
+  let svg = `<rect width="${width}" height="${height}" fill="${PAL.card}"/>`;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const y = top + i * rowH;
+    const w = Math.max(3, (s.n / max) * barMaxW);
+    const pct = f.reached > 0 ? (s.n / f.reached) * 100 : 0;
+    svg += `<text x="${left - 12}" y="${y + 25}" text-anchor="end" font-size="13" font-weight="700" fill="${PAL.text}">${s.label}</text>`;
+    svg += `<rect x="${left}" y="${y + 8}" width="${w}" height="30" rx="4" fill="${s.color}"/>`;
+    svg += `<text x="${left + w + 12}" y="${y + 28}" font-size="15" font-weight="800" fill="${PAL.text}">${fmtNumber(s.n)}</text>`;
+    const extra = s.label === 'Won' && f.wonAmount > 0 ? `  $${fmtNumber(f.wonAmount)}` : '';
+    svg += `<text x="${left + w + 12 + String(fmtNumber(s.n)).length * 10 + 8}" y="${y + 28}" font-size="11" fill="${PAL.textDim}">${pct.toFixed(1)}% of reached${extra}</text>`;
+  }
+  svg += `<text x="${left}" y="${height - 6}" font-size="11" fill="${PAL.textMuted}">Lost: ${fmtNumber(f.lost)}  |  Won amount is summed from deal values entered on the Conversations tracker.</text>`;
+  return svgWrap(width, height, svg);
+}
+
 export function renderBriefingHtml(d: BriefingData, now: Date): string {
   const touchRatePct = d.totalReachable > 0 ? ((d.uniqueRecipients / d.totalReachable) * 100).toFixed(2) : '0.00';
   const investor = d.campaigns.find(c => c.name.includes('Investor')) || { sends: 0 };
@@ -407,6 +437,13 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
       d.uniqueRespondedRecipients > 0 ? PAL.green : PAL.red,
     )}</td>
   </tr></table>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-top:4px solid ${PAL.navy};border-radius:8px;margin-bottom:24px"><tr><td style="padding:16px 18px">
+    <div style="font-size:10px;font-weight:800;color:${PAL.navy};text-transform:uppercase;letter-spacing:.1em">Outreach funnel &mdash; did it convert?</div>
+    <div style="font-size:13px;color:${PAL.textMuted};margin-top:4px">Reached &rarr; replied &rarr; meeting &rarr; proposal &rarr; won. Stages advance on the Conversations tracker; "Won" sums the deal value entered there.</div>
+    <div style="margin-top:14px">${funnelChart(d.funnel)}</div>
+    <div style="font-size:12px;color:${PAL.textMuted};margin-top:8px"><strong style="color:${PAL.text}">Bottom line:</strong> ${d.funnel.won > 0 ? `${fmtNumber(d.funnel.won)} closed${d.funnel.wonAmount > 0 ? ` worth $${fmtNumber(d.funnel.wonAmount)}` : ''}.` : 'no closed deals recorded yet'} ${d.funnel.replied} of ${fmtNumber(d.funnel.reached)} reached have replied${d.funnel.meeting > 0 ? `, ${d.funnel.meeting} reached a meeting` : ', none have reached a meeting stage yet'}. Move responders forward on the Conversations page to light up the rest of this funnel.</div>
+  </td></tr></table>
 
   ${respondersCard(d.responders)}
 

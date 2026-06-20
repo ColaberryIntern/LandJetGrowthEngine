@@ -193,6 +193,21 @@ export async function collectBriefingData(): Promise<BriefingData> {
   const daysSinceLastSend = Math.max(0, Math.floor((Date.now() - new Date(lastSend + 'T12:00:00').getTime()) / 86400000));
   const firstSend = totalsRow.first_send || lastSend;
 
+  // Outreach funnel among reached leads: counts at each stage tier + won $.
+  // Won = pipeline_stage 'enrolled' (deal_amount stored on notes by the
+  // Conversations tracker); lost = 'lost'.
+  const [funnelRow] = await sequelize.query<{ replied: string; meeting: string; proposal: string; won: string; lost: string; won_amount: string }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE pipeline_stage IN ('replied','meeting_scheduled','proposal_sent','negotiation','enrolled'))::text AS replied,
+       COUNT(*) FILTER (WHERE pipeline_stage IN ('meeting_scheduled','proposal_sent','negotiation','enrolled'))::text AS meeting,
+       COUNT(*) FILTER (WHERE pipeline_stage IN ('proposal_sent','negotiation','enrolled'))::text AS proposal,
+       COUNT(*) FILTER (WHERE pipeline_stage = 'enrolled')::text AS won,
+       COUNT(*) FILTER (WHERE pipeline_stage = 'lost')::text AS lost,
+       COALESCE(SUM((notes->>'deal_amount')::numeric) FILTER (WHERE pipeline_stage = 'enrolled'), 0)::text AS won_amount
+     FROM leads l WHERE ${TOUCHED}`,
+    { type: QueryTypes.SELECT },
+  );
+
   // Replies come from the validated inbound rows persisted by replyIngestionService
   // (Graph mailbox read + thread/vendor validation lives there now). The briefing
   // just reads what was recorded -- a single source of truth.
@@ -207,6 +222,15 @@ export async function collectBriefingData(): Promise<BriefingData> {
     uniqueRespondedRecipients: +totalsRow.unique_responded,
     replySource: hasInbound ? 'comm_logs' : 'unavailable',
     responders: responders.map(r => ({ name: r.name || '(unknown)', company: r.company, subject: r.subject, body: r.body, day: r.day, booked: !!r.booked })),
+    funnel: {
+      reached: +totalsRow.total_touched,
+      replied: +funnelRow.replied,
+      meeting: +funnelRow.meeting,
+      proposal: +funnelRow.proposal,
+      won: +funnelRow.won,
+      lost: +funnelRow.lost,
+      wonAmount: +funnelRow.won_amount,
+    },
     leadsEmailed: +channelRow.leads_emailed,
     leadsLinkedInOnly: +channelRow.leads_linkedin_only,
     totalTouchedLeads: +totalsRow.total_touched,
