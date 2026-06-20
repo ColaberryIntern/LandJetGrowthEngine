@@ -8,6 +8,8 @@
  * Six SVG charts get rasterized to PNG before send (Gmail strips inline svg).
  */
 
+import { classifyReply, ReplyTone } from './replyClassification';
+
 export interface BriefingData {
   totalSends: number;
   totalInbound: number;
@@ -37,7 +39,7 @@ export interface BriefingData {
   hourEmail: Array<{ hour: number; count: number }>;
   hourLinkedIn: Array<{ hour: number; count: number }>;
   // Distinct leads who replied (validated by replyIngestionService), newest first.
-  responders: Array<{ name: string; company: string | null; subject: string | null; body: string | null; day: string }>;
+  responders: Array<{ name: string; company: string | null; subject: string | null; body: string | null; day: string; booked: boolean }>;
 }
 
 // Shared channel palette + legend so every chart reads the same way.
@@ -337,19 +339,27 @@ function respondedRateSub(d: BriefingData): string {
 // responders so the reply number is not just a count but names you can act on.
 function respondersCard(responders: BriefingData['responders']): string {
   if (responders.length === 0) return '';
-  const rows = responders.slice(0, 20).map((r) => {
-    const snippet = (r.body || '').replace(/\s+/g, ' ').trim();
-    const shown = snippet.slice(0, 240);
-    return `<tr><td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder}">
-      <div style="font-size:13px"><span style="font-weight:700;color:${PAL.text}">${escXml(r.name)}</span>${r.company ? `<span style="color:${PAL.textMuted}"> &middot; ${escXml(r.company)}</span>` : ''}<span style="color:${PAL.textDim};font-size:11px"> &middot; ${escXml(r.day)}</span></div>
-      ${r.subject ? `<div style="font-size:12px;color:${PAL.textMuted};margin-top:3px">${escXml(r.subject)}</div>` : ''}
-      ${shown ? `<div style="font-size:12px;color:${PAL.text};margin-top:5px;line-height:1.5">${escXml(shown)}${snippet.length > 240 ? '&hellip;' : ''}</div>` : ''}
-    </td></tr>`;
+  const TONE: Record<ReplyTone, string> = {
+    meet: PAL.green, interested: PAL.teal, question: PAL.gold,
+    negative: PAL.red, auto: PAL.textDim, neutral: PAL.navyLight,
+  };
+  const pill = (bg: string, text: string, ml = '0') =>
+    `<span style="display:inline-block;background:${bg};color:#fff;border-radius:11px;padding:3px 10px;font-size:11px;font-weight:700;margin-left:${ml};white-space:nowrap">${text}</span>`;
+  const rows = responders.slice(0, 25).map((r) => {
+    const tag = classifyReply(r.subject, r.body);
+    const tagBadge = pill(TONE[tag.tone], escXml(tag.label));
+    const bookBadge = r.booked ? pill(PAL.green, '&#10003; Booking', '6px') : '';
+    return `<tr>
+      <td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder};font-size:13px;font-weight:700;color:${PAL.text};white-space:nowrap">${escXml(r.name)}</td>
+      <td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder};font-size:12px;color:${PAL.textMuted}">${escXml(r.company || '')}</td>
+      <td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder}">${tagBadge}${bookBadge}</td>
+      <td style="padding:10px 14px;border-top:1px solid ${PAL.cardBorder};font-size:11px;color:${PAL.textDim};white-space:nowrap;text-align:right">${escXml(r.day)}</td>
+    </tr>`;
   }).join('');
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-top:4px solid ${PAL.green};border-radius:8px;margin-bottom:24px">
     <tr><td style="padding:14px 16px 4px">
       <div style="font-size:10px;font-weight:700;color:${PAL.green};text-transform:uppercase;letter-spacing:.08em">Who replied (${responders.length})</div>
-      <div style="font-size:13px;color:${PAL.textMuted};margin-top:4px">Leads who answered our outreach, validated against the thread (vendor/newsletter/internal excluded). These are now marked "replied" in the pipeline.</div>
+      <div style="font-size:13px;color:${PAL.textMuted};margin-top:4px">Tagged by what each reply needs. ${pill(PAL.green, 'Wants to meet')} is the closest to a booking. A green ${pill(PAL.green, '&#10003; Booking')} means that lead also requested a trip quote (booking intent).</div>
     </td></tr>
     <tr><td style="padding:6px 4px 10px">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${rows}</table>

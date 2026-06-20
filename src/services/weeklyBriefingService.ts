@@ -115,13 +115,14 @@ export async function collectBriefingData(): Promise<BriefingData> {
 
   // Who replied: distinct leads with a validated inbound row (written by
   // replyIngestionService), most recent first, for the "Replies" section.
-  const responders = await sequelize.query<{ name: string; company: string | null; subject: string | null; body: string | null; day: string }>(
+  const responders = await sequelize.query<{ name: string; company: string | null; subject: string | null; body: string | null; day: string; booked: boolean }>(
     `SELECT DISTINCT ON (cl.lead_id)
             TRIM(l.first_name || ' ' || l.last_name) AS name,
             l.company AS company,
             cl.subject AS subject,
             cl.body AS body,
-            cl.created_at::date::text AS day
+            cl.created_at::date::text AS day,
+            EXISTS (SELECT 1 FROM reservation_quotes rq WHERE LOWER(rq.from_email) = LOWER(l.email)) AS booked
      FROM communication_logs cl JOIN leads l ON l.id = cl.lead_id
      WHERE cl.direction = 'inbound'
      ORDER BY cl.lead_id, cl.created_at DESC`,
@@ -205,7 +206,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
     uniqueRecipients: +totalsRow.unique_recipients,
     uniqueRespondedRecipients: +totalsRow.unique_responded,
     replySource: hasInbound ? 'comm_logs' : 'unavailable',
-    responders: responders.map(r => ({ name: r.name || '(unknown)', company: r.company, subject: r.subject, body: r.body, day: r.day })),
+    responders: responders.map(r => ({ name: r.name || '(unknown)', company: r.company, subject: r.subject, body: r.body, day: r.day, booked: !!r.booked })),
     leadsEmailed: +channelRow.leads_emailed,
     leadsLinkedInOnly: +channelRow.leads_linkedin_only,
     totalTouchedLeads: +totalsRow.total_touched,
