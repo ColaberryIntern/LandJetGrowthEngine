@@ -1097,6 +1097,13 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
       const notes = { ...(lead.notes as Record<string, unknown> || {}) };
       notes.category_source = 'manual';
       delete notes.category_review;
+      // Ryan WhatsApp 2026-06-20: moving a contact to a new campaign left the
+      // OLD campaign's LinkedIn message showing after a refresh. The cached
+      // draft (notes.linkedin_draft) is keyed only by sequence_stage, so a
+      // same-stage campaign move did not invalidate it. Clear it here so the
+      // message is regenerated for the new campaign's prompt. The fresh draft
+      // generated below is written back to the cache so the refresh is a hit.
+      delete notes.linkedin_draft;
       lead.notes = notes;
     }
     await lead.save();
@@ -1169,6 +1176,17 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
       }
       if (linkedinMessage && linkedinMessage.length > maxChars) {
         linkedinMessage = linkedinMessage.slice(0, maxChars).trim();
+      }
+      // Persist the freshly generated message so a page refresh (which reads the
+      // cached draft) shows THIS new-campaign message instead of reverting to a
+      // stale one. Pairs with the cache invalidation on the move above.
+      if (linkedinMessage) {
+        await writeCachedLinkedInDraft(updated.id, {
+          stage: updated.sequence_stage,
+          body: linkedinMessage,
+          at: new Date().toISOString(),
+          source: 'ai',
+        });
       }
     }
 
