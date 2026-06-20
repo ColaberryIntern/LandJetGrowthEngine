@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Reply ingestion + pipeline write-back (replies now count)**
+  - Date: 2026-06-20
+  - What changed: Built [replyIngestionService.ts](src/services/replyIngestionService.ts) -- reads the rlandry@ mailbox via Graph and records a reply ONLY if validated: sender is a lead (internal + vendor `tagteamagency.com` domains denied; newsletter/charity/fundraising subjects denied) AND the thread has an outbound from us (rlandry@/ryan@/ryan.landry@) to that lead before the reply. Validated replies are written as inbound `communication_logs` rows (deduped by Graph message id) and the lead advances `contacted -> replied`. Runner [ingestReplies.ts](src/scripts/ingestReplies.ts) (dry-run default, --apply). Briefing now reads these persisted replies (single source of truth; removed its own live Graph matcher), adds a "Who replied" table, and Section 04 shows real pipeline movement.
+  - Verification: `tsc --noEmit` clean; deny-filter unit test 5/5; dry-run on prod showed 9 distinct responders / 17 messages (down from a naive 22 -- vendor/newsletter/charity correctly excluded); `--apply` persisted 17 inbound rows and advanced 9 leads to 'replied' (DB-verified: inbound_rows=17, leads_at_replied=9). Updated briefing emailed to ali@ shows "Replies received: 17" (was 0).
+  - Notes: The 9 are almost all investor conversations (Spike Capital, UBS, Infusion Equity, Casepoint, Deloitte, EDC, KFM, Steven Thornburg). This is Ali's chosen "reply tracking + pipeline" priority. Still manual-run; next increment is wiring a periodic ingestion job into pipelineAutoRunner so it stays fresh. The validation is best-effort (thread we-reached-first + deny lists); a maintained deny list may need occasional additions.
+
 - [x] **LinkedIn message stale after campaign move (Ryan WhatsApp 2026-06-20)**
   - Date: 2026-06-20
   - What changed: Moving a contact to a new campaign kept showing the OLD campaign's LinkedIn message after refresh (e.g. a contact moved Sports -> Business Services still showed sports messaging). Root cause: `notes.linkedin_draft` cache ([outreachQueryService.ts:696](src/services/outreachQueryService.ts#L696)) is keyed only by `sequence_stage`, so a same-stage campaign move never invalidated it; the `POST /:id/campaign` reassign endpoint regenerated a message for its response but never wrote it back to the cache. Fix: on move, `delete notes.linkedin_draft` and `writeCachedLinkedInDraft()` the freshly generated new-campaign message ([outreachRoutes.ts](src/routes/admin/outreachRoutes.ts)).
