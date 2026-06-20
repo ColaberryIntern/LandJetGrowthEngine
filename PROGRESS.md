@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Deal-tracking Phase 1: see the reply messages**
+  - Date: 2026-06-20
+  - What changed: [replyIngestionService.ts](src/services/replyIngestionService.ts) now captures each reply's `bodyPreview` from Graph into `communication_logs.body` (backfilling rows recorded before body capture). The briefing "Who replied" section ([weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts)) now shows each responder's name, company, subject, and a ~240-char preview of what they said. Also restored the investor campaign on the chart and reassigned 5 investor responders (Spike/UBS/Infusion/Casepoint/Thornburg) to Investor Outreach.
+  - Verification: `tsc --noEmit` clean; deployed; re-ingest backfilled bodies (DB: inbound_with_body 17/17, idempotent: 0 new / 0 re-advanced); regenerated report + emailed to ali@ shows real previews (e.g. "Monday's bad for me. Do you prefer Friday or Tuesday?", "I assume you aren't going through with this now? No communication in over 2 months").
+  - Notes: Phase 1 of the deal-attribution plan (see/track/attribute). Shows bodyPreview, not the full ordered thread (Phase 1.5 endpoint/page). Phase 2 (move responders through stages w/ next-action) and Phase 3 (Deal model + funnel reached->replied->meeting->closed $) are next; Phase 3's "closed" gate needs outcome capture since most closes (esp. investor) are off-system.
+
 - [x] **Navbar: personalize with signed-in user name + territory**
   - Date: 2026-06-20
   - What changed: [Navbar.tsx](frontend/components/Navbar.tsx) now fetches /users/me/profile and shows the signed-in user (initials avatar + name) plus their territory chip (`Name · 📍 TX`, or "All regions" when unscoped) in the top-right. Non-fatal if the fetch fails (nav still renders).
