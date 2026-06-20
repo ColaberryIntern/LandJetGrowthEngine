@@ -29,7 +29,7 @@
 import { getSequelize } from '../config/database';
 import { initModels } from '../models';
 import { Lead } from '../models/Lead';
-import { buildVerticalCampaignMap, routeLeadToCorrectCampaign, RouteAction } from '../services/leadRoutingService';
+import { buildVerticalCampaignMap, buildStrategicCampaignIds, routeLeadToCorrectCampaign, RouteAction } from '../services/leadRoutingService';
 
 const APPLY = process.argv.includes('--apply');
 
@@ -42,7 +42,9 @@ const APPLY = process.argv.includes('--apply');
   console.log('');
 
   const campaignMap = await buildVerticalCampaignMap();
+  const strategicCampaignIds = await buildStrategicCampaignIds();
   console.log(`Active campaigns by vertical: ${[...campaignMap.keys()].join(', ') || '(none)'}`);
+  console.log(`Strategic (protected, non-vertical) campaigns: ${strategicCampaignIds.size}`);
   console.log('');
 
   const leads = await Lead.findAll({
@@ -51,13 +53,13 @@ const APPLY = process.argv.includes('--apply');
   });
 
   const tally: Record<RouteAction, number> = {
-    routed: 0, kept: 0, flagged: 0, unclassified: 0, manual_skip: 0,
+    routed: 0, kept: 0, flagged: 0, unclassified: 0, manual_skip: 0, protected: 0,
   };
   const needsAttention: string[] = [];
 
   for (const lead of leads) {
     // persist only on --apply; dry run mutates in-memory copies and discards them.
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap, persist: APPLY });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap, strategicCampaignIds, persist: APPLY });
     tally[result.action]++;
     if (result.action === 'routed') {
       console.log(`  routed   #${lead.id} ${lead.company ?? ''} -> ${result.leadVertical} (${result.reason})`);
@@ -73,6 +75,7 @@ const APPLY = process.argv.includes('--apply');
   console.log(`  routed             : ${tally.routed}`);
   console.log(`  kept (already ok)  : ${tally.kept}`);
   console.log(`  manual (skipped)   : ${tally.manual_skip}`);
+  console.log(`  protected (strategic): ${tally.protected}`);
   console.log(`  flagged (no campgn): ${tally.flagged}`);
   console.log(`  unclassified       : ${tally.unclassified}`);
 

@@ -36,7 +36,7 @@ function makeLead(over: Record<string, unknown> = {}): any {
 describe('routeLeadToCorrectCampaign', () => {
   it("routes a misfiled lead to the campaign matching its real industry (ZINTEX -> construction)", async () => {
     const lead = makeLead({ industry: 'Construction', campaign_id: 'camp-bank', vertical: 'Banking' });
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
 
     expect(result.action).toBe('routed');
     expect(lead.campaign_id).toBe('camp-re');
@@ -47,7 +47,7 @@ describe('routeLeadToCorrectCampaign', () => {
 
   it('keeps a lead already in the correct campaign and corrects its badge', async () => {
     const lead = makeLead({ industry: 'Banking', campaign_id: 'camp-bank', vertical: 'wrong-old-value' });
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
 
     expect(result.action).toBe('kept');
     expect(lead.campaign_id).toBe('camp-bank');
@@ -56,7 +56,7 @@ describe('routeLeadToCorrectCampaign', () => {
 
   it('flags a lead whose vertical has no active campaign (left in place)', async () => {
     const lead = makeLead({ industry: 'Law Practice', campaign_id: 'camp-bank' });
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
 
     expect(result.action).toBe('flagged');
     expect(lead.campaign_id).toBe('camp-bank'); // unchanged
@@ -65,11 +65,25 @@ describe('routeLeadToCorrectCampaign', () => {
 
   it('marks an unclassifiable industry for review without moving it', async () => {
     const lead = makeLead({ industry: 'Underwater Basket Weaving', campaign_id: 'camp-bank' });
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
 
     expect(result.action).toBe('unclassified');
     expect(lead.campaign_id).toBe('camp-bank');
     expect((lead.notes as any).category_review.status).toBe('unclassified');
+  });
+
+  it('never pulls a lead out of a strategic (non-vertical) campaign, e.g. Investor Outreach', async () => {
+    // Investment-industry lead sitting in the strategic "Investor Outreach"
+    // campaign (id camp-investor). Its industry maps to Banking, but it must
+    // NOT be routed to the Banking campaign -- this is the 2026-06-20 regression.
+    const lead = makeLead({ industry: 'Investment', campaign_id: 'camp-investor' });
+    const result = await routeLeadToCorrectCampaign(lead, {
+      campaignMap: campaignMap(),
+      strategicCampaignIds: new Set(['camp-investor']),
+    });
+    expect(result.action).toBe('protected');
+    expect(lead.campaign_id).toBe('camp-investor');
+    expect(lead.save).not.toHaveBeenCalled();
   });
 
   it('never overrides a manual (human) categorization', async () => {
@@ -77,7 +91,7 @@ describe('routeLeadToCorrectCampaign', () => {
       industry: 'Construction', campaign_id: 'camp-bank',
       notes: { category_source: 'manual' },
     });
-    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const result = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
 
     expect(result.action).toBe('manual_skip');
     expect(lead.campaign_id).toBe('camp-bank'); // Ryan's choice respected
@@ -86,16 +100,16 @@ describe('routeLeadToCorrectCampaign', () => {
 
   it('does not persist when persist:false (dry run)', async () => {
     const lead = makeLead({ industry: 'Construction', campaign_id: 'camp-bank' });
-    await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), persist: false });
+    await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set(), persist: false });
     expect(lead.save).not.toHaveBeenCalled();
   });
 
   it('is idempotent: re-running a routed lead reports kept and stops moving it', async () => {
     const lead = makeLead({ industry: 'Construction', campaign_id: 'camp-bank' });
-    const first = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const first = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
     expect(first.action).toBe('routed');
 
-    const second = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap() });
+    const second = await routeLeadToCorrectCampaign(lead, { campaignMap: campaignMap(), strategicCampaignIds: new Set() });
     expect(second.action).toBe('kept');
     expect(lead.campaign_id).toBe('camp-re');
   });

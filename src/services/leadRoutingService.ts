@@ -35,7 +35,7 @@ import { Campaign } from '../models/Campaign';
 import { classifyVertical, campaignVertical, Vertical } from './leadClassification';
 import { logger } from '../config/logger';
 
-export type RouteAction = 'kept' | 'routed' | 'flagged' | 'unclassified' | 'manual_skip';
+export type RouteAction = 'kept' | 'routed' | 'flagged' | 'unclassified' | 'manual_skip' | 'protected';
 
 export interface RouteResult {
   action: RouteAction;
@@ -76,6 +76,23 @@ export async function buildVerticalCampaignMap(): Promise<Map<Vertical, Campaign
   return map;
 }
 
+/**
+ * Ids of STRATEGIC campaigns -- active campaigns whose name does NOT map to a
+ * vertical (e.g. "Investor Outreach", "General Outreach"). Leads deliberately
+ * placed in these are segmented by strategy, not industry, so auto-route must
+ * never pull them out. (2026-06-20: the reconciliation sweep moved 31 actively
+ * worked investor prospects out of "Investor Outreach" into a Banking campaign
+ * because their industry is "Investment" -> Banking. This set prevents that.)
+ */
+export async function buildStrategicCampaignIds(): Promise<Set<string>> {
+  const campaigns = await Campaign.findAll({ where: { status: 'active' }, attributes: ['id', 'name'] });
+  const ids = new Set<string>();
+  for (const c of campaigns) {
+    if (campaignVertical(c.name) === null) ids.add(String(c.id));
+  }
+  return ids;
+}
+
 function setReview(lead: Lead, review: CategoryReview): void {
   lead.notes = { ...(lead.notes as object || {}), category_review: review };
 }
@@ -99,7 +116,7 @@ function isManuallyClassified(lead: Lead): boolean {
  */
 export async function routeLeadToCorrectCampaign(
   lead: Lead,
-  opts: { campaignMap?: Map<Vertical, Campaign>; persist?: boolean } = {},
+  opts: { campaignMap?: Map<Vertical, Campaign>; strategicCampaignIds?: Set<string>; persist?: boolean } = {},
 ): Promise<RouteResult> {
   const persist = opts.persist !== false;
   const fromCampaignId = lead.campaign_id;
@@ -112,6 +129,20 @@ export async function routeLeadToCorrectCampaign(
       fromCampaignId,
       toCampaignId: fromCampaignId,
       reason: 'Lead was manually categorized by an operator; auto-route skipped.',
+    };
+  }
+
+  // Strategic (non-vertical) campaigns -- e.g. Investor Outreach -- are protected:
+  // a lead deliberately placed there is segmented by strategy, not industry, so
+  // we never pull it out even if its industry maps to some vertical.
+  const strategicIds = opts.strategicCampaignIds ?? (await buildStrategicCampaignIds());
+  if (fromCampaignId && strategicIds.has(String(fromCampaignId))) {
+    return {
+      action: 'protected',
+      leadVertical: classifyVertical(lead.industry),
+      fromCampaignId,
+      toCampaignId: fromCampaignId,
+      reason: 'Lead is in a strategic (non-vertical) campaign; auto-route skipped.',
     };
   }
 

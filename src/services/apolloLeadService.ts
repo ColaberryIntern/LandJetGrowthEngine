@@ -13,7 +13,7 @@ import { Campaign } from '../models/Campaign';
 import { SystemSetting } from '../models/SystemSetting';
 import { logger } from '../config/logger';
 import { classifyVertical, campaignVertical } from './leadClassification';
-import { buildVerticalCampaignMap, routeLeadToCorrectCampaign } from './leadRoutingService';
+import { buildVerticalCampaignMap, buildStrategicCampaignIds, routeLeadToCorrectCampaign } from './leadRoutingService';
 
 const APOLLO_KEY = process.env.APOLLO_API_KEY || '';
 
@@ -169,8 +169,11 @@ export async function pullLeadsForCampaign(
   // lead we auto-route it to the campaign matching that vertical, so an
   // off-target Apollo result (e.g. a remodeling exec returned on a Banking
   // pull) lands in the right campaign instead of getting banking messaging.
-  // Built once here so we do not re-query campaigns per lead.
+  // Built once here so we do not re-query campaigns per lead. The strategic set
+  // protects non-vertical campaigns (e.g. Investor Outreach) from being routed
+  // away from -- a lead pulled into Investor Outreach stays there.
   const campaignMap = await buildVerticalCampaignMap();
+  const strategicCampaignIds = await buildStrategicCampaignIds();
 
   // Distribute target count across markets evenly (with slight rounding)
   const totalWeight = config.markets.reduce((sum, m) => sum + (m.weight || 1), 0);
@@ -252,7 +255,7 @@ export async function pullLeadsForCampaign(
           // Auto-route to the campaign matching the lead's real industry. Safe
           // to fail soft: a routing error must not lose the lead we just saved.
           try {
-            const routed = await routeLeadToCorrectCampaign(created, { campaignMap });
+            const routed = await routeLeadToCorrectCampaign(created, { campaignMap, strategicCampaignIds });
             if (routed.action === 'routed') {
               stats.details.push(`  ~ re-routed to matching campaign (${routed.leadVertical})`);
             }
