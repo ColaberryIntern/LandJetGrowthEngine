@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Reply Intelligence (proposed vs actual reply, learns over time) + trip-map fix**
+  - Date: 2026-06-20
+  - What changed: New [replyAnalysisService.ts](src/services/replyAnalysisService.ts) `analyzeReply(leadId)` -- pulls the lead's reply, drafts "what we would have replied" (AI in Ryan's voice, few-shot primed from past their->Ryan reply pairs), fetches Ryan's ACTUAL reply from the Graph thread, scores AI-proposed vs actual similarity (Jaccard), and persists each (their msg -> Ryan reply) pair on the inbound row's metadata so proposals improve over time. New `GET /api/admin/conversations/:leadId/reply-analysis` + an expandable 3-panel view on the Conversations page (They replied | What we'd reply (AI) | What Ryan sent) with the similarity + "learned from N examples". Trip-map fix: dropped the fixed `z=7` in [reservations/page.tsx](frontend/app/reservations/page.tsx) so each route auto-fits.
+  - Verification: backend + frontend `tsc --noEmit` clean; deployed backend+frontend. Trip maps verified per-trip (DB: quotes 13-20 carry distinct pickup/dropoff; 8-12 null -> no map); they only looked identical because all sample trips are the Des Moines IA <-> MI/WI corridor with duplicate/reverse pairs at a fixed regional zoom.
+  - Notes: AI proposal is generated live on expand. "Smarter over time" = the (their->Ryan) example store grows as analyses run and Ryan keeps replying; similarity should climb. A confirmed booking still needs LJ's booking backend; everything here uses the reachable mailbox + AI.
+
 - [x] **Deal-tracking Phase 3: outreach funnel + deal-value capture**
   - Date: 2026-06-20
   - What changed: Briefing gains an "Outreach funnel" section (reached -> replied -> meeting -> proposal -> won, conversion %, summed Won $) via a funnel query in [weeklyBriefingService.ts](src/services/weeklyBriefingService.ts) + `funnelChart` in [weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts). Won = pipeline_stage 'enrolled' with `notes.deal_amount`. The Conversations endpoint + page ([conversationsRoutes.ts](src/routes/admin/conversationsRoutes.ts), [page](frontend/app/conversations/page.tsx)) gain a Deal $ field and a Won total. Closes the "did outreach close it" loop: mark a responder enrolled + enter the amount -> it rolls into the funnel.
