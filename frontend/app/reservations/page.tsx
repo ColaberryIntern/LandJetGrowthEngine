@@ -28,6 +28,12 @@ function money(v: string | number | null | undefined): string {
   return Number.isFinite(n) ? `$${n.toFixed(2)}` : '--';
 }
 
+// No-key Google Maps embed showing the from -> to route ("kinda sorta").
+function mapSrc(pickup?: string, dropoff?: string): string | null {
+  if (!pickup || !dropoff) return null;
+  return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&z=7&output=embed`;
+}
+
 export default function ReservationsPage() {
   const [rows, setRows] = useState<ReservationQuoteRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,26 +124,47 @@ export default function ReservationsPage() {
             const open = openId === r.id;
             const sent = sendResult[r.id] || (r.result?.sent ? { sent: true, dry: false, to: r.result.sent.to, text: '' } : null);
             const canSend = r.status === 'auto_ready' || r.status === 'needs_review';
+            const quotedAt = r.result?.sent?.at || r.result?.prepared?.at || null;
+            const quotedKind = r.result?.sent?.at ? 'sent' : 'prepared';
+            const route = mapSrc(trip?.pickup_address, trip?.dropoff_address);
             return (
               <div key={r.id} className="rounded-lg border border-gray-200 bg-white">
-                <button onClick={() => setOpenId(open ? null : r.id)} className="w-full text-left px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
-                        <span className="text-xs text-gray-400">conf {Number(r.confidence).toFixed(2)}</span>
-                        {r.market && <span className="text-xs text-gray-400">&middot; {r.market.replace(/_/g, ' ')}</span>}
-                        <span className="text-xs text-gray-400">&middot; {timeAgo(r.received_at)}</span>
-                      </div>
-                      <div className="mt-1 truncate font-medium text-gray-900">{r.subject || '(no subject)'}</div>
-                      <div className="truncate text-sm text-gray-500">{r.from_email}</div>
+                <div className="flex items-stretch gap-3 px-4 py-3">
+                  <button onClick={() => setOpenId(open ? null : r.id)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+                      <span className="text-xs text-gray-400">conf {Number(r.confidence).toFixed(2)}</span>
+                      {r.market && <span className="text-xs text-gray-400">&middot; {r.market.replace(/_/g, ' ')}</span>}
+                      <span className="text-xs text-gray-400">&middot; in {timeAgo(r.received_at)}</span>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-lg font-semibold text-gray-900">{money(r.quote_total)}</div>
-                      <div className="text-xs text-gray-400">{open ? 'Hide' : 'View'}</div>
+                    <div className="mt-1 truncate font-medium text-gray-900">{r.subject || '(no subject)'}</div>
+                    <div className="truncate text-sm text-gray-500">{r.from_email}</div>
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap text-xs">
+                      {r.responded_at ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">&#9989; Replied {timeAgo(r.responded_at)}</span>
+                      ) : quotedAt ? (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">Awaiting reply</span>
+                      ) : null}
+                      {quotedAt ? (
+                        <span className="text-gray-500">Quote {quotedKind} {timeAgo(quotedAt)}</span>
+                      ) : (
+                        <span className="text-gray-400">Not quoted yet</span>
+                      )}
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  {route && (
+                    <iframe
+                      src={route}
+                      title={`route-${r.id}`}
+                      loading="lazy"
+                      className="hidden sm:block w-44 h-24 shrink-0 rounded border border-gray-200"
+                    />
+                  )}
+                  <button onClick={() => setOpenId(open ? null : r.id)} className="text-right shrink-0 self-center">
+                    <div className="text-lg font-semibold text-gray-900">{money(r.quote_total)}</div>
+                    <div className="text-xs text-gray-400">{open ? 'Hide' : 'View'}</div>
+                  </button>
+                </div>
 
                 {open && (
                   <div className="border-t border-gray-100 px-4 py-3 space-y-3">

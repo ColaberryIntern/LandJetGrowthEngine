@@ -31,6 +31,7 @@ export interface RawReservationEmail {
   from: string | null;
   receivedDateTime: string | null;
   body: string;
+  conversationId: string | null;
 }
 
 async function getGraphToken(): Promise<string> {
@@ -79,7 +80,7 @@ export async function fetchReservationEmails(
   const sinceIso = new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString();
   const url =
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders/inbox/messages` +
-    `?$top=${top}&$select=id,subject,from,receivedDateTime,body&$orderby=receivedDateTime desc` +
+    `?$top=${top}&$select=id,subject,from,receivedDateTime,body,conversationId&$orderby=receivedDateTime desc` +
     `&$filter=receivedDateTime ge ${sinceIso}`;
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) throw new Error(`Graph fetch ${r.status}: ${(await r.text()).slice(0, 160)}`);
@@ -90,7 +91,47 @@ export async function fetchReservationEmails(
     from: m.from?.emailAddress?.address || null,
     receivedDateTime: m.receivedDateTime || null,
     body: m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || ''),
+    conversationId: m.conversationId || null,
   }));
+}
+
+/**
+ * Detect customer replies: for recent priced rows whose thread we know, check
+ * the conversation for a message from the customer that is newer than the
+ * original reservation email, and stamp responded_at. Best-effort, fail-soft.
+ */
+export async function refreshReservationReplies(opts: { lookbackHours?: number; mailbox?: string } = {}): Promise<{ checked: number; newly_responded: number }> {
+  const lookbackHours = opts.lookbackHours ?? 168;
+  const mailbox = opts.mailbox ?? DEFAULT_MAILBOX;
+  const { Op } = await import('sequelize');
+  const since = new Date(Date.now() - lookbackHours * 3600 * 1000);
+  const rows = await ReservationQuote.findAll({
+    where: { mailbox, conversation_id: { [Op.ne]: null }, responded_at: null, received_at: { [Op.gte]: since } } as any,
+  });
+  if (rows.length === 0) return { checked: 0, newly_responded: 0 };
+
+  const token = await getGraphToken();
+  let newly = 0;
+  for (const rq of rows) {
+    try {
+      const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
+      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$orderby=receivedDateTime desc&$top=15`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) continue;
+      const data = (await r.json()) as { value?: any[] };
+      const origAt = rq.received_at ? new Date(rq.received_at).getTime() : 0;
+      const cust = (rq.from_email || '').toLowerCase();
+      let respAt: string | null = null;
+      for (const m of data.value || []) {
+        const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
+        const t = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0;
+        if (fromAddr && fromAddr === cust && t > origAt) { respAt = m.receivedDateTime; break; }
+      }
+      if (respAt) { await rq.update({ responded_at: new Date(respAt) } as any); newly++; }
+    } catch { /* skip this row, non-fatal */ }
+  }
+  logger.info('reservation replies refreshed', { checked: rows.length, newly_responded: newly });
+  return { checked: rows.length, newly_responded: newly };
 }
 
 /**
@@ -162,6 +203,7 @@ export async function ingestReservationQuotes(opts: {
         confidence,
         status,
         result: result as unknown as Record<string, unknown>,
+        conversation_id: e.conversationId,
       } as any);
 
       counts.created++;
@@ -171,6 +213,11 @@ export async function ingestReservationQuotes(opts: {
       logger.error('reservation ingest failed for one email (non-fatal)', { id: e.id, error: (err as Error).message });
     }
   }
+
+  // Best-effort reply detection so the queue shows what has been responded to.
+  await refreshReservationReplies({ lookbackHours: Math.max(lookbackHours, 72), mailbox }).catch((e) => {
+    logger.warn('reservation reply refresh failed (non-fatal)', { error: (e as Error).message });
+  });
 
   logger.info('reservation quote ingest complete', { mailbox, ...counts });
   return counts;

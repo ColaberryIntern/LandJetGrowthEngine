@@ -29,6 +29,12 @@ Last updated: 2026-06-19
   - What changed: [campaignRoutes.ts](src/routes/admin/campaignRoutes.ts) GET /campaigns loads the caller default_filters.states and passes to [campaignService.ts](src/services/campaignService.ts) listCampaigns, which restricts to campaigns having >=1 lead in those states (Op.iRegexp via buildStatesPattern). Unscoped admins see all. Mirrors the /today enforcement.
   - Verification: tsc --noEmit clean (exit 0); deployed; total campaigns 21, TX-scoped (Percy/demo) returns 15 (the 6 with no TX leads hidden).
 
+- [x] **Reservation queue: reply detection, sent-timing, route map**
+  - Date: 2026-06-20
+  - What changed: [reservationQuoteService.ts](src/services/reservationQuoteService.ts) now captures the Graph conversationId on ingest and a refreshReservationReplies() pass stamps responded_at when the customer next replies in the thread (runs at the end of each ingest cycle, fail-soft). New columns conversation_id + responded_at on reservation_quotes. The [/reservations](frontend/app/reservations/page.tsx) row now shows: a green "Replied Xago" or "Awaiting reply" badge, "Quote sent/prepared Xago" (from result.sent/prepared), and a small no-key Google Maps embed of the pickup->dropoff route on each overview row.
+  - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
+  - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
+
 - [x] **Reservation review queue UI + guarded 1-click send**
   - Date: 2026-06-20
   - What changed: New [/reservations](frontend/app/reservations/page.tsx) page lists priced reservation emails (status chips auto_ready/needs_review/forward/manual, confidence, market, total), expands to show the parsed trip + quote breakdown + warnings + original email, and has a 1-click "Send quote reply". Added Navbar link. Backend [composeQuoteReply + sendReservationQuote](src/services/reservationQuoteService.ts) and POST /api/admin/quotes/reservations/:id/send. SAFETY: real customer sends only fire when RESERVATION_SEND_ENABLED=true; default is DRY (returns the draft, marks result.prepared, emails no one) so the 1-click UX is safe to demo before Percy/Lorie validate quotes. "Refresh from mailbox" button triggers the ingest.

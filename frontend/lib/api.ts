@@ -984,6 +984,8 @@ export interface ReservationQuoteRow {
   confidence: string;
   status: 'auto_ready' | 'needs_review' | 'forward' | 'manual';
   raw_body: string | null;
+  conversation_id?: string | null;
+  responded_at?: string | null;
   result: {
     trip?: { passenger_name?: string; pickup_address?: string; dropoff_address?: string; service_type?: string; date_of_service?: string; passengers?: number };
     quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string };

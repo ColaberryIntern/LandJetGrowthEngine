@@ -28,6 +28,8 @@ export class ReservationQuote extends Model {
   declare confidence: string;          // DECIMAL -> string in pg
   declare status: ReservationQuoteStatus;
   declare result: Record<string, unknown> | null;
+  declare conversation_id: string | null; // Graph thread id, for reply detection
+  declare responded_at: Date | null;      // when the customer next replied in the thread
   declare created_at: Date;
   declare updated_at: Date;
 }
@@ -49,6 +51,8 @@ export function initReservationQuoteModel(sequelize: Sequelize): typeof Reservat
       confidence: { type: DataTypes.DECIMAL(3, 2), allowNull: false, defaultValue: 0 },
       status: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'manual' },
       result: { type: DataTypes.JSONB, allowNull: true },
+      conversation_id: { type: DataTypes.TEXT, allowNull: true },
+      responded_at: { type: DataTypes.DATE, allowNull: true },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },
