@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Outreach: server-side territory enforcement + visible location badge**
+  - Date: 2026-06-20
+  - What changed: Even with location data populated, the Outreach screen still showed the full pool because `/today` only scoped when the client passed `?states=` and the frontend hook was not reliably seeding it. Fixed at the source: [outreachRoutes.ts](src/routes/admin/outreachRoutes.ts) `/today` now loads the signed-in user's `default_filters.states` and ENFORCES it (a territory owner like Percy=TX only ever sees their state, regardless of client params); users with no profile scope keep ad-hoc query filtering. Response now returns `state`/`city` per contact; [outreach/page.tsx](frontend/app/outreach/page.tsx) renders a location badge (📍 City, ST) with a muted "No location" chip when unresolved; added `state`/`city` to `OutreachContact` ([api.ts](frontend/lib/api.ts)).
+  - Verification: backend + frontend `tsc --noEmit` clean (exit 0). Deployed both containers; post-deploy, logging in as the TX demo user with NO states param returns 40 contacts ALL `TX` (was 40 mixed before), each carrying its state -- confirms server-side scope enforcement + the field is present for the badge.
+  - Notes: City is null for area-code-derived rows (area code yields state only); the company-LLM pass adds cities. Map UI still pending (BC #10017098565).
+
 - [x] **Lead location resolution (unblocks territory scoping + map) + go-forward wiring**
   - Date: 2026-06-20
   - What changed: Root cause of "cannot confirm Percy is Texas-scoped": all 7,888 leads had empty `state`/`city`, so the territory/state filter had nothing to match (a TX-scoped view returned the full pool, not Texas). Built a multi-source resolver and populated location:
