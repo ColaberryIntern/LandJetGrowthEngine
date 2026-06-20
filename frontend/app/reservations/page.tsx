@@ -168,12 +168,18 @@ export default function ReservationsPage() {
 
                 {open && (
                   <div className="border-t border-gray-100 px-4 py-3 space-y-3">
-                    {trip && (trip.pickup_address || trip.dropoff_address) && (
+                    {trip && (
                       <div className="text-sm">
-                        <div className="font-medium text-gray-700">Trip</div>
-                        <div className="text-gray-600">{trip.pickup_address} &rarr; {trip.dropoff_address}</div>
+                        <div className="font-medium text-gray-700">
+                          {r.result?.source === 'nl' ? 'Extracted from a free-form email (AI)' : 'Trip'}
+                        </div>
+                        {(trip.pickup_address || trip.dropoff_address) ? (
+                          <div className="text-gray-600">{trip.pickup_address || '(no pickup)'} &rarr; {trip.dropoff_address || '(no dropoff)'}</div>
+                        ) : (
+                          <div className="text-xs text-amber-700">No pickup/dropoff in the email &mdash; add a route to produce a quote.</div>
+                        )}
                         <div className="text-gray-400 text-xs mt-0.5">
-                          {[trip.service_type, trip.date_of_service, trip.passengers != null ? `${trip.passengers} pax` : null].filter(Boolean).join(' · ')}
+                          {[trip.passenger_name, trip.service_type, trip.date_of_service, trip.passengers != null ? `${trip.passengers} pax` : null].filter(Boolean).join(' · ')}
                         </div>
                       </div>
                     )}
