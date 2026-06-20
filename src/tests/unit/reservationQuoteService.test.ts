@@ -2,9 +2,10 @@ import { deriveConfidenceAndStatus, htmlToText } from '../../services/reservatio
 import { processInboundEmail } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
-const priced = (over: Partial<any> = {}): InboundProcessResult => ({
+const priced = (over: Partial<any> = {}, source?: 'bookrides' | 'nl'): InboundProcessResult => ({
   mode: 'priced',
   market: 'dallas',
+  source,
   quote: { pricing_mode: 'distance', subtotal: 100, secondary_total: 100, third_total: 110, grand_total: 120, warnings: [], ...over } as any,
 });
 
@@ -37,6 +38,21 @@ describe('deriveConfidenceAndStatus (Percy: simple=high, complex/incomplete=huma
 
   it('non-quote (manual/faq) -> manual 0', () => {
     expect(deriveConfidenceAndStatus({ mode: 'manual', manual_reason: 'not_bookrides' } as InboundProcessResult))
+      .toEqual({ confidence: 0, status: 'manual' });
+  });
+
+  it('NL-extracted priced quote -> needs_review (human verifies the AI read)', () => {
+    expect(deriveConfidenceAndStatus(priced({}, 'nl' as any)).status).toBe('needs_review');
+    expect(deriveConfidenceAndStatus(priced({}, 'nl' as any)).confidence).toBe(0.5);
+  });
+
+  it('NL booking detected but no routable address -> needs_review with details', () => {
+    const r = deriveConfidenceAndStatus({ mode: 'manual', manual_reason: 'nl_no_route', source: 'nl', trip: { passenger_name: 'Mark', passengers: 8 } } as any);
+    expect(r).toEqual({ confidence: 0.3, status: 'needs_review' });
+  });
+
+  it('NL but not a booking -> manual 0', () => {
+    expect(deriveConfidenceAndStatus({ mode: 'manual', source: 'nl' } as InboundProcessResult))
       .toEqual({ confidence: 0, status: 'manual' });
   });
 });

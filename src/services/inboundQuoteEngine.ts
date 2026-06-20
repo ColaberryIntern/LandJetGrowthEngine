@@ -33,6 +33,7 @@ import {
   QuoteOutput,
 } from './landjetPricing';
 import { searchFaqs, FaqMatch } from './landjetFaqService';
+import { extractTripFromText } from './nlTripExtraction';
 
 export type InboundProcessMode = 'priced' | 'forward_only' | 'faq' | 'manual';
 
@@ -44,7 +45,8 @@ export interface InboundProcessResult {
   forward_to?: string[];         // present for 'forward_only'
   forward_reason?: string;       // present for 'forward_only'
   faq_matches?: FaqMatch[];      // present for 'faq' (top matched FAQ entries)
-  manual_reason?: string;        // present for 'manual' (e.g., 'not_bookrides', 'unknown_market')
+  manual_reason?: string;        // present for 'manual' (e.g., 'not_bookrides', 'unknown_market', 'nl_no_route')
+  source?: 'bookrides' | 'nl';   // how the trip was obtained: rigid parse vs LLM extraction
 }
 
 // =====================================================================
@@ -174,10 +176,6 @@ export function processInboundEmail(emailBody: string, senderEmail?: string): In
   // Step 1: is this a BookRides email at all?
   if (!isBookRidesEmail(emailBody)) {
     // Try FAQ pre-pass before falling through to manual.
-    // Threshold of 0.35 catches typical FAQ-style questions ("how is conversation
-    // kept confidential", "what is your cancellation policy") without firing on
-    // generic greetings or trip availability questions. The LLM gets the matched
-    // FAQ entries and can still decide they aren't relevant.
     const faqMatches = searchFaqs(emailBody, { limit: 3, threshold: 0.35 });
     if (faqMatches.length > 0) {
       return { mode: 'faq', faq_matches: faqMatches };
@@ -191,31 +189,38 @@ export function processInboundEmail(emailBody: string, senderEmail?: string): In
     return { mode: 'manual', manual_reason: 'parse_failed' };
   }
 
-  // Step 3: detect market
+  // Steps 3-9: price the parsed trip
+  return priceTripResult(trip, emailBody, senderEmail, 'bookrides');
+}
+
+/**
+ * Price a trip (from either the rigid BookRides parser or the NL extractor).
+ * Shared so both paths produce identical quote output. `source` is carried
+ * through so callers can treat LLM-extracted quotes as needs-review.
+ */
+export function priceTripResult(
+  trip: BookRidesTrip,
+  emailBody: string,
+  senderEmail: string | undefined,
+  source: 'bookrides' | 'nl',
+): InboundProcessResult {
   const market = detectMarketForTrip(emailBody, trip);
   if (!market) {
-    logger.warn('Inbound BookRides email could not be matched to a market', {
-      pickup: trip.pickup_address,
-      dropoff: trip.dropoff_address,
-    });
-    return { mode: 'manual', trip, manual_reason: 'unknown_market' };
+    if (source !== 'nl') {
+      logger.warn('Inbound BookRides email could not be matched to a market', {
+        pickup: trip.pickup_address, dropoff: trip.dropoff_address,
+      });
+    }
+    // nl_no_route: we understood it is a booking request but lack a routable
+    // pickup/dropoff -- surface it to a human with the extracted details.
+    return { mode: 'manual', trip, manual_reason: source === 'nl' ? 'nl_no_route' : 'unknown_market', source };
   }
 
-  // Step 4: customer category from sender email (or trip passenger email)
   const customerEmail = senderEmail || trip.passenger_email;
   const customer_category = detectCustomerCategory(customerEmail);
-
-  // Step 5: stops + service type
   const stops = extractStopsFromTrip(trip);
   const service_type = mapServiceType(trip.service_type);
-
-  // Step 6: detect flat rate
   const flatRoute = detectFlatRateRoute(trip.pickup_address || '', trip.dropoff_address || '');
-
-  // Step 7: build the QuoteInput
-  // For non-flat-rate trips we don't yet have miles (BookRides doesn't include them).
-  // The pricing engine will return passenger_miles=0 with a warning; concierge fills in miles later.
-  const passengerMiles = flatRoute ? 0 : 0; // explicit -- distance lookup is a future feature
   const flatRateAmount = flatRoute ? flatRoute.price : undefined;
 
   let quote: QuoteOutput;
@@ -224,28 +229,49 @@ export function processInboundEmail(emailBody: string, senderEmail?: string): In
       market,
       customer_category,
       service_type,
-      passenger_miles: passengerMiles,
+      passenger_miles: 0, // distance lookup is a future feature; concierge fills in
       stops,
-      payment: 'credit_card', // default; concierge can change
+      payment: 'credit_card',
       customer_email: customerEmail,
       flat_rate_amount: flatRateAmount,
     });
   } catch (e) {
     logger.error('calculateQuote threw on inbound trip', { error: (e as Error).message });
-    return { mode: 'manual', trip, manual_reason: 'pricing_error' };
+    return { mode: 'manual', trip, manual_reason: 'pricing_error', source };
   }
 
-  // Step 8: forward-only short-circuit (KC) -- engine already returns mode='forward_only'
   if (quote.pricing_mode === 'forward_only') {
-    return {
-      mode: 'forward_only',
-      trip,
-      market,
-      forward_to: quote.forward_to,
-      forward_reason: quote.forward_reason,
-    };
+    return { mode: 'forward_only', trip, market, forward_to: quote.forward_to, forward_reason: quote.forward_reason, source };
+  }
+  return { mode: 'priced', trip, market, quote, source };
+}
+
+/**
+ * Async wrapper: try the rigid BookRides path first; if the email is not in that
+ * format, fall back to an LLM extraction of the trip and price that. This is how
+ * free-form requests ("book me an 8-seater Monday, Dallas to DFW") get quoted.
+ */
+export async function processInboundEmailNL(emailBody: string, senderEmail?: string): Promise<InboundProcessResult> {
+  const base = processInboundEmail(emailBody, senderEmail);
+  // Only NL-fall-back when the email simply was not BookRides format. A real
+  // BookRides email that failed to parse/price should stay as-is for a human.
+  if (base.mode !== 'manual' || (base.manual_reason && base.manual_reason !== 'not_bookrides')) {
+    return base;
   }
 
-  // Step 9: priced result
-  return { mode: 'priced', trip, market, quote };
+  const extracted = await extractTripFromText(emailBody);
+  if (!extracted) return base; // not a booking request, or extraction unavailable
+
+  const trip: BookRidesTrip = {
+    passenger_name: extracted.passenger_name || 'Customer',
+    passenger_email: senderEmail,
+    pickup_address: extracted.pickup_address || undefined,
+    dropoff_address: extracted.dropoff_address || undefined,
+    service_type: extracted.service_type || undefined,
+    date_of_service: extracted.date_of_service || undefined,
+    passengers: extracted.passengers ?? undefined,
+    vehicle: extracted.vehicle || undefined,
+    raw_extracted_at: new Date().toISOString(),
+  };
+  return priceTripResult(trip, emailBody, senderEmail, 'nl');
 }

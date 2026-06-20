@@ -18,7 +18,7 @@
  */
 import { logger } from '../config/logger';
 import { ReservationQuote, ReservationQuoteStatus } from '../models/ReservationQuote';
-import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine';
+import { processInboundEmailNL, InboundProcessResult } from './inboundQuoteEngine';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -147,6 +147,16 @@ export function deriveConfidenceAndStatus(
   result: InboundProcessResult,
 ): { confidence: number; status: ReservationQuoteStatus } {
   if (result.mode === 'forward_only') return { confidence: 0, status: 'forward' };
+
+  // LLM-extracted (free-form) trips always go to a human to verify the AI read
+  // the request correctly. A priced one is a strong needs_review; one we
+  // understood as a booking but could not route surfaces with its details too.
+  if (result.source === 'nl') {
+    if (result.mode === 'priced' && result.quote) return { confidence: 0.5, status: 'needs_review' };
+    if (result.trip) return { confidence: 0.3, status: 'needs_review' };
+    return { confidence: 0, status: 'manual' };
+  }
+
   if (result.mode !== 'priced' || !result.quote) return { confidence: 0, status: 'manual' };
 
   const q = result.quote;
@@ -186,7 +196,7 @@ export async function ingestReservationQuotes(opts: {
       const existing = await ReservationQuote.findOne({ where: { graph_message_id: e.id }, attributes: ['id'] });
       if (existing) { counts.skipped_existing++; continue; }
 
-      const result = processInboundEmail(e.body, e.from || undefined);
+      const result = await processInboundEmailNL(e.body, e.from || undefined);
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 
