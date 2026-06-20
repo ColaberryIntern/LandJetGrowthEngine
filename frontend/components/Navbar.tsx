@@ -15,6 +15,7 @@ const PRIMARY_ITEMS = [
 ];
 
 const ADMIN_ITEMS = [
+  { href: '/admin/trust', label: 'Trust Center' },
   { href: '/activity', label: 'Activity' },
   { href: '/incidents', label: 'Incidents' },
   { href: '/integrations', label: 'Integrations' },

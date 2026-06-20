@@ -47,6 +47,12 @@ Last updated: 2026-06-19
   - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
   - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
 
+- [x] **Trust Command Center dashboard (TBI Phase 10, Ali-approved)**
+  - Date: 2026-06-20
+  - What changed: Built the /admin/trust dashboard (audit Phase 10) in the bridge form -- read-only aggregates over REAL tables, no new DB table. New [trustDashboardService.ts](src/services/trustDashboardService.ts) getTrustOverview() unions ai_agents, agent_runs, job_executions, campaign_errors, communication_logs, reservation_quotes, intelligence_decisions, interaction_outcomes, leads, audit_logs + env/setting flags. New GET /api/admin/trust/overview ([trustRoutes.ts](src/routes/admin/trustRoutes.ts), mounted in app.ts). New [/admin/trust](frontend/app/admin/trust/page.tsx) page: Executive (composite score+maturity+recommendation from latest audit), Operations, Governance (approval queue + automation flags + overrides), Observability (confidence distribution + 0.90 line; cost+tracing labelled NOT instrumented), Business Impact. Added to Admin nav.
+  - Verification: backend+frontend tsc --noEmit clean (exit 0). Deploy + endpoint/page check this session.
+  - Notes: Per the kit guardrail + CLAUDE.md, Phase 10 was gated and is now Ali-approved. Bridge form chosen (no system_events table yet) so it ships now; cost (G4) and tracing (G6) are shown as explicit NOT-instrumented placeholders rather than fabricated. Headline trust score (56) sourced from docs/trust-audit and labelled as point-in-time.
+
 - [x] **Ran the Trust-Before-Intelligence (TBI) 10-phase audit (Phases 1-9)**
   - Date: 2026-06-20
   - What changed: Pulled the TBI audit kit from Basecamp (Ali Personal todo 10017316985) and ran its evidence-based 10-phase audit on this repo via 4 parallel exploration passes (file:line cited). Wrote 9 reports to [docs/trust-audit/](docs/trust-audit/): repository-map, ai-inventory, observability-audit, governance-audit, trust-scorecard, event-model, dashboard-design, gap-analysis, and TRUST_COMPLIANCE_REPORT.

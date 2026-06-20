@@ -1024,3 +1024,8 @@ export interface ReservationMetrics {
 export function getReservationMetrics() {
   return request<ReservationMetrics>(`/admin/quotes/reservations/metrics`);
 }
+
+// Trust Command Center (read-only aggregates; see docs/trust-audit/)
+export function getTrustOverview() {
+  return request<any>(`/admin/trust/overview`);
+}
