@@ -41,7 +41,7 @@ const OUR_SENDERS = new Set(['rlandry@landjet.com', 'ryan@landjet.com', 'ryan.la
 const DENY_DOMAINS = ['landjet.com', 'landjettexas.com', 'colaberry.com', 'tagteamagency.com'];
 
 // Subjects that are clearly not outreach replies even if we "sent first".
-const DENY_SUBJECT_MARKERS = ['landjetter news', 'unsubscribe'];
+const DENY_SUBJECT_MARKERS = ['landjetter news', 'unsubscribe', 'fundraising', 'charity'];
 
 function domainOf(email: string): string {
   const at = email.lastIndexOf('@');
@@ -97,11 +97,12 @@ async function weReachedFirst(conversationId: string, leadEmail: string, before:
 }
 
 export interface ReplyIngestResult {
-  scanned: number;
-  candidates: number;
-  validated: number;
-  newReplies: number;
-  advanced: number;
+  scanned: number;             // inbox messages scanned
+  candidates: number;          // messages from a non-denied lead
+  validated: number;           // validated reply MESSAGES (a thread can have several)
+  distinctResponders: number;  // distinct leads who replied
+  newReplies: number;          // inbound rows newly persisted (deduped by message id)
+  advanced: number;            // distinct leads advanced contacted -> replied
   errors: number;
   details: Array<{ email: string; subject: string; leadId: number; advanced: boolean; persisted: boolean }>;
 }
@@ -109,7 +110,9 @@ export interface ReplyIngestResult {
 export async function ingestReplies(opts: { persist?: boolean; sinceDate?: string } = {}): Promise<ReplyIngestResult> {
   const persist = opts.persist === true; // default DRY RUN -- writes only with explicit persist
   const since = opts.sinceDate || '2026-05-01';
-  const result: ReplyIngestResult = { scanned: 0, candidates: 0, validated: 0, newReplies: 0, advanced: 0, errors: 0, details: [] };
+  const result: ReplyIngestResult = { scanned: 0, candidates: 0, validated: 0, distinctResponders: 0, newReplies: 0, advanced: 0, errors: 0, details: [] };
+  const responders = new Set<number>();   // distinct leads who replied
+  const advancedLeads = new Set<number>(); // distinct leads advanced this run
 
   const token = await getGraphToken();
   if (!token) {
@@ -168,41 +171,41 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
       const valid = await weReachedFirst(m.conversationId, m.from, m.received, token);
       if (!valid) continue;
       result.validated++;
+      responders.add(lead.id);
 
-      const willAdvance = PIPELINE_ORDER[lead.pipeline_stage as keyof typeof PIPELINE_ORDER] < PIPELINE_ORDER.replied;
       const detail = { email: m.from, subject: m.subject.slice(0, 60), leadId: lead.id, advanced: false, persisted: false };
 
-      if (persist && !already) {
-        await CommunicationLog.create({
-          lead_id: lead.id,
-          campaign_id: lead.campaign_id,
-          channel: 'email',
-          direction: 'inbound',
-          delivery_mode: 'live',
-          status: 'delivered',
-          to_address: REPLY_MAILBOX,
-          from_address: m.from,
-          subject: m.subject.slice(0, 255),
-          body: null,
-          provider: 'microsoft_graph',
-          provider_message_id: m.id,
-          provider_response: null,
-          metadata: { ingested_at: new Date().toISOString(), conversation_id: m.conversationId, received_at: m.received },
-          created_at: new Date(m.received),
-        } as any);
-        detail.persisted = true;
+      // 1) Record the inbound message (one row per distinct message, deduped).
+      if (!already) {
         result.newReplies++;
-        if (willAdvance) {
-          await Lead.update({ pipeline_stage: 'replied' }, { where: { id: lead.id } });
-          detail.advanced = true;
-          result.advanced++;
-          lead.pipeline_stage = 'replied'; // local guard against double-count within a run
+        if (persist) {
+          await CommunicationLog.create({
+            lead_id: lead.id,
+            campaign_id: lead.campaign_id,
+            channel: 'email',
+            direction: 'inbound',
+            delivery_mode: 'live',
+            status: 'delivered',
+            to_address: REPLY_MAILBOX,
+            from_address: m.from,
+            subject: m.subject.slice(0, 255),
+            body: null,
+            provider: 'microsoft_graph',
+            provider_message_id: m.id,
+            provider_response: null,
+            metadata: { ingested_at: new Date().toISOString(), conversation_id: m.conversationId, received_at: m.received },
+            created_at: new Date(m.received),
+          } as any);
+          detail.persisted = true;
         }
-      } else if (!already) {
-        // dry run accounting
-        if (willAdvance) detail.advanced = true;
-        result.newReplies++;
-        if (willAdvance) result.advanced++;
+      }
+
+      // 2) Advance the lead to 'replied' at most once per run (never demote).
+      const stageOrder = PIPELINE_ORDER[lead.pipeline_stage as keyof typeof PIPELINE_ORDER] ?? 0;
+      if (!advancedLeads.has(lead.id) && stageOrder < PIPELINE_ORDER.replied) {
+        advancedLeads.add(lead.id);
+        detail.advanced = true;
+        if (persist) await Lead.update({ pipeline_stage: 'replied' }, { where: { id: lead.id } });
       }
       result.details.push(detail);
     } catch (e) {
@@ -211,10 +214,14 @@ export async function ingestReplies(opts: { persist?: boolean; sinceDate?: strin
     }
   }
 
+  result.distinctResponders = responders.size;
+  result.advanced = advancedLeads.size;
+
   logger.info('replyIngestion complete', {
     mode: persist ? 'apply' : 'dry-run',
     scanned: result.scanned, candidates: result.candidates, validated: result.validated,
-    newReplies: result.newReplies, advanced: result.advanced, errors: result.errors,
+    distinctResponders: result.distinctResponders, newReplies: result.newReplies,
+    advanced: result.advanced, errors: result.errors,
   });
   return result;
 }

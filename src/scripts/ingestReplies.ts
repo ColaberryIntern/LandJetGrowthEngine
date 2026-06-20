@@ -25,17 +25,22 @@ const APPLY = process.argv.includes('--apply');
   const r = await ingestReplies({ persist: APPLY });
 
   console.log('');
-  console.log(`  inbox scanned     : ${r.scanned}`);
-  console.log(`  lead candidates   : ${r.candidates}`);
-  console.log(`  VALIDATED replies : ${r.validated}  (thread we-reached-first, vendor/internal excluded)`);
-  console.log(`  new (deduped)     : ${r.newReplies}`);
-  console.log(`  leads -> replied  : ${r.advanced}`);
-  console.log(`  errors            : ${r.errors}`);
+  console.log(`  inbox scanned       : ${r.scanned}`);
+  console.log(`  lead candidates     : ${r.candidates}`);
+  console.log(`  validated messages  : ${r.validated}  (thread we-reached-first, vendor/internal/charity excluded)`);
+  console.log(`  DISTINCT responders : ${r.distinctResponders}`);
+  console.log(`  inbound rows (new)  : ${r.newReplies}`);
+  console.log(`  leads -> replied    : ${r.advanced}`);
+  console.log(`  errors              : ${r.errors}`);
   console.log('');
+  // De-duplicate the per-lead display (a lead may have several reply messages).
+  const seen = new Set<number>();
   for (const d of r.details) {
-    console.log(`  ${d.advanced ? '>>' : '  '} #${d.leadId} ${d.email} :: ${d.subject}${d.persisted ? '' : (APPLY ? ' (dup)' : '')}`);
+    if (seen.has(d.leadId)) continue;
+    seen.add(d.leadId);
+    console.log(`  ${d.advanced ? '>>' : '  '} #${d.leadId} ${d.email} :: ${d.subject}`);
   }
-  if (!APPLY) console.log(`\nDry run only. Re-run with --apply to persist ${r.newReplies} reply row(s) and advance ${r.advanced} lead(s).`);
+  if (!APPLY) console.log(`\nDry run only. Re-run with --apply to persist ${r.newReplies} reply row(s) and advance ${r.advanced} lead(s) to 'replied'.`);
 
   await sequelize.close();
 })().catch((e) => { console.error('ERR', e); process.exit(1); });
