@@ -7,6 +7,11 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Navbar: personalize with signed-in user name + territory**
+  - Date: 2026-06-20
+  - What changed: [Navbar.tsx](frontend/components/Navbar.tsx) now fetches /users/me/profile and shows the signed-in user (initials avatar + name) plus their territory chip (`Name · 📍 TX`, or "All regions" when unscoped) in the top-right. Non-fatal if the fetch fails (nav still renders).
+  - Verification: frontend tsc --noEmit clean (exit 0); deployed; nav renders name + 📍 TX for the TX-scoped demo user.
+
 - [x] **Outreach: server-side territory enforcement + visible location badge**
   - Date: 2026-06-20
   - What changed: Even with location data populated, the Outreach screen still showed the full pool because `/today` only scoped when the client passed `?states=` and the frontend hook was not reliably seeding it. Fixed at the source: [outreachRoutes.ts](src/routes/admin/outreachRoutes.ts) `/today` now loads the signed-in user's `default_filters.states` and ENFORCES it (a territory owner like Percy=TX only ever sees their state, regardless of client params); users with no profile scope keep ad-hoc query filtering. Response now returns `state`/`city` per contact; [outreach/page.tsx](frontend/app/outreach/page.tsx) renders a location badge (📍 City, ST) with a muted "No location" chip when unresolved; added `state`/`city` to `OutreachContact` ([api.ts](frontend/lib/api.ts)).
