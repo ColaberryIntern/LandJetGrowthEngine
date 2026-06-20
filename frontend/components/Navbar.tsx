@@ -30,7 +30,26 @@ const ADMIN_ITEMS = [
 export default function Navbar() {
   const pathname = usePathname();
   const [adminOpen, setAdminOpen] = useState(false);
+  const [me, setMe] = useState<{ name: string; states: string[] } | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Load the signed-in user once so the nav can show who is logged in + their
+  // territory (personalization for account managers like Percy).
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) return;
+    (async () => {
+      try {
+        const r = await fetch('/api/users/me/profile', { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const d = await r.json();
+        const u = d.user || {};
+        const name = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || 'Account';
+        const states = Array.isArray(u.default_filters?.states) ? u.default_filters.states : [];
+        setMe({ name, states });
+      } catch { /* non-fatal: nav still renders without the chip */ }
+    })();
+  }, []);
 
   // Close dropdown on route change
   useEffect(() => { setAdminOpen(false); }, [pathname]);
@@ -108,6 +127,21 @@ export default function Navbar() {
                 </div>
               )}
             </div>
+
+            {/* Signed-in user + territory */}
+            {me && (
+              <div className="ml-2 flex items-center gap-2 border-l border-gray-200 pl-3">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-900 text-xs font-semibold text-white">
+                  {me.name.split(' ').filter(Boolean).map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+                </div>
+                <div className="leading-tight">
+                  <div className="text-sm font-medium text-gray-900">{me.name}</div>
+                  <div className="text-[11px] text-gray-500">
+                    {me.states.length ? `📍 ${me.states.join(', ')}` : 'All regions'}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
