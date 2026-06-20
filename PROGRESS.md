@@ -47,6 +47,12 @@ Last updated: 2026-06-19
   - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
   - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
 
+- [x] **Ran the Trust-Before-Intelligence (TBI) 10-phase audit (Phases 1-9)**
+  - Date: 2026-06-20
+  - What changed: Pulled the TBI audit kit from Basecamp (Ali Personal todo 10017316985) and ran its evidence-based 10-phase audit on this repo via 4 parallel exploration passes (file:line cited). Wrote 9 reports to [docs/trust-audit/](docs/trust-audit/): repository-map, ai-inventory, observability-audit, governance-audit, trust-scorecard, event-model, dashboard-design, gap-analysis, and TRUST_COMPLIANCE_REPORT.
+  - Verification: docs-only (no code). Composite Trust 56/100; Governance LEVEL 3 (MANAGED); Observability 40, Auditability 45, Explainability 70; TBI maturity ~2.5/5. Recommendation: GO WITH CONDITIONS.
+  - Notes: Phase 10 (build /admin/trust + system_events table) intentionally NOT executed -- it writes app code and is gated behind approval of dashboard-design.md per the kit guardrail + CLAUDE.md governance. Top P0s: cost/token observability, audit coverage on sends/routing/progression, unauth feedback endpoint + unsigned Mandrill webhook + HTTPS.
+
 - [x] **Quote Engine dashboard (GOALS-Observability)**
   - Date: 2026-06-20
   - What changed: New getReservationMetrics() aggregates reservation_quotes (by status w/ avg confidence + value, by source bookrides/nl, by market, by service type, the quoted/sent/replied funnel, confidence distribution vs the 0.90 line) behind GET /api/admin/quotes/reservations/metrics. New [/reservations/dashboard](frontend/app/reservations/dashboard/page.tsx) renders KPI cards + bars + a confidence-distribution panel that calls out the trust-before-intelligence auto-send threshold and that auto-send is OFF (all human-reviewed). Linked from the queue header.
