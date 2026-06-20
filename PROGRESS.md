@@ -47,6 +47,12 @@ Last updated: 2026-06-19
   - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
   - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
 
+- [x] **TBI framework alignment: read the actual INPACT/GOALS, encoded the Lexicon 0.90 auto-send gate, wrote the mapping doc**
+  - Date: 2026-06-20
+  - What changed: Read the real frameworks from the public repo (manuscript ch.2 INPACT, ch.7 GOALS, quick reference). Mapped the quote engine to each tenet in [docs/trust-before-intelligence-quote-engine.md](docs/trust-before-intelligence-quote-engine.md). Encoded the one autonomy rule we were missing -- GOALS-Lexicon "below the confidence threshold, do not guess, hand to a human": new  +  in [reservationQuoteService.ts](src/services/reservationQuoteService.ts) so any future auto-send may only fire on auto_ready AND confidence >= 0.90; everything else stays human-reviewed.
+  - Verification: tsc --noEmit clean (exit 0); jest reservationQuoteService 13/13 (adds autoSendEligible threshold cases).
+  - Notes: Strong alignment on Transparent (breakdown+confidence+provenance+audit), Permitted (authz+send gate), Natural (NL extraction), Governance/HITL (human-in-loop, dry-by-default), Lexicon (0.90 gate). Honest gaps: Adaptive/learning loop (#10017156199) and accuracy/hallucination metrics not built. Detailed mapping in the doc.
+
 - [x] **Reservation queue: relative trip dates, at-a-glance tags, conditional colors, Trust-Before-Intelligence framing**
   - Date: 2026-06-20
   - What changed: [/reservations](frontend/app/reservations/page.tsx) rows now show the APPOINTMENT time relative + color-coded by urgency ("Trip in 5 hrs" red, tomorrow amber, in N days blue/gray), a row of at-a-glance TAGS (service type one-way/round-trip/hourly, market/location, special-incentive customer categories JD/Investor/Lockton/LJ-Member, and special gates: overnight / dead leg / long-or-2-driver / needs-approval / forward-to-local), confidence colored by level, and an AI-provenance tag ("AI-extracted - verify") for NL rows. Header carries an explicit trust line. Added quote fields (service_type/customer_category/market/approvals_needed) + trip.start_time to the [api type](frontend/lib/api.ts).

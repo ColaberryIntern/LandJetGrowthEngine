@@ -170,6 +170,18 @@ export function deriveConfidenceAndStatus(
   return { confidence: needsHuman ? 0.4 : 0.5, status: 'needs_review' };
 }
 
+/**
+ * Trust-Before-Intelligence gate (GOALS - Lexicon: "below the confidence
+ * threshold, request clarification / hand to a human rather than guess").
+ * The agent may only ever auto-send a quote at or above this confidence; every
+ * thing below stays human-reviewed. A person clicking Send in the queue is a
+ * separate, explicit human decision and is not bound by this gate.
+ */
+export const AUTOSEND_MIN_CONFIDENCE = 0.9;
+export function autoSendEligible(rq: { status: string; confidence: string | number }): boolean {
+  return rq.status === 'auto_ready' && Number(rq.confidence) >= AUTOSEND_MIN_CONFIDENCE;
+}
+
 export interface IngestCounts {
   fetched: number; created: number; skipped_existing: number;
   auto_ready: number; needs_review: number; forward: number; manual: number; errors: number;

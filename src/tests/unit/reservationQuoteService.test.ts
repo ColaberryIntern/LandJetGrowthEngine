@@ -1,4 +1,4 @@
-import { deriveConfidenceAndStatus, htmlToText } from '../../services/reservationQuoteService';
+import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE } from '../../services/reservationQuoteService';
 import { processInboundEmail } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
@@ -54,6 +54,17 @@ describe('deriveConfidenceAndStatus (Percy: simple=high, complex/incomplete=huma
   it('NL but not a booking -> manual 0', () => {
     expect(deriveConfidenceAndStatus({ mode: 'manual', source: 'nl' } as InboundProcessResult))
       .toEqual({ confidence: 0, status: 'manual' });
+  });
+});
+
+describe('autoSendEligible (Trust-Before-Intelligence: only act at/above 0.90)', () => {
+  it('blocks anything below the threshold', () => {
+    expect(autoSendEligible({ status: 'auto_ready', confidence: 0.7 })).toBe(false);
+    expect(autoSendEligible({ status: 'needs_review', confidence: 0.95 })).toBe(false);
+  });
+  it('allows only high-confidence auto_ready', () => {
+    expect(autoSendEligible({ status: 'auto_ready', confidence: AUTOSEND_MIN_CONFIDENCE })).toBe(true);
+    expect(autoSendEligible({ status: 'auto_ready', confidence: '0.90' })).toBe(true);
   });
 });
 
