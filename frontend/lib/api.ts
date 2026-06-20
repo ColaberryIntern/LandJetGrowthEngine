@@ -990,6 +990,7 @@ export interface ReservationQuoteRow {
     trip?: { passenger_name?: string; pickup_address?: string; dropoff_address?: string; service_type?: string; date_of_service?: string; passengers?: number };
     quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string };
     manual_reason?: string;
+    source?: 'bookrides' | 'nl';
     sent?: { at: string; to: string | null };
     prepared?: { at: string; to: string | null };
   } | null;
