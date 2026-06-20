@@ -5,6 +5,7 @@ import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLe
 import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
 import { Campaign } from '../../models/Campaign';
+import { User } from '../../models/User';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
 import { sendOutreachEmail, testConnection, loadAttachmentFromPath, resolveSender } from '../../services/outreachEmailService';
@@ -748,8 +749,15 @@ router.post('/campaigns/:campaignId/upload', authorize('campaigns:write'), async
 router.get('/today', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { parseStatesParam } = await import('../../services/leadService');
+    // Territory enforcement: if the signed-in user has a state scope on their
+    // profile (e.g. Percy = TX), that scope WINS -- they only ever see their
+    // own territory, regardless of what the client sends. Users with no profile
+    // scope (global admins) can still filter ad-hoc via the query param.
+    const me = await User.findByPk(req.user!.userId, { attributes: ['default_filters'] });
+    const profileStates = ((me?.default_filters as Record<string, unknown> | null)?.states as string[] | undefined) || [];
+    const effectiveStates = profileStates.length > 0 ? profileStates : parseStatesParam(req.query.states);
     const leads = await getLeadsForToday({
-      states: parseStatesParam(req.query.states),
+      states: effectiveStates,
       state: req.query.state as string | undefined,
       city: req.query.city as string | undefined,
       campaign_id: req.query.campaign_id as string | undefined,
@@ -790,6 +798,8 @@ router.get('/today', authorize('campaigns:read'), async (req: Request, res: Resp
         contact_id: c.id,
         name: `${c.first_name} ${c.last_name}`.trim(),
         email: c.email,
+        state: c.state || null,
+        city: c.city || null,
         relationship_type: c.lead_source || 'past_client',
         sequence_stage: c.sequence_stage,
         suggested_action: channel === 'linkedin_connect' ? 'Send Connection Request' :

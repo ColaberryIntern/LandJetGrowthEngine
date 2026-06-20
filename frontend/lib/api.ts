@@ -217,6 +217,8 @@ export interface OutreachContact {
   contact_id: string;
   name: string;
   email: string;
+  state?: string | null;
+  city?: string | null;
   relationship_type: string;
   sequence_stage: number;
   suggested_action: string;

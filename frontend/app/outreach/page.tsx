@@ -668,6 +668,11 @@ export default function OutreachPage() {
                 <h2 className="text-base font-semibold text-gray-900">{contact.name}</h2>
                 <p className="text-sm text-gray-500">{contact.email}</p>
                 <div className="mt-2 flex items-center gap-2">
+                  {contact.state ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">📍 {contact.city ? `${contact.city}, ` : ''}{contact.state}</span>
+                  ) : (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-400" title="No location resolved yet">📍 No location</span>
+                  )}
                   {contact.vertical && (
                     <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">{contact.vertical}</span>
                   )}
