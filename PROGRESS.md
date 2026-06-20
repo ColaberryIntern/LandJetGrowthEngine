@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Deal-tracking Phase 3: outreach funnel + deal-value capture**
+  - Date: 2026-06-20
+  - What changed: Briefing gains an "Outreach funnel" section (reached -> replied -> meeting -> proposal -> won, conversion %, summed Won $) via a funnel query in [weeklyBriefingService.ts](src/services/weeklyBriefingService.ts) + `funnelChart` in [weeklyBriefingRenderer.ts](src/services/weeklyBriefingRenderer.ts). Won = pipeline_stage 'enrolled' with `notes.deal_amount`. The Conversations endpoint + page ([conversationsRoutes.ts](src/routes/admin/conversationsRoutes.ts), [page](frontend/app/conversations/page.tsx)) gain a Deal $ field and a Won total. Closes the "did outreach close it" loop: mark a responder enrolled + enter the amount -> it rolls into the funnel.
+  - Verification: backend + frontend `tsc --noEmit` clean; deployed backend+frontend; funnel currently reads reached=151, replied~9, meeting/proposal/won=0 (nothing advanced past replied yet), which is correct.
+  - Notes: v1 stores deal value on lead.notes.deal_amount (no migration) and uses existing pipeline_stage for won/lost; a normalized Deal model (multiple deals per lead, close_date, source) is the future enhancement. The funnel fills as the team advances responders + records amounts on the Conversations page. Completes the see -> track -> attribute arc (Phases 1-3).
+
 - [x] **Deal-tracking Phase 2: Conversations tracker + booking tags**
   - Date: 2026-06-20
   - What changed: (1) "Who replied" redesigned -- dropped the conversation text for deterministic colored category tags via [replyClassification.ts](src/services/replyClassification.ts) (Wants to meet / Interested / Question / Not now / Auto-reply) plus a green "Booking" icon when the lead's email matches a `reservation_quotes` row (trip-quote request). (2) New [conversationsRoutes.ts](src/routes/admin/conversationsRoutes.ts) (`/api/admin/conversations` GET list + PATCH stage/next_action) and a [/conversations admin page](frontend/app/conversations/page.tsx) -- the interactive tracker to move responders replied -> meeting_scheduled -> proposal_sent -> ... with a next-action note. Navbar link added. (3) Activated the booking signal by running `ingestReservationQuotes` (read-only).
