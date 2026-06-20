@@ -36,6 +36,8 @@ export interface BriefingData {
   dailyLinkedIn: Array<{ day: string; count: number }>;
   hourEmail: Array<{ hour: number; count: number }>;
   hourLinkedIn: Array<{ hour: number; count: number }>;
+  // Distinct leads who replied (validated by replyIngestionService), newest first.
+  responders: Array<{ name: string; company: string | null; subject: string | null; day: string }>;
 }
 
 // Shared channel palette + legend so every chart reads the same way.
@@ -322,16 +324,34 @@ function senderBars(senders: BriefingData['senders']): string {
 }
 
 function replyTileSub(d: BriefingData): string {
-  if (d.replySource === 'unavailable') return 'inbox read unavailable this run';
-  if (d.totalInbound === 0) return d.replySource === 'graph_inbox' ? 'no replies matched in Ryan inbox' : 'none in comm_logs yet';
-  return d.replySource === 'graph_inbox' ? 'matched against Ryan inbox (live)' : 'from comm_logs';
+  if (d.replySource === 'unavailable') return 'no replies ingested yet';
+  return `${fmtNumber(d.uniqueRespondedRecipients)} leads replied (validated)`;
 }
 
 function respondedRateSub(d: BriefingData): string {
-  const base = `${fmtNumber(d.uniqueRespondedRecipients)} of ${fmtNumber(d.uniqueRecipients)} emailed recipients have replied`;
-  if (d.replySource === 'graph_inbox') return `${base} | matched live against rlandry@landjet.com inbox (replies from people we emailed)`;
-  if (d.replySource === 'unavailable') return `${base} | inbox read was unavailable this run, so this reflects comm_logs only`;
-  return `${base} | source: comm_logs inbound rows`;
+  const base = `${fmtNumber(d.uniqueRespondedRecipients)} of ${fmtNumber(d.totalTouchedLeads)} reached leads have replied`;
+  return `${base} | validated replies from Ryan's inbox (thread-confirmed; vendor/newsletter/internal excluded). Most are investor conversations.`;
+}
+
+// "Who replied" -- a plain HTML table (not rasterized) listing the validated
+// responders so the reply number is not just a count but names you can act on.
+function respondersCard(responders: BriefingData['responders']): string {
+  if (responders.length === 0) return '';
+  const rows = responders.slice(0, 20).map((r) => `<tr>
+      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:13px;font-weight:600;color:${PAL.text};white-space:nowrap">${escXml(r.name)}</td>
+      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:12px;color:${PAL.textMuted}">${escXml(r.company || '')}</td>
+      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:12px;color:${PAL.textDim}">${escXml((r.subject || '').slice(0, 64))}</td>
+      <td style="padding:8px 12px;border-top:1px solid ${PAL.cardBorder};font-size:11px;color:${PAL.textDim};white-space:nowrap">${escXml(r.day)}</td>
+    </tr>`).join('');
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAL.card};border:1px solid ${PAL.cardBorder};border-top:4px solid ${PAL.green};border-radius:8px;margin-bottom:24px">
+    <tr><td style="padding:14px 16px 4px">
+      <div style="font-size:10px;font-weight:700;color:${PAL.green};text-transform:uppercase;letter-spacing:.08em">Who replied (${responders.length})</div>
+      <div style="font-size:13px;color:${PAL.textMuted};margin-top:4px">Leads who answered our outreach, validated against the thread (vendor/newsletter/internal excluded). These are now marked "replied" in the pipeline.</div>
+    </td></tr>
+    <tr><td style="padding:6px 4px 10px">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${rows}</table>
+    </td></tr>
+  </table>`;
 }
 
 export function renderBriefingHtml(d: BriefingData, now: Date): string {
@@ -368,12 +388,14 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:24px"><tr>
     <td width="100%" style="vertical-align:top">${kpiTile(
-      'Responded rate (emailed recipients who replied / emailed recipients)',
-      d.uniqueRecipients > 0 ? `${((d.uniqueRespondedRecipients / d.uniqueRecipients) * 100).toFixed(2)}%` : 'n/a',
+      'Responded rate (leads who replied / leads reached)',
+      d.totalTouchedLeads > 0 ? `${((d.uniqueRespondedRecipients / d.totalTouchedLeads) * 100).toFixed(2)}%` : 'n/a',
       respondedRateSub(d),
       d.uniqueRespondedRecipients > 0 ? PAL.green : PAL.red,
     )}</td>
   </tr></table>
+
+  ${respondersCard(d.responders)}
 
   ${section('01', 'One campaign is doing the work',
     `Investor Outreach has fired ${investor.sends} of ${d.totalSends} logged sends (${investorShareTxt}). The vertical cold-outreach campaigns are at single-digit touches each.`,
@@ -390,10 +412,10 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
     dailyTimeline(d.dailyEmail, d.dailyLinkedIn),
     `<strong>Cadence reading.</strong> A real cadence would show daily activity at some baseline volume. If this chart still looks like spikes rather than a flat baseline, the scheduler is not feeding the queue, or the queue is empty.`)}
 
-  ${section('04', 'Every touched lead is parked at "contacted"',
-    `${d.touchedPipeline.find(p => p.stage === 'contacted')?.count || 0} of ${d.totalTouchedLeads} touched leads sit at the "contacted" stage. Replies should advance leads to "replied" or beyond.`,
+  ${section('04', 'Pipeline movement',
+    `${d.uniqueRespondedRecipients} leads have advanced to "replied"; ${d.touchedPipeline.find(p => p.stage === 'contacted')?.count || 0} of ${d.totalTouchedLeads} reached leads are still at "contacted".`,
     pipelineDonut(d.pipelineChannel),
-    `<strong>Pipeline forward motion.</strong> Replies should advance a lead from contacted to replied. We now know replies ARE coming in (the replies metric above is matched live from Ryan's inbox), but touched leads still sit at "contacted" because nothing writes those replies back to the lead's pipeline stage yet. The missing piece is reply write-back, not the responses themselves.`)}
+    `<strong>Pipeline forward motion.</strong> Reply write-back is now live: validated replies from Ryan's inbox advance the lead from contacted to replied automatically (and are recorded as inbound communication_logs). The green segment is the first real forward motion in the pipeline. Next step is moving "replied" leads on to meetings.`)}
 
   ${section('05', 'Send timing',
     `${businessHours} of ${d.totalSends} sends land between 9 and 11 AM Central. ${afterHours > 0 ? `${afterHours} after-hours sends to inspect.` : 'No after-hours sends this period.'}`,
