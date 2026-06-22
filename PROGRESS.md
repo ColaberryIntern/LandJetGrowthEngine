@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Reservations: resolve when WE close the thread; Past trips bucket once trip passes**
+  - Date: 2026-06-22
+  - What changed: A reservation is Resolved when there's no more work for us -- including when WE send the closing message, not only when the customer signs off. Previously a courtesy close from the desk (Lorie's "Thank you for letting us know") left the row stuck in Awaiting customer. New [classifyOutboundIntent](src/services/inboundIntent.ts): a closing courtesy from us (no price/question/CTA) vs an open one (quote/question/confirm-to-book). [decideLifecycleFromThread](src/services/reservationQuoteService.ts) maps a closing last-message-from-us to `completed` (resolved); an open one stays awaiting_customer; a later customer question still re-opens to needs_reply. Past trips: a resolved reservation stays in Resolved until its trip date passes, then moves to a new "Past trips" tab (hidden by default, viewable); Resolved + All exclude past trips ([tripPassed](frontend/app/reservations/page.tsx)).
+  - Verification: backend tsc + frontend tsc clean; jest inboundIntent + reservationQuoteService 35/35 (Lorie courtesy-close -> completed incl. signature/policy boilerplate; our quote/question -> awaiting; outbound closing vs open). Deployed; reconcile moved Brett Peterson #88 ("8/19 and 8/21", Lorie close) to completed/resolved; awaiting 14->12, completed 6->8, needs_reply 3. /reservations 200.
+  - Notes: "Needs reply" now only ever holds outstanding items needing a reply right now. classifyOutboundIntent is conservative (defaults to 'open') so a real pending quote stays Awaiting.
+
 - [x] **Reservations: classify BookRides invoices/confirmations as not_quote; cleaner two-address map**
   - Date: 2026-06-22
   - What changed: An invoice ("LandJet, LLC Invoice For Services Completed") and a "Transportation Confirmation" arrive from the SAME no-reply@bookridesonline.com as quote requests, so they were landing in Needs reply. New [isPostBookingEmail](src/services/reservationClassify.ts) detects invoice/receipt/confirmation by content (subject + body: Grand Total Due, Bill To, Download Invoice PDF, Transportation Confirmation) and forces `not_quote` at ingest even if a stray trip parsed; backfill reclassifies existing ones regardless of parsed trip. Map: [cleanAddr](frontend/app/reservations/page.tsx) strips "(ORD)"-style parentheticals / trailing USA / stray commas so the keyless route embed frames the driving route instead of an ocean view; row map slightly larger.
