@@ -20,10 +20,15 @@ describe('deriveConfidenceAndStatus (Percy: simple=high, complex/incomplete=huma
       .toEqual({ confidence: 0.7, status: 'auto_ready' });
   });
 
-  it('miles unknown (concierge warning) -> needs_review', () => {
-    const r = deriveConfidenceAndStatus(priced({ warnings: ['Passenger miles unknown; concierge to fill in'] }));
+  it('incomplete miles (minimum applied, actual 0) -> needs_review', () => {
+    const r = deriveConfidenceAndStatus(priced({ warnings: ['Mileage minimum 200 mi applied (actual 0 mi)'] }));
     expect(r.status).toBe('needs_review');
     expect(r.confidence).toBeLessThan(0.7);
+  });
+
+  it('routine flat-rate fuel/concierge note does NOT force review -> auto_ready', () => {
+    const r = deriveConfidenceAndStatus(priced({ pricing_mode: 'flat_rate', warnings: ['Fuel surcharge not included on flat-rate quotes (route miles not tracked). Concierge: add $0.10/mi if applicable.'] }));
+    expect(r).toEqual({ confidence: 0.9, status: 'auto_ready' });
   });
 
   it('complex trip (overnight / dead leg / approval) -> needs_review', () => {

@@ -162,9 +162,10 @@ export function deriveConfidenceAndStatus(
 
   const q = result.quote;
   const warns = (q.warnings || []).join(' ').toLowerCase();
-  // Engine appends a warning when miles are unknown (concierge must fill in) and
-  // for DOT/approval/overnight/dead-leg complications.
-  const needsHuman = /mile|concierge|approval|overnight|dead\s?leg|second driver|2nd driver|compliance|over\s?10|per diem/.test(warns);
+  // Flag genuinely-complex / incomplete quotes for a human. Specific patterns
+  // only -- NOT bare "mile"/"concierge", which appear in the routine flat-rate
+  // fuel-surcharge note and were false-flagging clean quotes as needs_review.
+  const needsHuman = /overnight|dead\s?leg|second driver|2nd driver|over\s?10|per diem|needs? approval|approval (required|needed)|actual 0 mi|minimum [\d.]+ mi applied|compliance/.test(warns);
 
   if (q.pricing_mode === 'flat_rate' && !needsHuman) return { confidence: 0.9, status: 'auto_ready' };
   if (!needsHuman && q.grand_total > 0) return { confidence: 0.7, status: 'auto_ready' };
