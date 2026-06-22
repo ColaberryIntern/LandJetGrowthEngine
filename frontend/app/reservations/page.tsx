@@ -451,15 +451,20 @@ export default function ReservationsPage() {
                       </button>
                       {conv && (
                         <div className="mt-2 space-y-2">
-                          {conv.length === 0 ? <div className="text-xs text-gray-400">No thread history available.</div> : conv.map(m => (
-                            <div key={m.id} className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${m.direction === 'outbound' ? 'ml-auto bg-blue-50 text-blue-900' : 'bg-gray-100 text-gray-700'}`}>
-                              <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px] text-gray-400">
-                                <span>{m.direction === 'outbound' ? 'LandJet' : (m.from || 'Customer')}</span>
-                                <span>{timeAgo(m.at)}</span>
-                              </div>
-                              <div className="whitespace-pre-wrap">{m.preview}</div>
-                            </div>
-                          ))}
+                          {conv.length === 0 ? <div className="text-xs text-gray-400">No thread history available.</div> : (
+                            <>
+                              <div className="text-[10px] uppercase tracking-wide text-gray-400">Most recent first</div>
+                              {conv.slice().reverse().map((m, idx) => (
+                                <div key={m.id} className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${m.direction === 'outbound' ? 'ml-auto bg-blue-50 text-blue-900' : 'bg-gray-100 text-gray-700'} ${idx === 0 ? 'ring-1 ring-blue-200' : ''}`}>
+                                  <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px] text-gray-400">
+                                    <span>{m.direction === 'outbound' ? 'LandJet' : (m.from || 'Customer')}{idx === 0 ? ' · latest' : ''}</span>
+                                    <span>{timeAgo(m.at)}</span>
+                                  </div>
+                                  <div className="whitespace-pre-wrap">{m.preview}</div>
+                                </div>
+                              ))}
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
