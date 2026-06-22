@@ -1,4 +1,4 @@
-import { isNonQuoteEmail, missingForQuote } from '../../services/reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail, missingForQuote } from '../../services/reservationClassify';
 
 describe('isNonQuoteEmail (keep inbox noise out of Needs reply)', () => {
   it('flags social / system notifications and receipts', () => {
@@ -13,6 +13,16 @@ describe('isNonQuoteEmail (keep inbox noise out of Needs reply)', () => {
     expect(isNonQuoteEmail('no-reply@bookridesonline.com', 'stacey Spillum requested a quote for a trip', 'Pickup 123 Main St')).toBe(false);
     expect(isNonQuoteEmail('cparkin@vonmaur.com', 'Re: LandJet 6/24 & 7/7', 'We need a ride to the airport')).toBe(false);
     expect(isNonQuoteEmail('greg@gmail.com', 'Quote please', 'I need a quote from OHare to LeClaire')).toBe(false);
+  });
+
+  it('flags BookRides post-booking notices (invoice / confirmation) by content, not sender', () => {
+    // Same sender as a quote request, but it is an invoice/confirmation.
+    expect(isPostBookingEmail('LandJet, LLC Invoice For Services Completed', 'LandJet Invoice : #3501205 ... Grand Total Due $574.74')).toBe(true);
+    expect(isPostBookingEmail('LandJet, LLC Transportation Confirmation', 'Transportation Confirmation\nTrip Details')).toBe(true);
+    expect(isNonQuoteEmail('no-reply@bookridesonline.com', 'LandJet, LLC Invoice For Services Completed', 'Grand Total Due $574.74')).toBe(true);
+    expect(isNonQuoteEmail('no-reply@bookridesonline.com', 'LandJet, LLC Transportation Confirmation', 'Reservation Info')).toBe(true);
+    // A real quote request is still NOT post-booking.
+    expect(isPostBookingEmail('stacey Spillum requested a quote for a trip', 'Quote Request')).toBe(false);
   });
 });
 

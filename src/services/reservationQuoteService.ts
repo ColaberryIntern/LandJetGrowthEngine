@@ -21,7 +21,7 @@ import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, InboundIntent } from './inboundIntent';
-import { isNonQuoteEmail } from './reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail } from './reservationClassify';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -430,11 +430,14 @@ export async function ingestReservationQuotes(opts: {
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 
-      // Keep inbox noise (Instagram, SharePoint, receipts, bounces) out of the
-      // active queue: if it is not a quote and looks like an automated notice,
-      // file it under not_quote rather than needs_reply.
+      // Keep inbox noise out of the active queue. Post-booking notices (invoice /
+      // receipt / confirmation) are filed as not_quote even if a stray trip was
+      // parsed from them, since they are not new quote requests. Other automated
+      // noise is filed when it did not parse as a quote.
       const isQuote = isBookingIntent(result) || total != null;
-      const lifecycle = (!isQuote && isNonQuoteEmail(e.from, e.subject, e.body)) ? 'not_quote' : 'needs_reply';
+      const lifecycle = isPostBookingEmail(e.subject, e.body) ? 'not_quote'
+        : (!isQuote && isNonQuoteEmail(e.from, e.subject, e.body)) ? 'not_quote'
+        : 'needs_reply';
 
       await ReservationQuote.create({
         graph_message_id: e.id,

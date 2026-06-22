@@ -17,17 +17,20 @@ async function main(): Promise<void> {
   // Backfill: reclassify existing noise rows (still in an active state, no quote)
   // into not_quote using the same heuristic the ingest now applies.
   const { ReservationQuote } = await import('../models/ReservationQuote');
-  const { isNonQuoteEmail } = await import('../services/reservationClassify');
+  const { isNonQuoteEmail, isPostBookingEmail } = await import('../services/reservationClassify');
   const { Op } = await import('sequelize');
   const rows = await ReservationQuote.findAll({
-    where: { lifecycle: { [Op.in]: ['needs_reply', 'awaiting_customer'] }, quote_total: null, deleted_at: null } as any,
+    where: { lifecycle: { [Op.in]: ['needs_reply', 'awaiting_customer'] }, deleted_at: null } as any,
   });
   let moved = 0;
   for (const rq of rows) {
     const r = (rq.result || {}) as { trip?: any; mode?: string };
     const hasTrip = Boolean(r.trip?.pickup_address || r.trip?.dropoff_address);
-    if (hasTrip) continue; // a real (if incomplete) request -> leave it
-    if (isNonQuoteEmail(rq.from_email, rq.subject, rq.raw_body)) {
+    // Post-booking notices (invoice/receipt/confirmation) are not_quote even with
+    // a stray parsed trip. Other noise only when there is no real trip.
+    const isNoise = isPostBookingEmail(rq.subject, rq.raw_body) ||
+      (!hasTrip && rq.quote_total == null && isNonQuoteEmail(rq.from_email, rq.subject, rq.raw_body));
+    if (isNoise) {
       await rq.update({ lifecycle: 'not_quote' } as any);
       moved++;
     }

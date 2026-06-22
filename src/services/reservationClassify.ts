@@ -15,7 +15,20 @@ const NOISE_DOMAINS = /@(?:[a-z0-9-]+\.)*(instagram|facebookmail|facebook|fb|lin
 
 const NOISE_SENDER = /(mailer-daemon|postmaster|no-?reply@(?:sharepoint|microsoft|office365|sharepointonline))/i;
 
-const NOISE_SUBJECT = /(added to (their|your) stor|has responded to your request|you now have access|out of office|automatic reply|undeliverable|delivery (status notification|has failed|failure)|read:|payment received|^invoice\b|^receipt\b|statement is ready|newsletter|webinar|unsubscribe|verify your|reset your password|security alert|meeting (invitation|accepted|declined|canceled)|^(accepted|declined|canceled|tentative):|your .* (subscription|account|order)|sign in|new (login|sign-in)|cart #)/i;
+const NOISE_SUBJECT = /(added to (their|your) stor|has responded to your request|you now have access|out of office|automatic reply|undeliverable|delivery (status notification|has failed|failure)|read:|payment received|newsletter|webinar|unsubscribe|verify your|reset your password|security alert|meeting (invitation|accepted|declined|canceled)|^(accepted|declined|canceled|tentative):|your .* (subscription|account|order)|sign in|new (login|sign-in)|cart #)/i;
+
+// A POST-BOOKING notice (invoice, receipt, or trip confirmation) is about a trip
+// already handled, not a new quote request -- and BookRides sends these from the
+// SAME address as quote requests, so we detect them by content, not by sender.
+const POST_BOOKING_SUBJECT = /\b(invoice|receipt|statement)\b|services completed|(transportation|reservation|booking|trip) confirmation|payment (received|confirmation)/i;
+const POST_BOOKING_BODY = /invoice\s*[:#]\s*#?\d|grand total due|amount due|balance due|paid in full|download invoice|bill to:|please rate us on google|transportation confirmation/i;
+
+/** Is this a post-booking notice (invoice / receipt / confirmation) rather than a new request? */
+export function isPostBookingEmail(subject?: string | null, body?: string | null): boolean {
+  if (POST_BOOKING_SUBJECT.test(subject || '')) return true;
+  if (POST_BOOKING_BODY.test((body || '').slice(0, 1500))) return true;
+  return false;
+}
 
 /** True when the email is automated/non-customer noise rather than a quote request. */
 export function isNonQuoteEmail(from?: string | null, subject?: string | null, body?: string | null): boolean {
@@ -23,6 +36,7 @@ export function isNonQuoteEmail(from?: string | null, subject?: string | null, b
   const s = (subject || '').toLowerCase();
   if (NOISE_DOMAINS.test(f) || NOISE_SENDER.test(f)) return true;
   if (NOISE_SUBJECT.test(s)) return true;
+  if (isPostBookingEmail(subject, body)) return true; // invoices/receipts/confirmations (incl. from BookRides)
   // A short body that is clearly a system notice (no trip language at all).
   const b = (body || '').slice(0, 400).toLowerCase();
   if (/this email (is|was) (generated|sent automatically)|do not reply to this/.test(b) &&

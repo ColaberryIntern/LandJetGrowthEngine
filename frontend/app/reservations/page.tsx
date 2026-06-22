@@ -72,10 +72,26 @@ function money(v: string | number | null | undefined): string {
   return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
 }
 
+// Tidy an address so the embed geocodes it cleanly: drop "(ORD)"-style
+// parentheticals, a redundant trailing USA, and collapse stray commas/spaces.
+// A malformed pickup (e.g. "ORD airport (ORD), West O'Hare Avenue...") is what
+// makes the directions embed give up and show an ocean.
+function cleanAddr(a?: string): string {
+  return (a || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s*,\s*USA\s*$/i, '')
+    .replace(/\s*,(?:\s*,)+/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s,]+|[\s,]+$/g, '')
+    .trim();
+}
+
 function mapSrc(pickup?: string, dropoff?: string): string | null {
-  if (pickup && dropoff) return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&output=embed`;
+  const p = cleanAddr(pickup), d = cleanAddr(dropoff);
+  // Two addresses -> a framed driving route (the good-looking one).
+  if (p && d) return `https://maps.google.com/maps?saddr=${encodeURIComponent(p)}&daddr=${encodeURIComponent(d)}&output=embed`;
   // One address is enough to show a map -- center on whichever we have.
-  const one = pickup || dropoff;
+  const one = p || d;
   return one ? `https://maps.google.com/maps?q=${encodeURIComponent(one)}&z=12&output=embed` : null;
 }
 
@@ -569,7 +585,7 @@ export default function ReservationsPage() {
                         {r.ai_draft && !r.our_reply_at && <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-700">&#9999;&#65039; Draft ready</span>}
                       </div>
                     </button>
-                    {route && <iframe src={route} title={`route-${r.id}`} loading="lazy" className="hidden sm:block w-44 h-24 shrink-0 rounded border border-gray-200" />}
+                    {route && <iframe src={route} title={`route-${r.id}`} loading="lazy" className="hidden sm:block w-52 h-28 shrink-0 rounded-md border border-gray-200" />}
                     <button onClick={() => mergeMode ? toggleSelect(r.id) : setOpenId(open ? null : r.id)} className="text-right shrink-0 self-center">
                       <div className="text-lg font-semibold text-gray-900">{money(r.quote_total)}</div>
                       <div className="text-xs text-gray-400">{mergeMode ? (selected ? 'Selected' : 'Select') : (open ? 'Hide' : 'Open')}</div>
