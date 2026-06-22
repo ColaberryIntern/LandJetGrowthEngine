@@ -1,5 +1,5 @@
 import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE } from '../../services/reservationQuoteService';
-import { processInboundEmail } from '../../services/inboundQuoteEngine';
+import { processInboundEmail, detectMarketFromAddress } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
 const priced = (over: Partial<any> = {}, source?: 'bookrides' | 'nl'): InboundProcessResult => ({
@@ -59,6 +59,18 @@ describe('deriveConfidenceAndStatus (Percy: simple=high, complex/incomplete=huma
   it('NL but not a booking -> manual 0', () => {
     expect(deriveConfidenceAndStatus({ mode: 'manual', source: 'nl' } as InboundProcessResult))
       .toEqual({ confidence: 0, status: 'manual' });
+  });
+});
+
+describe('detectMarketFromAddress (Quad Cities suburbs route, not just the core cities)', () => {
+  it('resolves LeClaire IA (a direct-email dropoff) to quad_cities', () => {
+    expect(detectMarketFromAddress('853 Canal Shore SW, LeClaire Iowa')).toBe('quad_cities');
+    expect(detectMarketFromAddress('123 Main St, Le Claire, IA 52753')).toBe('quad_cities');
+    expect(detectMarketFromAddress('Eldridge, IA')).toBe('quad_cities');
+  });
+  it('still resolves the core Quad Cities and leaves unknown towns null', () => {
+    expect(detectMarketFromAddress('2950 Eastern Ave, Davenport, IA 52803')).toBe('quad_cities');
+    expect(detectMarketFromAddress('Louisville, KY')).toBeNull();
   });
 });
 

@@ -43,9 +43,12 @@ export async function extractTripFromText(body: string): Promise<ExtractedTrip |
               'You extract ground-transportation booking details from a free-form email. ' +
               'Return ONLY JSON with these keys: is_booking_request (boolean), passenger_name, pickup_address, ' +
               'dropoff_address, service_type ("one_way"|"round_trip"|"hourly"|null), date_of_service, passengers (integer|null), ' +
-              'vehicle, notes. Set is_booking_request=false if the email is not asking to book or quote a trip ' +
-              '(e.g. an invoice, a reply, a sales lead form, a general question). Use null for anything you cannot ' +
-              'determine. Do NOT invent addresses or dates.',
+              'vehicle, notes. Set is_booking_request=true whenever the sender wants a price, quote, estimate, or booking ' +
+              'for a point-to-point trip -- EVEN IF the message is informal, arrives through a sales lead or contact form, ' +
+              'gives only a rough idea, or has no firm dates. Set is_booking_request=false only when no trip is being ' +
+              'requested at all (an invoice, an automated receipt, a reply continuing an already-quoted thread, or a ' +
+              'general question with no origin/destination). Use null for anything you cannot determine. ' +
+              'Do NOT invent addresses or dates.',
           },
           { role: 'user', content: text.slice(0, 4000) },
         ],

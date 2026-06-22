@@ -72,7 +72,7 @@ const MARKET_OFFICE_PATTERNS: { market: Market; patterns: RegExp[] }[] = [
 ];
 
 const MARKET_CITY_MAP: { market: Market; cities: string[] }[] = [
-  { market: 'quad_cities', cities: ['davenport', 'bettendorf', 'moline', 'rock island', 'quad cities', 'east moline'] },
+  { market: 'quad_cities', cities: ['davenport', 'bettendorf', 'moline', 'rock island', 'quad cities', 'east moline', 'le claire', 'leclaire', 'eldridge', 'blue grass', 'walcott', 'princeton'] },
   { market: 'des_moines',  cities: ['des moines', 'west des moines', 'ankeny', 'urbandale', 'clive'] },
   { market: 'dallas',      cities: ['dallas', 'fort worth', 'plano', 'frisco', 'irving', 'arlington'] },
   { market: 'san_antonio', cities: ['san antonio', 'new braunfels'] },
