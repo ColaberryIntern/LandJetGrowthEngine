@@ -983,7 +983,7 @@ export interface ReservationQuoteRow {
   quote_total: string | null;
   confidence: string;
   status: 'auto_ready' | 'needs_review' | 'forward' | 'manual';
-  lifecycle?: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed';
+  lifecycle?: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed' | 'not_quote';
   ai_draft?: ReservationAiDraft | null;
   our_reply_at?: string | null;
   reply_from?: string | null;
@@ -991,6 +991,7 @@ export interface ReservationQuoteRow {
   merged_into?: number | null;
   last_inbound_intent?: 'gratitude' | 'confirmation' | 'question' | 'other' | null;
   resolved_at?: string | null;
+  deleted_at?: string | null;
   raw_body: string | null;
   conversation_id?: string | null;
   responded_at?: string | null;
@@ -1021,10 +1022,11 @@ export interface ReservationConversationMessage {
   preview: string;
 }
 
-export function getReservations(opts?: { status?: string; lifecycle?: string }) {
+export function getReservations(opts?: { status?: string; lifecycle?: string; deleted?: boolean }) {
   const p = new URLSearchParams();
   if (opts?.status && opts.status !== 'all') p.set('status', opts.status);
   if (opts?.lifecycle && opts.lifecycle !== 'all') p.set('lifecycle', opts.lifecycle);
+  if (opts?.deleted) p.set('deleted', '1');
   const q = p.toString() ? `?${p.toString()}` : '';
   return request<{ reservations: ReservationQuoteRow[]; total: number }>(`/admin/quotes/reservations${q}`);
 }
@@ -1049,7 +1051,7 @@ export function saveReservationDraft(id: number, subject: string, text: string) 
     `/admin/quotes/reservations/${id}/draft`, { method: 'PUT', body: JSON.stringify({ subject, text }) });
 }
 
-export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed') {
+export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed' | 'not_quote') {
   return request<{ id: number; lifecycle: string }>(
     `/admin/quotes/reservations/${id}/lifecycle`, { method: 'POST', body: JSON.stringify({ lifecycle }) });
 }
@@ -1067,6 +1069,14 @@ export function mergeReservations(primary_id: number, secondary_ids: number[]) {
 export function unmergeReservation(id: number) {
   return request<{ id: number; merged_into: number | null; lifecycle: string }>(
     `/admin/quotes/reservations/${id}/unmerge`, { method: 'POST' });
+}
+
+export function deleteReservation(id: number) {
+  return request<{ id: number; deleted: boolean }>(`/admin/quotes/reservations/${id}/delete`, { method: 'POST' });
+}
+
+export function restoreReservation(id: number) {
+  return request<{ id: number; deleted: boolean }>(`/admin/quotes/reservations/${id}/restore`, { method: 'POST' });
 }
 
 export interface ReservationMetrics {

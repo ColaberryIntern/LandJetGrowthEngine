@@ -487,13 +487,15 @@ router.get('/reservations', authorize('campaigns:read'), async (req: Request, re
   try {
     const { ReservationQuote } = await import('../../models/ReservationQuote');
     const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const { Op } = await import('sequelize');
     const where: Record<string, unknown> = {};
     if (req.query.status) where.status = req.query.status as string;
-    // Lifecycle filter for the operational queue. 'resolved' = booked or closed.
+    // Soft-deleted rows are hidden unless explicitly requested.
+    where.deleted_at = req.query.deleted === '1' ? { [Op.ne]: null } : null;
+    // Lifecycle filter for the operational queue. 'resolved' = booked/closed/completed.
     const lc = req.query.lifecycle as string | undefined;
     if (lc && lc !== 'all') {
-      const { Op } = await import('sequelize');
-      where.lifecycle = lc === 'resolved' ? { [Op.in]: ['booked', 'closed'] } : lc;
+      where.lifecycle = lc === 'resolved' ? { [Op.in]: ['booked', 'closed', 'completed'] } : lc;
     }
     const rows = await ReservationQuote.findAll({
       where,
@@ -559,7 +561,7 @@ router.post('/reservations/:id/lifecycle', authorize('campaigns:write'), async (
   try {
     const { setReservationLifecycle } = await import('../../services/reservationQuoteService');
     const lifecycle = String(req.body?.lifecycle || '');
-    if (!['needs_reply', 'awaiting_customer', 'completed', 'booked', 'closed'].includes(lifecycle)) {
+    if (!['needs_reply', 'awaiting_customer', 'completed', 'booked', 'closed', 'not_quote'].includes(lifecycle)) {
       return res.status(400).json({ error: 'invalid lifecycle' });
     }
     const rq = await setReservationLifecycle(Number(req.params.id), lifecycle as any);
@@ -576,6 +578,20 @@ router.post('/reservations/merge', authorize('campaigns:write'), async (req: Req
     if (!primaryId || secondaryIds.length === 0) return res.status(400).json({ error: 'primary_id and secondary_ids are required' });
     const result = await mergeReservations(primaryId, secondaryIds);
     res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Soft delete / restore a reservation row.
+router.post('/reservations/:id/delete', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { deleteReservation } = await import('../../services/reservationQuoteService');
+    res.json(await deleteReservation(Number(req.params.id)));
+  } catch (error) { next(error); }
+});
+router.post('/reservations/:id/restore', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { restoreReservation } = await import('../../services/reservationQuoteService');
+    res.json(await restoreReservation(Number(req.params.id)));
   } catch (error) { next(error); }
 });
 

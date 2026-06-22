@@ -6,6 +6,7 @@ import {
   getReservations, ingestReservations, sendReservationQuote,
   generateReservationDraft, saveReservationDraft, setReservationLifecycle,
   getReservationConversation, mergeReservations, unmergeReservation,
+  deleteReservation, restoreReservation,
   type ReservationQuoteRow, type ReservationConversationMessage,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
@@ -25,15 +26,29 @@ const LIFECYCLE_META: Record<string, { label: string; chip: string; bar: string;
   completed:         { label: 'Completed',    chip: 'bg-teal-100 text-teal-700',     bar: 'bg-teal-400',    card: 'border-teal-200 bg-teal-50/40' },
   booked:            { label: 'Booked',       chip: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500', card: 'border-emerald-200 bg-emerald-50/40' },
   closed:            { label: 'Closed',       chip: 'bg-gray-200 text-gray-600',     bar: 'bg-gray-300',    card: 'border-gray-200 bg-gray-50 opacity-75' },
+  not_quote:         { label: 'Not a quote',  chip: 'bg-gray-200 text-gray-500',     bar: 'bg-gray-300',    card: 'border-gray-200 bg-gray-50 opacity-75' },
 };
 
 const RESOLVED_STATES = ['completed', 'booked', 'closed'];
+
+// Fields a request needs before it can be properly quoted.
+function missingFields(r: ReservationQuoteRow): string[] {
+  const t = r.result?.trip || {};
+  const out: string[] = [];
+  if (!t.pickup_address) out.push('Pickup address');
+  if (!t.dropoff_address) out.push('Dropoff address');
+  if (!t.date_of_service) out.push('Date');
+  if (t.passengers == null) out.push('Passengers');
+  return out;
+}
 
 const LIFECYCLE_FILTERS = [
   { key: 'needs_reply', label: 'Needs reply' },
   { key: 'awaiting_customer', label: 'Awaiting' },
   { key: 'resolved', label: 'Resolved' },
+  { key: 'not_quote', label: 'Not a quote' },
   { key: 'all', label: 'All' },
+  { key: 'deleted', label: 'Deleted' },
 ] as const;
 
 const POLL_MS = 20000;
@@ -58,8 +73,10 @@ function money(v: string | number | null | undefined): string {
 }
 
 function mapSrc(pickup?: string, dropoff?: string): string | null {
-  if (!pickup || !dropoff) return null;
-  return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&output=embed`;
+  if (pickup && dropoff) return `https://maps.google.com/maps?saddr=${encodeURIComponent(pickup)}&daddr=${encodeURIComponent(dropoff)}&output=embed`;
+  // One address is enough to show a map -- center on whichever we have.
+  const one = pickup || dropoff;
+  return one ? `https://maps.google.com/maps?q=${encodeURIComponent(one)}&z=12&output=embed` : null;
 }
 
 function apptRelative(dateStr?: string, startTime?: string): { text: string; cls: string } | null {
@@ -189,6 +206,7 @@ export default function ReservationsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deletedRows, setDeletedRows] = useState<ReservationQuoteRow[]>([]);
 
   // Per-row UI state, kept separate from server rows so live polling never
   // clobbers an in-progress edit.
@@ -217,6 +235,11 @@ export default function ReservationsPage() {
     }
   }, []);
 
+  const loadDeleted = useCallback(async () => {
+    try { const res = await getReservations({ deleted: true }); setDeletedRows(res.reservations || []); }
+    catch (e) { setError((e as Error).message); }
+  }, []);
+
   useEffect(() => { (async () => { await ensureAuth(); await load(); })(); }, [load]);
 
   // Live auto-refresh. Skips a beat while the operator is editing a draft.
@@ -224,6 +247,8 @@ export default function ReservationsPage() {
     const t = setInterval(() => { if (!editingRef.current) load(false); }, POLL_MS);
     return () => clearInterval(t);
   }, [load]);
+
+  useEffect(() => { if (filter === 'deleted') loadDeleted(); }, [filter, loadDeleted]);
 
   async function refreshFromMailbox() {
     setRefreshing(true);
@@ -285,9 +310,22 @@ export default function ReservationsPage() {
     finally { setBusyFor(id, null); }
   }
 
-  async function handleLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'booked' | 'closed') {
+  async function handleLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed' | 'not_quote') {
     setBusyFor(id, 'Updating...');
-    try { await setReservationLifecycle(id, lifecycle); await load(false); }
+    try { await setReservationLifecycle(id, lifecycle); await load(false); if (filter === 'deleted') await loadDeleted(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusyFor(id, null); }
+  }
+
+  async function handleDelete(id: number) {
+    setBusyFor(id, 'Removing...');
+    try { await deleteReservation(id); await load(false); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusyFor(id, null); }
+  }
+  async function handleRestore(id: number) {
+    setBusyFor(id, 'Restoring...');
+    try { await restoreReservation(id); await loadDeleted(); await load(false); }
     catch (e) { setError((e as Error).message); }
     finally { setBusyFor(id, null); }
   }
@@ -324,25 +362,29 @@ export default function ReservationsPage() {
     r.received_at ? new Date(r.received_at).getTime() : 0,
   );
   const resolvedAt = (r: ReservationQuoteRow) => (r.resolved_at ? new Date(r.resolved_at).getTime() : 0);
-  const visible = listBase
-    .filter(r => {
-      const lc = lifecycleOf(r);
-      if (filter === 'all') return true;
-      if (filter === 'resolved') return RESOLVED_STATES.includes(lc);
-      return lc === filter;
-    })
-    .sort((a, b) => filter === 'resolved' ? (resolvedAt(b) - resolvedAt(a)) : (customerActivity(b) - customerActivity(a)));
+  const visible = filter === 'deleted'
+    ? deletedRows
+    : listBase
+        .filter(r => {
+          const lc = lifecycleOf(r);
+          if (filter === 'all') return lc !== 'not_quote';
+          if (filter === 'resolved') return RESOLVED_STATES.includes(lc);
+          return lc === filter;
+        })
+        .sort((a, b) => filter === 'resolved' ? (resolvedAt(b) - resolvedAt(a)) : (customerActivity(b) - customerActivity(a)));
   const stats = {
     needs_reply: statBase.filter(r => lifecycleOf(r) === 'needs_reply').length,
     awaiting_customer: statBase.filter(r => lifecycleOf(r) === 'awaiting_customer').length,
     resolved: statBase.filter(r => RESOLVED_STATES.includes(lifecycleOf(r))).length,
-    pipelineValue: statBase.filter(r => !RESOLVED_STATES.includes(lifecycleOf(r))).reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
+    pipelineValue: statBase.filter(r => !RESOLVED_STATES.includes(lifecycleOf(r)) && lifecycleOf(r) !== 'not_quote').reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
   };
   const counts: Record<string, number> = {
     needs_reply: stats.needs_reply,
     awaiting_customer: stats.awaiting_customer,
     resolved: stats.resolved,
-    all: statBase.length,
+    not_quote: statBase.filter(r => lifecycleOf(r) === 'not_quote').length,
+    all: statBase.filter(r => lifecycleOf(r) !== 'not_quote').length,
+    deleted: deletedRows.length,
   };
 
   return (
@@ -463,7 +505,13 @@ export default function ReservationsPage() {
             const trip = r.result?.trip;
             const quote = r.result?.quote;
             const open = openId === r.id;
-            const canSend = r.status === 'auto_ready' || r.status === 'needs_review';
+            const miss = missingFields(r);
+            // Show "missing" only for real-but-incomplete requests (some info present,
+            // not priced, not filed as non-quote).
+            const showMissing = lc !== 'not_quote' && !r.quote_total && miss.length > 0 && miss.length < 4;
+            // Composer is available for priceable rows AND incomplete-but-real
+            // requests (to draft a "please send us X" note).
+            const canSend = r.status === 'auto_ready' || r.status === 'needs_review' || showMissing;
             const route = mapSrc(trip?.pickup_address, trip?.dropoff_address);
             const appt = apptRelative(trip?.date_of_service, (trip as { start_time?: string })?.start_time);
             const tg = tagsFor(r);
@@ -502,6 +550,7 @@ export default function ReservationsPage() {
                           <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800" title="Other rows were merged into this one.">{mergedKids} merged</span>
                         )}
                         {!isMerged && !dup?.isDup && (() => { const it = intentTag(r); return it ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${it.cls}`}>{it.label}</span> : null; })()}
+                        {showMissing && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700" title="More info needed before we can quote.">Missing: {miss.join(', ')}</span>}
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                         {appt && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${appt.cls}`}>{appt.text}</span>}
                         <span className="text-xs text-gray-400">received {timeAgo(r.received_at)}</span>
@@ -554,6 +603,15 @@ export default function ReservationsPage() {
                         </div>
                       ) : <div className="text-sm text-gray-500">Not a structured quote ({r.result?.manual_reason || r.mode}).</div>}
                     </div>
+
+                    {/* What's missing before we can quote */}
+                    {lc !== 'not_quote' && !r.quote_total && miss.length > 0 && (
+                      <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm">
+                        <div className="font-medium text-orange-800">To send a proper quote, we still need:</div>
+                        <ul className="mt-1 list-disc pl-5 text-orange-700">{miss.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                        <div className="mt-1 text-xs text-orange-600">Use &quot;Generate AI reply&quot; below to draft a note asking the customer for exactly these.</div>
+                      </div>
+                    )}
 
                     {/* AI reply composer */}
                     {canSend && (
@@ -644,11 +702,25 @@ export default function ReservationsPage() {
 
                     {/* Lifecycle controls */}
                     <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
-                      {isMerged ? (
+                      {filter === 'deleted' ? (
+                        <>
+                          <span className="text-xs text-gray-500">Deleted {timeAgo(r.deleted_at)}.</span>
+                          <button onClick={() => handleRestore(r.id)} disabled={!!actionBusy}
+                            className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">Restore</button>
+                        </>
+                      ) : isMerged ? (
                         <>
                           <span className="text-xs text-violet-700">This request was merged into #{r.merged_into}.</span>
                           <button onClick={() => handleUnmerge(r.id)} disabled={!!actionBusy}
                             className="rounded-md bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100">Unmerge</button>
+                        </>
+                      ) : lc === 'not_quote' ? (
+                        <>
+                          <span className="text-xs text-gray-500">Not a quote request.</span>
+                          <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
+                            className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Actually a quote</button>
+                          <button onClick={() => handleDelete(r.id)} disabled={!!actionBusy}
+                            className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200">&#128465;&#65039; Delete</button>
                         </>
                       ) : (
                         <>
@@ -661,6 +733,8 @@ export default function ReservationsPage() {
                             <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
                               className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Reopen</button>
                           )}
+                          <button onClick={() => handleLifecycle(r.id, 'not_quote')} disabled={!!actionBusy}
+                            className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-200" title="This is not a quote request; move it out of the queue.">Not a quote</button>
                           {lc === 'completed' && <span className="text-xs text-teal-600">Auto-resolved (customer signed off)</span>}
                           {mergedKids > 0 && <span className="text-xs text-violet-600">{mergedKids} other request{mergedKids === 1 ? '' : 's'} merged in</span>}
                         </>

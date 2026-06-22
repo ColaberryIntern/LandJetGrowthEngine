@@ -17,6 +17,7 @@ import { logger } from '../config/logger';
 import { ReservationQuote, ReservationAiDraft } from '../models/ReservationQuote';
 import { composeQuoteReply, fetchConversationText } from './reservationQuoteService';
 import { getToneProfile, getTopExemplars } from './reservationLearningService';
+import { missingForQuote } from './reservationClassify';
 import { recordLlmUsage } from './aiCost';
 
 const EM_DASH = /—|–/g;
@@ -123,14 +124,21 @@ export async function generateDraft(rq: ReservationQuote): Promise<ReservationAi
       const historyBlock = history
         ? `\n\nFull conversation so far (oldest first) -- reply in context of all of it, do not repeat what was already settled:\n${history}`
         : '';
+      // If the request is missing details we need to price it, the reply should
+      // politely ask for exactly those, rather than promise a quote we can't make.
+      const missing = missingForQuote((rq.result as any)?.trip);
+      const missingBlock = (!facts.total && missing.length)
+        ? `\nWe CANNOT quote yet -- still missing: ${missing.map((m) => m.label).join(', ')}. Write a short, friendly note that thanks them, says we would be glad to quote, and asks them to confirm exactly these missing details (list them). Do not state a price.`
+        : '';
       const factBlock =
         `Customer first name: ${facts.firstName}\n` +
         `Route: ${facts.route || '(not provided)'}\n` +
         `Service: ${facts.service || '(not provided)'}\n` +
         `Date: ${facts.date || '(not provided)'}\n` +
         `Passengers: ${facts.passengers ?? '(not provided)'}\n` +
-        `Quoted total: ${facts.total || '(no price yet - acknowledge and say a quote will follow)'}\n` +
+        `Quoted total: ${facts.total || '(no price yet)'}\n` +
         `Original subject: ${rq.subject || '(none)'}` +
+        missingBlock +
         historyBlock;
 
       const resp = await fetch('https://api.openai.com/v1/chat/completions', {

@@ -25,9 +25,11 @@ export type ReservationQuoteStatus = 'auto_ready' | 'needs_review' | 'forward' |
  *                        and re-opens if they ask something new.
  *   booked            -- resolved (manual): trip booked
  *   closed            -- resolved (manual): no deal / nothing more to do
+ *   not_quote         -- not a transportation quote request at all (inbox noise:
+ *                        notifications, receipts, bounces). Kept out of Needs reply.
  * The Resolved bucket = booked | closed | completed.
  */
-export type ReservationLifecycle = 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed';
+export type ReservationLifecycle = 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed' | 'not_quote';
 
 /** The AI draft reply we generated, with its self-evaluation rubric. */
 export interface ReservationAiDraft {
@@ -63,6 +65,7 @@ export class ReservationQuote extends Model {
   declare merged_into: number | null;     // if set, this row was manually merged into that row id
   declare last_inbound_intent: string | null; // gratitude|confirmation|question|other (customer's latest msg)
   declare resolved_at: Date | null;       // when it entered the Resolved bucket (for newest-first sort)
+  declare deleted_at: Date | null;        // soft delete: hidden from all views, recoverable
   declare created_at: Date;
   declare updated_at: Date;
 }
@@ -93,6 +96,7 @@ export function initReservationQuoteModel(sequelize: Sequelize): typeof Reservat
       merged_into: { type: DataTypes.INTEGER, allowNull: true },
       last_inbound_intent: { type: DataTypes.TEXT, allowNull: true },
       resolved_at: { type: DataTypes.DATE, allowNull: true },
+      deleted_at: { type: DataTypes.DATE, allowNull: true },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },

@@ -21,6 +21,7 @@ import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, InboundIntent } from './inboundIntent';
+import { isNonQuoteEmail } from './reservationClassify';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -212,7 +213,9 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
     where: {
       mailbox,
       conversation_id: { [Op.ne]: null },
-      lifecycle: { [Op.notIn]: ['booked', 'closed'] },
+      // Don't reconcile manual resolutions, non-quotes, or deleted rows.
+      lifecycle: { [Op.notIn]: ['booked', 'closed', 'not_quote'] },
+      deleted_at: null,
       received_at: { [Op.gte]: since },
     } as any,
   });
@@ -427,6 +430,12 @@ export async function ingestReservationQuotes(opts: {
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 
+      // Keep inbox noise (Instagram, SharePoint, receipts, bounces) out of the
+      // active queue: if it is not a quote and looks like an automated notice,
+      // file it under not_quote rather than needs_reply.
+      const isQuote = isBookingIntent(result) || total != null;
+      const lifecycle = (!isQuote && isNonQuoteEmail(e.from, e.subject, e.body)) ? 'not_quote' : 'needs_reply';
+
       await ReservationQuote.create({
         graph_message_id: e.id,
         mailbox,
@@ -439,6 +448,7 @@ export async function ingestReservationQuotes(opts: {
         quote_total: total,
         confidence,
         status,
+        lifecycle,
         result: result as unknown as Record<string, unknown>,
         conversation_id: e.conversationId,
       } as any);
@@ -579,8 +589,12 @@ export function composeQuoteReply(rq: ReservationQuote): { subject: string; text
 export async function sendReservationQuote(id: number): Promise<{ sent: boolean; dry: boolean; to: string | null; from: string | null; draft: { subject: string; text: string } }> {
   const rq = await ReservationQuote.findByPk(id);
   if (!rq) throw new Error('Reservation quote not found');
-  if (rq.status === 'manual' || rq.status === 'forward') {
-    throw new Error(`Cannot send a ${rq.status} reservation (no priced quote)`);
+  // Forward-only routes go to the local team, never an auto-reply. A 'manual' row
+  // may still be replied to IF the operator drafted one (e.g. a request for the
+  // missing details) -- the explicit draft is the go-ahead.
+  if (rq.status === 'forward') throw new Error('Cannot send a forward-only reservation (routes to the local team)');
+  if (rq.status === 'manual' && !(rq.ai_draft && rq.ai_draft.text)) {
+    throw new Error('Cannot send a manual reservation without a reviewed draft');
   }
   // Prefer the reviewed/edited AI draft; fall back to the deterministic template.
   const draft = rq.ai_draft && rq.ai_draft.text
@@ -653,6 +667,23 @@ export async function unmergeReservation(id: number): Promise<ReservationQuote> 
   await rq.update({ merged_into: null, lifecycle: 'needs_reply', resolved_at: null } as any);
   logger.info('reservation unmerged', { id });
   return rq;
+}
+
+/** Soft delete: hide a row from every view (recoverable via restore). */
+export async function deleteReservation(id: number): Promise<{ id: number; deleted: boolean }> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  await rq.update({ deleted_at: new Date() } as any);
+  logger.info('reservation soft-deleted', { id });
+  return { id, deleted: true };
+}
+
+export async function restoreReservation(id: number): Promise<{ id: number; deleted: boolean }> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  await rq.update({ deleted_at: null } as any);
+  logger.info('reservation restored', { id });
+  return { id, deleted: false };
 }
 
 /** Save an operator-edited draft (keeps the rubric, marks it edited). */
