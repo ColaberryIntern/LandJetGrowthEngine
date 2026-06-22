@@ -7,6 +7,12 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Reservations: manual merge (pick one to keep) + money formatting with commas**
+  - Date: 2026-06-22
+  - What changed: Same-person/same-day rows that are genuinely different quotes (different reservation #/time/price) are not auto-duplicates, so added a manual merge. New `merged_into` column ([ReservationQuote.ts](src/models/ReservationQuote.ts)) + `mergeReservations`/`unmergeReservation` ([reservationQuoteService.ts](src/services/reservationQuoteService.ts)) + `POST /reservations/merge` and `/:id/unmerge` routes. Merged rows are closed, badged "Merged into #X", hidden under the grouped toggle, excluded from stats/counts; the kept row shows "N merged"; unmerge restores. UI ([reservations/page.tsx](frontend/app/reservations/page.tsx)) adds a Merge mode (select rows, pick which to keep, confirm) and an Unmerge action. Also formatted money with thousands separators ($1,114.98) across the reservations list, quote tester, AI draft facts ([reservationDraftService.ts](src/services/reservationDraftService.ts)), and the template fallback. Schema via idempotent [migrateReservationsMerge.ts](src/scripts/migrateReservationsMerge.ts).
+  - Verification: backend tsc clean; frontend tsc clean; jest reservationQuoteService 23/23. Deployed backend+frontend; migration applied (merged_into present:true); /reservations 200.
+  - Notes: Merge is operator-driven and reversible; auto-dedup (exact reservation #) is unchanged and separate.
+
 - [x] **Reservations: duplicate detection + sort by most recent customer activity**
   - Date: 2026-06-22
   - What changed: BookRides sends the same request as several emails, each ingested as its own row (e.g. Stacey Spillum #110/#111 both reservation 3503372). Added client-side duplicate detection in [reservations/page.tsx](frontend/app/reservations/page.tsx): `dedupKey` uses the BookRides reservation number (exact) or a strict passenger+route+date+time signature; `buildDupMap` groups copies and picks a canonical (prefers the one with a draft, then most recent). Duplicates are hidden by default with a "N duplicates hidden" toggle; the canonical shows an "N duplicates" badge and revealed copies show "Duplicate of #X" (dashed amber). Stats + tab counts now reflect UNIQUE requests so copies do not inflate the workload. Distinct requests stay separate (e.g. #112 reservation 3503371, different time/price). Also sorts the list by most recent CUSTOMER activity (last customer reply, else when the request came in), desc, so a just-answered thread jumps to the top.
