@@ -17,7 +17,7 @@
  * No outbound is sent here; this only reads + prices + persists.
  */
 import { logger } from '../config/logger';
-import { ReservationQuote, ReservationQuoteStatus } from '../models/ReservationQuote';
+import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '../models/ReservationQuote';
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 
@@ -35,7 +35,7 @@ export interface RawReservationEmail {
   conversationId: string | null;
 }
 
-async function getGraphToken(): Promise<string> {
+export async function getGraphToken(): Promise<string> {
   if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {
     throw new Error('Microsoft Graph OAuth env not configured (OAUTH_CLIENT_ID/SECRET/TENANT_ID)');
   }
@@ -128,7 +128,15 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
         const t = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0;
         if (fromAddr && fromAddr === cust && t > origAt) { respAt = m.receivedDateTime; break; }
       }
-      if (respAt) { await rq.update({ responded_at: new Date(respAt) } as any); newly++; }
+      if (respAt) {
+        // Customer came back. If we were waiting on them, we now owe a reply, so
+        // the row lights up as needs_reply again. Resolved rows (booked/closed)
+        // are left alone.
+        const patch: Record<string, unknown> = { responded_at: new Date(respAt) };
+        if (rq.lifecycle === 'awaiting_customer') patch.lifecycle = 'needs_reply';
+        await rq.update(patch as any);
+        newly++;
+      }
     } catch { /* skip this row, non-fatal */ }
   }
   logger.info('reservation replies refreshed', { checked: rows.length, newly_responded: newly });
@@ -326,6 +334,48 @@ export async function ingestReservationQuotes(opts: {
   return counts;
 }
 
+export interface ConversationMessage {
+  id: string;
+  from: string | null;
+  at: string | null;
+  direction: 'inbound' | 'outbound';
+  preview: string;
+}
+
+/**
+ * Pull the full back-and-forth for a reservation's thread so the UI can show a
+ * conversation when there were multiple replies. Chronological (oldest first).
+ * Fail-soft: returns [] if the thread is unknown or Graph is unavailable.
+ */
+export async function getConversationThread(id: number): Promise<ConversationMessage[]> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq || !rq.conversation_id) return [];
+  const mailbox = rq.reply_from || rq.mailbox;
+  try {
+    const token = await getGraphToken();
+    const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=id,from,receivedDateTime,sentDateTime,body&$orderby=receivedDateTime asc&$top=30`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return [];
+    const data = (await r.json()) as { value?: any[] };
+    const me = mailbox.toLowerCase();
+    return (data.value || []).map((m) => {
+      const from = (m.from?.emailAddress?.address || '').toLowerCase() || null;
+      const bodyText = m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || '');
+      return {
+        id: m.id,
+        from,
+        at: m.sentDateTime || m.receivedDateTime || null,
+        direction: (from === me ? 'outbound' : 'inbound') as 'inbound' | 'outbound',
+        preview: bodyText.replace(/\n{2,}/g, '\n').slice(0, 600),
+      };
+    });
+  } catch (e) {
+    logger.warn('getConversationThread failed (non-fatal)', { id, error: (e as Error).message });
+    return [];
+  }
+}
+
 /** Compose the customer-facing quote reply from a stored ReservationQuote. */
 export function composeQuoteReply(rq: ReservationQuote): { subject: string; text: string } {
   const r = (rq.result || {}) as { trip?: any; quote?: any };
@@ -349,30 +399,64 @@ export function composeQuoteReply(rq: ReservationQuote): { subject: string; text
  * Until Percy/Lorie validate the quotes, this returns the draft without
  * emailing anyone (sent=false, dry=true) so the 1-click UX is safe to demo.
  */
-export async function sendReservationQuote(id: number): Promise<{ sent: boolean; dry: boolean; to: string | null; draft: { subject: string; text: string } }> {
+export async function sendReservationQuote(id: number): Promise<{ sent: boolean; dry: boolean; to: string | null; from: string | null; draft: { subject: string; text: string } }> {
   const rq = await ReservationQuote.findByPk(id);
   if (!rq) throw new Error('Reservation quote not found');
   if (rq.status === 'manual' || rq.status === 'forward') {
     throw new Error(`Cannot send a ${rq.status} reservation (no priced quote)`);
   }
-  const draft = composeQuoteReply(rq);
+  // Prefer the reviewed/edited AI draft; fall back to the deterministic template.
+  const draft = rq.ai_draft && rq.ai_draft.text
+    ? { subject: rq.ai_draft.subject, text: rq.ai_draft.text }
+    : composeQuoteReply(rq);
   const live = process.env.RESERVATION_SEND_ENABLED === 'true';
   const to = rq.from_email;
+  // Reply FROM the account the request came in on (or an explicit override), so
+  // the customer hears back from the same address/voice that received them.
+  const from = rq.reply_from || rq.mailbox;
 
   if (!live) {
-    const result = { ...((rq.result as Record<string, unknown>) || {}), prepared: { at: new Date().toISOString(), to } };
+    const result = { ...((rq.result as Record<string, unknown>) || {}), prepared: { at: new Date().toISOString(), to, from } };
     await rq.update({ result } as any);
-    return { sent: false, dry: true, to, draft };
+    return { sent: false, dry: true, to, from, draft };
   }
 
   const token = await getGraphToken();
   const resp = await fetch(
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(rq.mailbox)}/messages/${rq.graph_message_id}/reply`,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/messages/${rq.graph_message_id}/reply`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: draft.text }) },
   );
   if (!resp.ok) throw new Error(`Graph reply ${resp.status}: ${(await resp.text()).slice(0, 160)}`);
-  const result = { ...((rq.result as Record<string, unknown>) || {}), sent: { at: new Date().toISOString(), to } };
-  await rq.update({ result } as any);
-  logger.info('reservation quote sent', { id, to });
-  return { sent: true, dry: false, to, draft };
+  const now = new Date();
+  const result = { ...((rq.result as Record<string, unknown>) || {}), sent: { at: now.toISOString(), to, from } };
+  // We replied -> ball is in the customer's court, but the row STAYS in the queue
+  // until it is booked or closed.
+  await rq.update({ result, our_reply_at: now, lifecycle: 'awaiting_customer' } as any);
+  logger.info('reservation quote sent', { id, to, from });
+  return { sent: true, dry: false, to, from, draft };
+}
+
+/** Operator action: move a reservation through its lifecycle (e.g. mark booked). */
+export async function setReservationLifecycle(id: number, lifecycle: ReservationLifecycle): Promise<ReservationQuote> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  await rq.update({ lifecycle } as any);
+  logger.info('reservation lifecycle updated', { id, lifecycle });
+  return rq;
+}
+
+/** Save an operator-edited draft (keeps the rubric, marks it edited). */
+export async function saveReservationDraft(id: number, subject: string, text: string): Promise<ReservationQuote> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  const prior = rq.ai_draft;
+  const ai_draft = {
+    subject, text,
+    generated_at: prior?.generated_at || new Date().toISOString(),
+    model: prior?.model || 'edited',
+    edited: true,
+    rubric: prior?.rubric || { score: 0, breakdown: {} },
+  };
+  await rq.update({ ai_draft } as any);
+  return rq;
 }

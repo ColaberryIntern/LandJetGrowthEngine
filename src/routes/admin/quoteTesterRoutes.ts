@@ -489,6 +489,12 @@ router.get('/reservations', authorize('campaigns:read'), async (req: Request, re
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const where: Record<string, unknown> = {};
     if (req.query.status) where.status = req.query.status as string;
+    // Lifecycle filter for the operational queue. 'resolved' = booked or closed.
+    const lc = req.query.lifecycle as string | undefined;
+    if (lc && lc !== 'all') {
+      const { Op } = await import('sequelize');
+      where.lifecycle = lc === 'resolved' ? { [Op.in]: ['booked', 'closed'] } : lc;
+    }
     const rows = await ReservationQuote.findAll({
       where,
       order: [['received_at', 'DESC'], ['id', 'DESC']],
@@ -521,6 +527,67 @@ router.post('/reservations/:id/send', authorize('campaigns:write'), async (req: 
     const { sendReservationQuote } = await import('../../services/reservationQuoteService');
     const result = await sendReservationQuote(Number(req.params.id));
     res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Generate the AI reply (in the sending account's learned voice) + rubric score.
+router.post('/reservations/:id/draft', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ReservationQuote } = await import('../../models/ReservationQuote');
+    const { generateDraft } = await import('../../services/reservationDraftService');
+    const rq = await ReservationQuote.findByPk(Number(req.params.id));
+    if (!rq) return res.status(404).json({ error: 'not found' });
+    const draft = await generateDraft(rq);
+    res.json({ draft, reply_from: rq.reply_from || rq.mailbox });
+  } catch (error) { next(error); }
+});
+
+// Save an operator-edited draft (preserves rubric, marks edited).
+router.put('/reservations/:id/draft', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { saveReservationDraft } = await import('../../services/reservationQuoteService');
+    const subject = String(req.body?.subject || '');
+    const text = String(req.body?.text || '');
+    if (!text.trim()) return res.status(400).json({ error: 'text is required' });
+    const rq = await saveReservationDraft(Number(req.params.id), subject, text);
+    res.json({ ai_draft: rq.ai_draft });
+  } catch (error) { next(error); }
+});
+
+// Move a reservation through its lifecycle (needs_reply/awaiting_customer/booked/closed).
+router.post('/reservations/:id/lifecycle', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { setReservationLifecycle } = await import('../../services/reservationQuoteService');
+    const lifecycle = String(req.body?.lifecycle || '');
+    if (!['needs_reply', 'awaiting_customer', 'booked', 'closed'].includes(lifecycle)) {
+      return res.status(400).json({ error: 'invalid lifecycle' });
+    }
+    const rq = await setReservationLifecycle(Number(req.params.id), lifecycle as any);
+    res.json({ id: rq.id, lifecycle: rq.lifecycle });
+  } catch (error) { next(error); }
+});
+
+// Full thread for the conversation view (multi-message back-and-forth).
+router.get('/reservations/:id/conversation', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getConversationThread } = await import('../../services/reservationQuoteService');
+    const messages = await getConversationThread(Number(req.params.id));
+    res.json({ messages });
+  } catch (error) { next(error); }
+});
+
+// Run the history learner (mine Sent Items + rebuild tone profiles) on demand.
+router.post('/reservations/learn', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { learnFromMailboxes } = await import('../../services/reservationLearningService');
+    const def = (process.env.RESERVATION_EXTRA_MAILBOXES ?? 'rlandry@landjet.com,percy@landjet.com')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    const mailboxes: string[] = Array.isArray(req.body?.mailboxes) && req.body.mailboxes.length
+      ? req.body.mailboxes
+      : ['ljreservations@landjet.com', ...def];
+    const maxMessages = Math.min(Math.max(Number(req.body?.max_messages) || 300, 50), 1000);
+    const summary = await learnFromMailboxes(mailboxes, maxMessages);
+    res.json({ summary });
   } catch (error) { next(error); }
 });
 

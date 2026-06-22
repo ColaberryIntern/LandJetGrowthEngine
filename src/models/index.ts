@@ -11,6 +11,8 @@ import { initScheduledEmailModel, ScheduledEmail } from './ScheduledEmail';
 import { initCommunicationLogModel, CommunicationLog } from './CommunicationLog';
 import { initInteractionOutcomeModel, InteractionOutcome } from './InteractionOutcome';
 import { initReservationQuoteModel, ReservationQuote } from './ReservationQuote';
+import { initReservationReplyExemplarModel, ReservationReplyExemplar } from './ReservationReplyExemplar';
+import { initReservationToneProfileModel, ReservationToneProfile } from './ReservationToneProfile';
 import { initAiCostLogModel, AiCostLog } from './AiCostLog';
 import { initUnsubscribeModel, Unsubscribe } from './Unsubscribe';
 import { initDncListModel, DncList } from './DncList';
@@ -78,6 +80,8 @@ export function initModels(sequelize: Sequelize) {
   initEtlPipelineModel(sequelize);
   initAgentRunModel(sequelize);
   initReservationQuoteModel(sequelize);
+  initReservationReplyExemplarModel(sequelize);
+  initReservationToneProfileModel(sequelize);
   initAiCostLogModel(sequelize);
 
   // Associations
@@ -99,7 +103,7 @@ export function initModels(sequelize: Sequelize) {
 }
 
 export {
-  ReservationQuote, AiCostLog,
+  ReservationQuote, ReservationReplyExemplar, ReservationToneProfile, AiCostLog,
   User, SystemSetting, AuditLog, Notification, Lead,
   Campaign, FollowUpSequence, CampaignLead,
   ScheduledEmail, CommunicationLog, InteractionOutcome,

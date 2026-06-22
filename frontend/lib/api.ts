@@ -983,6 +983,11 @@ export interface ReservationQuoteRow {
   quote_total: string | null;
   confidence: string;
   status: 'auto_ready' | 'needs_review' | 'forward' | 'manual';
+  lifecycle?: 'needs_reply' | 'awaiting_customer' | 'booked' | 'closed';
+  ai_draft?: ReservationAiDraft | null;
+  our_reply_at?: string | null;
+  reply_from?: string | null;
+  mailbox?: string | null;
   raw_body: string | null;
   conversation_id?: string | null;
   responded_at?: string | null;
@@ -991,13 +996,33 @@ export interface ReservationQuoteRow {
     quote?: { grand_total?: number; subtotal?: number; lines?: { label: string; amount: number }[]; warnings?: string[]; pricing_mode?: string; service_type?: string; customer_category?: string; market?: string; approvals_needed?: string[] };
     manual_reason?: string;
     source?: 'bookrides' | 'nl';
-    sent?: { at: string; to: string | null };
-    prepared?: { at: string; to: string | null };
+    sent?: { at: string; to: string | null; from?: string | null };
+    prepared?: { at: string; to: string | null; from?: string | null };
   } | null;
 }
 
-export function getReservations(status?: string) {
-  const q = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
+export interface ReservationAiDraft {
+  subject: string;
+  text: string;
+  generated_at: string;
+  model: string;
+  edited: boolean;
+  rubric: { score: number; breakdown: Record<string, boolean> };
+}
+
+export interface ReservationConversationMessage {
+  id: string;
+  from: string | null;
+  at: string | null;
+  direction: 'inbound' | 'outbound';
+  preview: string;
+}
+
+export function getReservations(opts?: { status?: string; lifecycle?: string }) {
+  const p = new URLSearchParams();
+  if (opts?.status && opts.status !== 'all') p.set('status', opts.status);
+  if (opts?.lifecycle && opts.lifecycle !== 'all') p.set('lifecycle', opts.lifecycle);
+  const q = p.toString() ? `?${p.toString()}` : '';
   return request<{ reservations: ReservationQuoteRow[]; total: number }>(`/admin/quotes/reservations${q}`);
 }
 
@@ -1007,8 +1032,28 @@ export function ingestReservations(lookback_hours = 72) {
 }
 
 export function sendReservationQuote(id: number) {
-  return request<{ sent: boolean; dry: boolean; to: string | null; draft: { subject: string; text: string } }>(
+  return request<{ sent: boolean; dry: boolean; to: string | null; from: string | null; draft: { subject: string; text: string } }>(
     `/admin/quotes/reservations/${id}/send`, { method: 'POST' });
+}
+
+export function generateReservationDraft(id: number) {
+  return request<{ draft: ReservationAiDraft; reply_from: string }>(
+    `/admin/quotes/reservations/${id}/draft`, { method: 'POST' });
+}
+
+export function saveReservationDraft(id: number, subject: string, text: string) {
+  return request<{ ai_draft: ReservationAiDraft }>(
+    `/admin/quotes/reservations/${id}/draft`, { method: 'PUT', body: JSON.stringify({ subject, text }) });
+}
+
+export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'booked' | 'closed') {
+  return request<{ id: number; lifecycle: string }>(
+    `/admin/quotes/reservations/${id}/lifecycle`, { method: 'POST', body: JSON.stringify({ lifecycle }) });
+}
+
+export function getReservationConversation(id: number) {
+  return request<{ messages: ReservationConversationMessage[] }>(
+    `/admin/quotes/reservations/${id}/conversation`);
 }
 
 export interface ReservationMetrics {

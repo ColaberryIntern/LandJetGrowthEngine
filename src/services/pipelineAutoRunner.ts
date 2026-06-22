@@ -54,6 +54,8 @@ const STEPPER_INTERVAL_MS = 5 * 60 * 1000;
 const RESERVATIONS_INTERVAL_MS = 10 * 60 * 1000;
 
 const running = { ingest: false, scheduler: false, pulse: false, briefing: false, stepper: false, reservations: false };
+// Counts reservations cron cycles so we re-learn tone profiles ~once a day.
+let reservationsCycle = 0;
 const timers: ReturnType<typeof setInterval>[] = [];
 const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -170,6 +172,20 @@ async function runReservations(): Promise<void> {
     }
     if (r.created > 0 || r.errors > 0) {
       logger.info('pipeline.reservations complete', { duration_ms: Date.now() - start, ...r });
+    }
+    // Keep the voice models fresh: re-mine Sent Items + rebuild tone profiles
+    // roughly once a day (this cron runs every ~10 min). The exemplar corpus
+    // growing is what makes the draft rubric better over time.
+    reservationsCycle++;
+    if (reservationsCycle % 144 === 0) {
+      try {
+        const { learnFromMailboxes } = await import('./reservationLearningService');
+        const boxes = ['ljreservations@landjet.com', ...extra];
+        const sum = await learnFromMailboxes(boxes, 300);
+        logger.info('pipeline.reservations re-learned tone profiles', { summary: sum });
+      } catch (e) {
+        logger.warn('pipeline.reservations learn step failed (non-fatal)', { error: (e as Error).message });
+      }
     }
   } catch (e) {
     logger.error('pipeline.reservations failed (non-fatal)', { error: (e as Error).message });
