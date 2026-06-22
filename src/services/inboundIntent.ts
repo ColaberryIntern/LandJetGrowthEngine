@@ -42,3 +42,28 @@ export function classifyInboundIntent(text: string): InboundIntent {
 export function intentNeedsReply(intent: InboundIntent): boolean {
   return intent !== 'gratitude';
 }
+
+/** The message above the signature/boilerplate (drop sign-off + policy footer). */
+function messageBody(text: string): string {
+  const t = lead(text);
+  const cut = t.search(/\n?\s*(warm regards|best regards|kind regards|best,|regards,|thanks,|thank you,|sincerely|cheers,|reservation team|cancellation policy|payment terms|get in\. get connected|p:\s*8)/i);
+  return (cut > 0 ? t.slice(0, cut) : t).trim();
+}
+
+export type OutboundIntent = 'closing' | 'open';
+
+/**
+ * Classify a reply WE sent. 'closing' = a courtesy that ends the thread with
+ * nothing pending ("Thank you for letting us know"). 'open' = we sent something
+ * the customer must act on (a quote, a question, a confirm-to-book) so the ball
+ * is genuinely in their court. Conservative: defaults to 'open'.
+ */
+export function classifyOutboundIntent(text: string): OutboundIntent {
+  const t = messageBody(text);
+  if (!t) return 'open';
+  // A price, a question, or an explicit call to action means we are waiting on them.
+  if (/\$\s?\d|\?|please (confirm|let us know|advise|review|reply|provide)|let us know if you|would you like|to (confirm|book|proceed|secure)|your (quote|estimate|total) (is|comes|for)|attached (is|you)|we (need|require)|could you|can you (confirm|send|provide)|once you confirm|awaiting your/i.test(t)) return 'open';
+  // A short courtesy / acknowledgment that closes the loop.
+  if (/thank you for (letting us know|the update|reaching|your)|thanks for (letting us know|the update|reaching)|sounds good|you'?re all set|we'?re all set|happy to help|glad to (help|hear)|no problem|safe travels|talk soon|see you (then|soon)|got it,? (thank|thanks)|appreciate the update/i.test(t)) return 'closing';
+  return 'open';
+}

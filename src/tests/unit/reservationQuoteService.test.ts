@@ -147,6 +147,19 @@ describe('decideLifecycleFromThread (lifecycle follows who sent the LAST message
     const d = decideLifecycleFromThread([{ from: C, t: 100, preview: 'thanks in advance!' }], 100, cur);
     expect(d.lifecycle).toBeUndefined(); // already needs_reply
   });
+
+  it('WE send a courtesy close (last message ours) -> completed, not awaiting', () => {
+    const msgs = [{ from: C, t: 100, preview: 'will confer with the group and circle back' }, { from: US, t: 200, preview: 'Brett, Thank you for letting us know. Warm regards, Lorie' }];
+    const d = decideLifecycleFromThread(msgs, 100, cur);
+    expect(d.lifecycle).toBe('completed');
+    expect(d.resolved_at).toBe(200);
+  });
+
+  it('WE send a quote/question (last message ours, open) -> awaiting_customer', () => {
+    const msgs = [{ from: C, t: 100, preview: 'how much?' }, { from: US, t: 200, preview: 'Your quote is $900. Reply to confirm and we will book it.' }];
+    const d = decideLifecycleFromThread(msgs, 100, cur);
+    expect(d.lifecycle).toBe('awaiting_customer');
+  });
 });
 
 describe('autoSendEligible (Trust-Before-Intelligence: only act at/above 0.90)', () => {

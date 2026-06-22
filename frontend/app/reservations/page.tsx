@@ -46,10 +46,21 @@ const LIFECYCLE_FILTERS = [
   { key: 'needs_reply', label: 'Needs reply' },
   { key: 'awaiting_customer', label: 'Awaiting' },
   { key: 'resolved', label: 'Resolved' },
+  { key: 'past_trips', label: 'Past trips' },
   { key: 'not_quote', label: 'Not a quote' },
   { key: 'all', label: 'All' },
   { key: 'deleted', label: 'Deleted' },
 ] as const;
+
+// A resolved reservation stays in Resolved until its trip date passes, then it
+// moves to Past trips (hidden by default, still viewable).
+function tripPassed(r: ReservationQuoteRow): boolean {
+  const ds = r.result?.trip?.date_of_service;
+  const m = ds?.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return false;
+  const end = new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]), 23, 59, 59);
+  return end.getTime() < Date.now();
+}
 
 const POLL_MS = 20000;
 
@@ -383,23 +394,27 @@ export default function ReservationsPage() {
     : listBase
         .filter(r => {
           const lc = lifecycleOf(r);
-          if (filter === 'all') return lc !== 'not_quote';
-          if (filter === 'resolved') return RESOLVED_STATES.includes(lc);
+          if (filter === 'all') return lc !== 'not_quote' && !(RESOLVED_STATES.includes(lc) && tripPassed(r));
+          if (filter === 'resolved') return RESOLVED_STATES.includes(lc) && !tripPassed(r);
+          if (filter === 'past_trips') return RESOLVED_STATES.includes(lc) && tripPassed(r);
           return lc === filter;
         })
-        .sort((a, b) => filter === 'resolved' ? (resolvedAt(b) - resolvedAt(a)) : (customerActivity(b) - customerActivity(a)));
+        .sort((a, b) => (filter === 'resolved' || filter === 'past_trips') ? (resolvedAt(b) - resolvedAt(a)) : (customerActivity(b) - customerActivity(a)));
+  const isResolvedUpcoming = (r: ReservationQuoteRow) => RESOLVED_STATES.includes(lifecycleOf(r)) && !tripPassed(r);
+  const isPastTrip = (r: ReservationQuoteRow) => RESOLVED_STATES.includes(lifecycleOf(r)) && tripPassed(r);
   const stats = {
     needs_reply: statBase.filter(r => lifecycleOf(r) === 'needs_reply').length,
     awaiting_customer: statBase.filter(r => lifecycleOf(r) === 'awaiting_customer').length,
-    resolved: statBase.filter(r => RESOLVED_STATES.includes(lifecycleOf(r))).length,
+    resolved: statBase.filter(isResolvedUpcoming).length,
     pipelineValue: statBase.filter(r => !RESOLVED_STATES.includes(lifecycleOf(r)) && lifecycleOf(r) !== 'not_quote').reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
   };
   const counts: Record<string, number> = {
     needs_reply: stats.needs_reply,
     awaiting_customer: stats.awaiting_customer,
     resolved: stats.resolved,
+    past_trips: statBase.filter(isPastTrip).length,
     not_quote: statBase.filter(r => lifecycleOf(r) === 'not_quote').length,
-    all: statBase.filter(r => lifecycleOf(r) !== 'not_quote').length,
+    all: statBase.filter(r => lifecycleOf(r) !== 'not_quote' && !isPastTrip(r)).length,
     deleted: deletedRows.length,
   };
 

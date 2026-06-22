@@ -20,7 +20,7 @@ import { logger } from '../config/logger';
 import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '../models/ReservationQuote';
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
-import { classifyInboundIntent, InboundIntent } from './inboundIntent';
+import { classifyInboundIntent, classifyOutboundIntent, InboundIntent } from './inboundIntent';
 import { isNonQuoteEmail, isPostBookingEmail } from './reservationClassify';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
@@ -176,9 +176,15 @@ export function decideLifecycleFromThread(
   const intent: InboundIntent = latestIsOurs ? 'other' : classifyInboundIntent(latest.preview || '');
 
   let newLifecycle: ReservationLifecycle;
-  if (latestIsOurs) newLifecycle = 'awaiting_customer';
-  else if (intent === 'gratitude' && lastOurs) newLifecycle = 'completed'; // customer signed off after we handled it
-  else newLifecycle = 'needs_reply';
+  if (latestIsOurs) {
+    // We sent the last message. If it was a courtesy close with nothing pending,
+    // there is no more work to do -> resolved. Otherwise the ball is in their court.
+    newLifecycle = classifyOutboundIntent(latest.preview || '') === 'closing' ? 'completed' : 'awaiting_customer';
+  } else if (intent === 'gratitude' && lastOurs) {
+    newLifecycle = 'completed'; // customer signed off after we handled it
+  } else {
+    newLifecycle = 'needs_reply';
+  }
 
   const out: LifecycleDecision = {};
   if (current.lifecycle !== newLifecycle) out.lifecycle = newLifecycle;

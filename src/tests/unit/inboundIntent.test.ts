@@ -1,4 +1,4 @@
-import { classifyInboundIntent, intentNeedsReply } from '../../services/inboundIntent';
+import { classifyInboundIntent, intentNeedsReply, classifyOutboundIntent } from '../../services/inboundIntent';
 
 describe('classifyInboundIntent', () => {
   it('treats a sign-off / thanks as gratitude (no reply needed)', () => {
@@ -28,5 +28,19 @@ describe('classifyInboundIntent', () => {
 
   it('ignores a quoted signature/history tail', () => {
     expect(classifyInboundIntent('Sounds great, thanks!\n\nFrom: LJ_Reservations\nSent: Monday\nCan you confirm the time?')).toBe('gratitude');
+  });
+});
+
+describe('classifyOutboundIntent (did WE close the thread or leave it open?)', () => {
+  it('a courtesy close with nothing pending -> closing', () => {
+    // The exact Lorie message, signature + policy boilerplate included.
+    const msg = 'Brett,\n\nThank you for letting us know.\n\nWarm regards,\nLorie\nReservation Team\nCancellation Policy: ... a $200 cancellation fee ... 3% convenience fee.';
+    expect(classifyOutboundIntent(msg)).toBe('closing');
+    expect(classifyOutboundIntent('Sounds good, you are all set. Safe travels!')).toBe('closing');
+  });
+  it('a quote, a question, or a confirm-to-book -> open (we are waiting on them)', () => {
+    expect(classifyOutboundIntent('Your quote for the trip is $1,114.98. Reply to confirm and we will book it.')).toBe('open');
+    expect(classifyOutboundIntent('Could you confirm the pickup time?')).toBe('open');
+    expect(classifyOutboundIntent('To proceed, please let us know if you would like to book.')).toBe('open');
   });
 });
