@@ -275,7 +275,11 @@ export async function processInboundEmailNL(emailBody: string, senderEmail?: str
         return priceTripResult(merged, emailBody, senderEmail, 'nl');
       }
     }
-    return base; // could not complete the route -> leave for a human
+    // Could not complete a real route. The rigid parser likely hallucinated a
+    // partial trip out of a free-form concierge thread (already-quoted email,
+    // flight details, etc.). Do NOT present a fabricated price -- route to a
+    // human as manual instead.
+    return { mode: 'manual', trip: base.trip, manual_reason: 'incomplete_parse', source: 'bookrides' };
   }
 
   // Only NL-fall-back when the email simply was not BookRides format. A real
