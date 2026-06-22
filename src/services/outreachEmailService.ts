@@ -14,6 +14,7 @@ import { CommunicationLog } from '../models/CommunicationLog';
 import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { categoryMatches } from './leadClassification';
+import { validateEmail } from './emailValidationService';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
@@ -297,6 +298,29 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
       );
       return { success: false, error, from: fromEmail };
     }
+  }
+
+  // Email deliverability guard (Ryan WhatsApp 2026-06-22: "have an email
+  // validation tool make sure the emails are legitimate before they get sent
+  // anything"). Same fail-closed philosophy as the sender/category guards: a
+  // malformed address or a domain with no mail exchanger is never transmitted.
+  // Transient DNS failures fail OPEN (send proceeds, warning logged) so a flaky
+  // resolver cannot silently halt the whole queue; the post-send bounce
+  // processor remains the backstop for mailbox-level dead addresses (e.g. a
+  // person who left the job), which DNS-level validation cannot detect.
+  const emailCheck = await validateEmail(input.to);
+  if (!emailCheck.valid) {
+    const error = `Email validation failed (${emailCheck.reason}): ${input.to}`;
+    logger.warn('Outreach send blocked by email validation guard', {
+      to: input.to, lead_id: input.lead_id, reason: emailCheck.reason,
+    });
+    await writeCommLog(input, fromEmail, 'failed', null, { error, email_guard: true, reason: emailCheck.reason }).catch(e =>
+      logger.warn('comm log write failed (email_guard)', { err: e.message }),
+    );
+    return { success: false, error, from: fromEmail };
+  }
+  if (emailCheck.transient) {
+    logger.warn('Email MX lookup unavailable, proceeding (fail-open)', { to: input.to, lead_id: input.lead_id });
   }
 
   if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_TENANT_ID) {
