@@ -79,15 +79,29 @@ export function parseBookRidesEmail(body: string): BookRidesTrip | null {
   };
 
   for (const [key, pattern] of Object.entries(FIELD_PATTERNS) as [keyof typeof FIELD_PATTERNS, RegExp][]) {
+    if (key === 'pickup_address' || key === 'dropoff_address') {
+      // A reply thread can contain the same Pickup/Dropoff block several times
+      // (the live message plus quoted copies), and a plain .match() returns the
+      // FIRST, which may be a truncated quote. Scan ALL occurrences and keep the
+      // most complete one (a real street address has a "City, ST ZIP"). This is
+      // deterministic, so the same email always prices the same way.
+      const globalRe = new RegExp(pattern.source, 'ig');
+      let best: string | undefined;
+      let bestScore = -1;
+      for (const m of normalized.matchAll(globalRe)) {
+        const addr = m[1].replace(/\n+/g, ', ').replace(/\s{2,}/g, ' ').trim();
+        const score = (/[A-Z]{2}\s*\d{5}/.test(addr) ? 1000 : 0) + addr.length;
+        if (score > bestScore) { best = addr; bestScore = score; }
+      }
+      if (best) (trip as any)[key] = best;
+      continue;
+    }
+
     const match = normalized.match(pattern);
     if (!match) continue;
     const value = match[1].trim();
-
     if (key === 'passengers' || key === 'luggage') {
       (trip as any)[key] = parseInt(value, 10);
-    } else if (key === 'pickup_address' || key === 'dropoff_address') {
-      // Collapse multi-line addresses into a single line for the pricing engine
-      (trip as any)[key] = value.replace(/\n+/g, ', ').replace(/\s{2,}/g, ' ').trim();
     } else {
       (trip as any)[key] = value;
     }

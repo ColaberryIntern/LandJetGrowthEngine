@@ -138,4 +138,28 @@ Dropoff
       expect(a?.dropoff_address).toBe(b?.dropoff_address);
     });
   });
+
+  describe('Reply threads with repeated/quoted blocks (deterministic best-match)', () => {
+    it('picks the most complete Pickup/Dropoff (with City, ST ZIP) over a truncated quoted copy', () => {
+      // Simulates a "Re:" thread: a truncated quote appears first, the full
+      // address block appears lower. The parser must choose the complete one.
+      const thread = `Re: LandJet 6/29
+
+Reservation #: 3500900
+Pickup
+Davenport
+Dropoff
+O'Hare
+
+----- quoted -----
+Reservation #: 3500900
+Pickup
+6110 Hillandale Rd, Davenport, IA 52806
+Dropoff
+Chicago O'Hare International Airport, Chicago, IL 60666`;
+      const trip = parseBookRidesEmail(thread);
+      expect(trip?.pickup_address).toBe('6110 Hillandale Rd, Davenport, IA 52806');
+      expect(trip?.dropoff_address).toContain('IL 60666');
+    });
+  });
 });
