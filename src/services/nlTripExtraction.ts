@@ -40,7 +40,11 @@ export async function extractTripFromText(body: string): Promise<ExtractedTrip |
           {
             role: 'system',
             content:
-              'You extract ground-transportation booking details from a free-form email. ' +
+              'You extract ground-transportation booking details from a free-form email, which may be an ENTIRE ' +
+              'email THREAD with several messages and quoted history. Consider the WHOLE conversation, not just the ' +
+              'latest message: the pickup, dropoff, date, and passenger count may each appear in different messages ' +
+              '(e.g. a pickup given first, a dropoff added in a later reply). Assemble the most complete and most ' +
+              'RECENT trip from everything provided; if a detail was revised later in the thread, prefer the newer value. ' +
               'Return ONLY JSON with these keys: is_booking_request (boolean), passenger_name, pickup_address, ' +
               'dropoff_address, service_type ("one_way"|"round_trip"|"hourly"|null), date_of_service, passengers (integer|null), ' +
               'vehicle, notes. Set is_booking_request=true whenever the sender wants a price, quote, estimate, or booking ' +
@@ -50,7 +54,7 @@ export async function extractTripFromText(body: string): Promise<ExtractedTrip |
               'general question with no origin/destination). Use null for anything you cannot determine. ' +
               'Do NOT invent addresses or dates.',
           },
-          { role: 'user', content: text.slice(0, 4000) },
+          { role: 'user', content: text.slice(0, 14000) },
         ],
         temperature: 0,
         max_tokens: 300,

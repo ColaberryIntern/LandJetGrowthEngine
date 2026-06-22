@@ -15,7 +15,7 @@
  */
 import { logger } from '../config/logger';
 import { ReservationQuote, ReservationAiDraft } from '../models/ReservationQuote';
-import { composeQuoteReply } from './reservationQuoteService';
+import { composeQuoteReply, fetchConversationText } from './reservationQuoteService';
 import { getToneProfile, getTopExemplars } from './reservationLearningService';
 import { recordLlmUsage } from './aiCost';
 
@@ -117,6 +117,12 @@ export async function generateDraft(rq: ReservationQuote): Promise<ReservationAi
         ? '\n\nReal past replies from this account to learn the voice from (do not copy facts, only the style):\n' +
           exemplars.map((e, i) => `--- example ${i + 1} ---\n${e.reply_excerpt.slice(0, 500)}`).join('\n\n')
         : '';
+      // Pull the whole conversation so the reply is written in context of
+      // everything discussed, not just the latest message.
+      const history = rq.conversation_id ? await fetchConversationText(rq.mailbox, rq.conversation_id, 6000) : null;
+      const historyBlock = history
+        ? `\n\nFull conversation so far (oldest first) -- reply in context of all of it, do not repeat what was already settled:\n${history}`
+        : '';
       const factBlock =
         `Customer first name: ${facts.firstName}\n` +
         `Route: ${facts.route || '(not provided)'}\n` +
@@ -124,7 +130,8 @@ export async function generateDraft(rq: ReservationQuote): Promise<ReservationAi
         `Date: ${facts.date || '(not provided)'}\n` +
         `Passengers: ${facts.passengers ?? '(not provided)'}\n` +
         `Quoted total: ${facts.total || '(no price yet - acknowledge and say a quote will follow)'}\n` +
-        `Original subject: ${rq.subject || '(none)'}`;
+        `Original subject: ${rq.subject || '(none)'}` +
+        historyBlock;
 
       const resp = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',

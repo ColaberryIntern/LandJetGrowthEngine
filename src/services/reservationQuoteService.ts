@@ -97,6 +97,35 @@ export async function fetchReservationEmails(
 }
 
 /**
+ * Concatenate the FULL text of every message in a conversation (oldest first)
+ * so trip details that are spread across the thread -- a pickup given in the
+ * first email, a dropoff added two replies later -- are all visible to the
+ * extractor. Capped to keep the prompt bounded. Fail-soft: returns null.
+ */
+export async function fetchConversationText(mailbox: string, conversationId: string, maxChars = 14000): Promise<string | null> {
+  try {
+    const token = await getGraphToken();
+    const filter = encodeURIComponent(`conversationId eq '${conversationId}'`);
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime,body&$orderby=receivedDateTime asc&$top=30`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const data = (await r.json()) as { value?: any[] };
+    const parts: string[] = [];
+    for (const m of data.value || []) {
+      const who = m.from?.emailAddress?.address || 'unknown';
+      const body = m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || '');
+      if (body.trim()) parts.push(`From ${who} (${m.receivedDateTime || ''}):\n${body.trim()}`);
+    }
+    if (parts.length === 0) return null;
+    const joined = parts.join('\n\n----\n\n');
+    return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
+  } catch (e) {
+    logger.warn('fetchConversationText failed (non-fatal)', { mailbox, error: (e as Error).message });
+    return null;
+  }
+}
+
+/**
  * Detect customer replies: for recent priced rows whose thread we know, check
  * the conversation for a message from the customer that is newer than the
  * original reservation email, and stamp responded_at. Best-effort, fail-soft.
@@ -291,6 +320,20 @@ export async function ingestReservationQuotes(opts: {
       if (existing) { counts.skipped_existing++; continue; }
 
       let result = await processInboundEmailNL(e.body, e.from || undefined);
+
+      // The latest message alone may not carry a full route (the customer gave
+      // the pickup in an earlier email, the dropoff in a later one). If we could
+      // not assemble both addresses and we know the thread, re-run extraction on
+      // the ENTIRE conversation history. Only adopt the retry if it actually
+      // produced a routable trip, so this can only improve a result.
+      const hasRoute = Boolean(result.trip?.pickup_address && result.trip?.dropoff_address);
+      if (!hasRoute && e.conversationId) {
+        const threadText = await fetchConversationText(mailbox, e.conversationId);
+        if (threadText && threadText.length > (e.body || '').length) {
+          const retry = await processInboundEmailNL(threadText, e.from || undefined);
+          if (retry.trip?.pickup_address && retry.trip?.dropoff_address) result = retry;
+        }
+      }
       result = await enrichWithDistance(result, e.body, e.from || undefined);
 
       // On a general inbox, only persist genuine trip/quote requests so the
@@ -332,6 +375,52 @@ export async function ingestReservationQuotes(opts: {
 
   logger.info('reservation quote ingest complete', { mailbox, ...counts });
   return counts;
+}
+
+/**
+ * Backfill: re-run extraction on the FULL conversation history for existing rows
+ * that never got a routable trip (so their map was blank). Only updates a row if
+ * the full-thread pass actually produces both addresses, so it cannot regress a
+ * good row. Idempotent and safe to re-run.
+ */
+export async function reprocessMissingRoutes(opts: { limit?: number } = {}): Promise<{ scanned: number; updated: number; skipped: number }> {
+  const { Op } = await import('sequelize');
+  const limit = opts.limit ?? 200;
+  const rows = await ReservationQuote.findAll({
+    where: { conversation_id: { [Op.ne]: null } } as any,
+    order: [['received_at', 'DESC']],
+    limit,
+  });
+  let updated = 0, skipped = 0, scanned = 0;
+  for (const rq of rows) {
+    scanned++;
+    try {
+      const r = (rq.result || {}) as { trip?: any };
+      const hasRoute = Boolean(r.trip?.pickup_address && r.trip?.dropoff_address);
+      if (hasRoute) { skipped++; continue; }
+
+      const threadText = await fetchConversationText(rq.mailbox, rq.conversation_id as string);
+      if (!threadText) { skipped++; continue; }
+
+      let result = await processInboundEmailNL(threadText, rq.from_email || undefined);
+      if (!(result.trip?.pickup_address && result.trip?.dropoff_address)) { skipped++; continue; }
+      result = await enrichWithDistance(result, threadText, rq.from_email || undefined);
+
+      const { confidence, status } = deriveConfidenceAndStatus(result);
+      await rq.update({
+        market: result.market || rq.market,
+        quote_total: result.quote ? result.quote.grand_total : rq.quote_total,
+        confidence, status,
+        result: result as unknown as Record<string, unknown>,
+      } as any);
+      updated++;
+    } catch (e) {
+      skipped++;
+      logger.warn('reprocessMissingRoutes skipped one row (non-fatal)', { id: rq.id, error: (e as Error).message });
+    }
+  }
+  logger.info('reprocessMissingRoutes complete', { scanned, updated, skipped });
+  return { scanned, updated, skipped };
 }
 
 export interface ConversationMessage {
