@@ -47,6 +47,12 @@ Last updated: 2026-06-19
   - Verification: backend + frontend tsc --noEmit clean (exit 0). (Deploy + page verification this session.)
   - Notes: map uses the keyless maps.google.com saddr/daddr embed (no GOOGLE_MAPS_API_KEY in prod yet, #10015474993) so it is approximate (kinda-sorta route). Reply detection matches the customer from-address newer than the original email; forwarded/notification emails (non-customer from) will not flag.
 
+- [x] **Quote engine: NL-augment incomplete BookRides parses (unlocks real reservation emails)**
+  - Date: 2026-06-22
+  - What changed: Diagnosed that the live ljreservations@ emails are mostly FREE-FORM concierge threads, not structured BookRides quote-requests -- the rigid parser extracted a pickup but no dropoff, so distance could not compute. [inboundQuoteEngine.processInboundEmailNL](src/services/inboundQuoteEngine.ts) now detects an incomplete priced BookRides parse (missing pickup or dropoff), calls the LLM extractor to fill the missing address, and re-prices (source nl -> stays human-reviewed). With both addresses present, the existing Google Distance enrichment then applies real road miles. Set GOOGLE_MAPS_API_KEY in prod (verified Distance Matrix returns real miles, e.g. 399 mi).
+  - Verification: tsc --noEmit clean (exit 0); jest reservationQuoteService 13/13. Maps key live + confirmed in-app (roadMilesBetween -> 399.4).
+  - Notes: AI-filled addresses are flagged source nl so they never auto-send (TBI). Cost of the extra extraction call is now tracked (ai_cost_log).
+
 - [x] **TBI remediation: LLM cost observability (G4) + auditability & tracing (G5/G6) + Google distance wiring (G16)**
   - Date: 2026-06-20
   - What changed: (1) COST: new [AiCostLog](src/models/AiCostLog.ts) + [aiCost.ts](src/services/aiCost.ts) recordLlmUsage/getCostSummary (USD from token usage, per-model rates); wired into 5 LLM call sites (ai_message, email_draft, linkedin_draft, nl_extraction, company_location). (2) TRACE: [requestContext.ts](src/middleware/requestContext.ts) AsyncLocalStorage carries traceId+userId (app middleware + auth capture). (3) AUDIT: auditAction() in [auditLogService.ts](src/services/auditLogService.ts) auto-fills userId+traceId; wired email.send, lead.route, lead.advance (previously unaudited). (4) DISTANCE: [googleDistance.ts](src/services/googleDistance.ts) roadMilesBetween (gated on GOOGLE_MAPS_API_KEY, fail-soft); reservation ingest re-prices distance trips with real miles, raising confidence toward the 0.90 auto-send line. Trust dashboard cost/tracing panels now show real data.

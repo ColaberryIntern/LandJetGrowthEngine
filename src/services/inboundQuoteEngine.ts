@@ -254,6 +254,30 @@ export function priceTripResult(
  */
 export async function processInboundEmailNL(emailBody: string, senderEmail?: string): Promise<InboundProcessResult> {
   const base = processInboundEmail(emailBody, senderEmail);
+
+  // INCOMPLETE BookRides parse: the rigid parser found a trip but is missing a
+  // routable pickup or dropoff (common when the "email" is really a free-form
+  // concierge thread, not a structured BookRides quote-request). Fall back to
+  // the LLM to fill the missing address, then re-price so distance can apply.
+  // Marked source 'nl' so the AI-filled trip stays human-reviewed.
+  if (base.mode === 'priced' && base.trip && (!base.trip.pickup_address || !base.trip.dropoff_address)) {
+    const filled = await extractTripFromText(emailBody);
+    if (filled && (filled.pickup_address || filled.dropoff_address)) {
+      const merged: BookRidesTrip = {
+        ...base.trip,
+        pickup_address: base.trip.pickup_address || filled.pickup_address || undefined,
+        dropoff_address: base.trip.dropoff_address || filled.dropoff_address || undefined,
+        service_type: base.trip.service_type || filled.service_type || undefined,
+        passengers: base.trip.passengers ?? filled.passengers ?? undefined,
+        passenger_name: base.trip.passenger_name || filled.passenger_name || 'Customer',
+      };
+      if (merged.pickup_address && merged.dropoff_address) {
+        return priceTripResult(merged, emailBody, senderEmail, 'nl');
+      }
+    }
+    return base; // could not complete the route -> leave for a human
+  }
+
   // Only NL-fall-back when the email simply was not BookRides format. A real
   // BookRides email that failed to parse/price should stay as-is for a human.
   if (base.mode !== 'manual' || (base.manual_reason && base.manual_reason !== 'not_bookrides')) {
