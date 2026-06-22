@@ -567,6 +567,27 @@ router.post('/reservations/:id/lifecycle', authorize('campaigns:write'), async (
   } catch (error) { next(error); }
 });
 
+// Manually merge reservations the operator judges to be the same booking, keeping one.
+router.post('/reservations/merge', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { mergeReservations } = await import('../../services/reservationQuoteService');
+    const primaryId = Number(req.body?.primary_id);
+    const secondaryIds = Array.isArray(req.body?.secondary_ids) ? req.body.secondary_ids.map(Number).filter(Boolean) : [];
+    if (!primaryId || secondaryIds.length === 0) return res.status(400).json({ error: 'primary_id and secondary_ids are required' });
+    const result = await mergeReservations(primaryId, secondaryIds);
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Undo a merge.
+router.post('/reservations/:id/unmerge', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { unmergeReservation } = await import('../../services/reservationQuoteService');
+    const rq = await unmergeReservation(Number(req.params.id));
+    res.json({ id: rq.id, merged_into: rq.merged_into, lifecycle: rq.lifecycle });
+  } catch (error) { next(error); }
+});
+
 // Full thread for the conversation view (multi-message back-and-forth).
 router.get('/reservations/:id/conversation', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {

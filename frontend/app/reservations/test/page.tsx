@@ -197,7 +197,7 @@ export default function QuoteTesterPage() {
     }
   }
 
-  const fmt = (n: number) => '$' + n.toFixed(2);
+  const fmt = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const bandClasses = {
     green: 'bg-emerald-50 border-emerald-200 text-emerald-800',

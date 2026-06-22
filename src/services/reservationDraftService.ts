@@ -38,7 +38,7 @@ function extractFacts(rq: ReservationQuote): DraftFacts {
   return {
     firstName: (trip.passenger_name || '').split(' ')[0] || 'there',
     route: [trip.pickup_address, trip.dropoff_address].filter(Boolean).join(' to ') || null,
-    total: q.grand_total != null ? `$${Number(q.grand_total).toFixed(2)}` : null,
+    total: q.grand_total != null ? `$${Number(q.grand_total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null,
     service: q.service_type || trip.service_type || null,
     date: trip.date_of_service || null,
     passengers: trip.passengers ?? null,

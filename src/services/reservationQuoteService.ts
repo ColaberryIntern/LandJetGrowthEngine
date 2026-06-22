@@ -519,7 +519,7 @@ export function composeQuoteReply(rq: ReservationQuote): { subject: string; text
   const r = (rq.result || {}) as { trip?: any; quote?: any };
   const trip = r.trip || {};
   const q = r.quote || {};
-  const total = q.grand_total != null ? `$${Number(q.grand_total).toFixed(2)}` : 'to be confirmed';
+  const total = q.grand_total != null ? `$${Number(q.grand_total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'to be confirmed';
   const name = (trip.passenger_name || '').split(' ')[0] || 'there';
   const route = [trip.pickup_address, trip.dropoff_address].filter(Boolean).join(' to ');
   const subject = rq.subject ? (/^re:/i.test(rq.subject) ? rq.subject : `Re: ${rq.subject}`) : 'Your LandJet quote';
@@ -580,6 +580,37 @@ export async function setReservationLifecycle(id: number, lifecycle: Reservation
   if (!rq) throw new Error('Reservation quote not found');
   await rq.update({ lifecycle } as any);
   logger.info('reservation lifecycle updated', { id, lifecycle });
+  return rq;
+}
+
+/**
+ * Manually merge reservations: the operator decides several rows are the same
+ * person/booking and picks one to keep. The others get a merged_into pointer and
+ * are closed so they leave the active queue (the kept row "takes over"). The
+ * pointer lets the UI badge them and an unmerge restore them. Idempotent.
+ */
+export async function mergeReservations(primaryId: number, secondaryIds: number[]): Promise<{ primary: number; merged: number[] }> {
+  const primary = await ReservationQuote.findByPk(primaryId);
+  if (!primary) throw new Error('Primary reservation not found');
+  if (primary.merged_into) throw new Error('Cannot merge into a row that is itself merged');
+  const merged: number[] = [];
+  for (const id of secondaryIds) {
+    if (id === primaryId) continue;
+    const rq = await ReservationQuote.findByPk(id);
+    if (!rq) continue;
+    await rq.update({ merged_into: primaryId, lifecycle: 'closed' } as any);
+    merged.push(id);
+  }
+  logger.info('reservations merged', { primaryId, merged });
+  return { primary: primaryId, merged };
+}
+
+/** Undo a merge: detach the row and return it to the active queue. */
+export async function unmergeReservation(id: number): Promise<ReservationQuote> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) throw new Error('Reservation quote not found');
+  await rq.update({ merged_into: null, lifecycle: 'needs_reply' } as any);
+  logger.info('reservation unmerged', { id });
   return rq;
 }
 

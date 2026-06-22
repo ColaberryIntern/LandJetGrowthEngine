@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   getReservations, ingestReservations, sendReservationQuote,
   generateReservationDraft, saveReservationDraft, setReservationLifecycle,
-  getReservationConversation,
+  getReservationConversation, mergeReservations, unmergeReservation,
   type ReservationQuoteRow, type ReservationConversationMessage,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
@@ -51,7 +51,7 @@ function timeAgo(s?: string | null): string {
 function money(v: string | number | null | undefined): string {
   if (v == null) return '--';
   const n = typeof v === 'string' ? parseFloat(v) : v;
-  return Number.isFinite(n) ? `$${n.toFixed(2)}` : '--';
+  return Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
 }
 
 function mapSrc(pickup?: string, dropoff?: string): string | null {
@@ -185,6 +185,11 @@ export default function ReservationsPage() {
   const [convs, setConvs] = useState<Record<number, ReservationConversationMessage[]>>({});
   const editingRef = useRef(false);
 
+  // Manual merge mode: operator selects same-booking rows and picks one to keep.
+  const [mergeMode, setMergeMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [primaryPick, setPrimaryPick] = useState<number | null>(null);
+
   const load = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
@@ -212,6 +217,27 @@ export default function ReservationsPage() {
     try { await ingestReservations(168); await load(false); }
     catch (e) { setError((e as Error).message); }
     finally { setRefreshing(false); }
+  }
+
+  function exitMerge() { setMergeMode(false); setSelectedIds([]); setPrimaryPick(null); }
+  function toggleSelect(id: number) {
+    setSelectedIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      setPrimaryPick(p => (next.length ? (p && next.includes(p) ? p : next[0]) : null));
+      return next;
+    });
+  }
+  async function handleMerge() {
+    if (!primaryPick || selectedIds.length < 2) return;
+    const secondaries = selectedIds.filter(id => id !== primaryPick);
+    try { await mergeReservations(primaryPick, secondaries); exitMerge(); await load(false); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function handleUnmerge(id: number) {
+    setBusyFor(id, 'Unmerging...');
+    try { await unmergeReservation(id); await load(false); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusyFor(id, null); }
   }
 
   function setBusyFor(id: number, label: string | null) {
@@ -260,15 +286,24 @@ export default function ReservationsPage() {
     finally { setBusyFor(id, null); }
   }
 
-  // Duplicate detection across the full set. Unique = canonical + singletons.
+  // Duplicate detection + manual merges across the full set. A row is "collapsed"
+  // (hidden under the canonical) if it is an auto-duplicate OR was merged into
+  // another row by the operator. Unique = everything still standing on its own.
   const dupMap = buildDupMap(rows);
-  const dupTotal = rows.filter(r => dupMap.get(r.id)?.isDup).length;
-  const uniqueRows = rows.filter(r => !dupMap.get(r.id)?.isDup);
+  const mergedChildren = new Map<number, number[]>();
+  for (const r of rows) {
+    if (r.merged_into) (mergedChildren.get(r.merged_into) || mergedChildren.set(r.merged_into, []).get(r.merged_into)!).push(r.id);
+  }
+  const isCollapsed = (r: ReservationQuoteRow) => r.merged_into != null || !!dupMap.get(r.id)?.isDup;
+  const dupTotal = rows.filter(isCollapsed).length;
+  const uniqueRows = rows.filter(r => !isCollapsed(r));
 
   // Stats and tab counts reflect UNIQUE requests, so duplicates never inflate the
   // workload. The list hides duplicates by default (toggle to reveal, badged).
   const statBase = uniqueRows;
-  const listBase = hideDuplicates ? uniqueRows : rows;
+  // In merge mode always show the active (uncollapsed) rows so the operator can
+  // select among them; otherwise honor the hide-grouped toggle.
+  const listBase = (mergeMode || hideDuplicates) ? uniqueRows : rows;
   // Sort by most recent CUSTOMER activity: their last reply, else when the
   // request first came in. So a thread the customer just answered jumps to the top.
   const customerActivity = (r: ReservationQuoteRow) => Math.max(
@@ -350,14 +385,52 @@ export default function ReservationsPage() {
             {f.label} ({counts[f.key] ?? 0})
           </button>
         ))}
-        {dupTotal > 0 && (
-          <button onClick={() => setHideDuplicates(v => !v)}
-            className={`ml-auto rounded-full px-3 py-1 text-xs font-medium ${hideDuplicates ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            title="BookRides can send the same request more than once; copies are grouped under one row.">
-            {hideDuplicates ? `${dupTotal} duplicate${dupTotal === 1 ? '' : 's'} hidden` : 'Hide duplicates'}
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {mergeMode ? (
+            <button onClick={exitMerge} className="rounded-full bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300">Cancel merge</button>
+          ) : (
+            <button onClick={() => setMergeMode(true)} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 hover:bg-violet-200"
+              title="Combine rows you know are the same booking and pick one to keep.">
+              &#128279; Merge
+            </button>
+          )}
+          {dupTotal > 0 && (
+            <button onClick={() => setHideDuplicates(v => !v)}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${hideDuplicates ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              title="Duplicate BookRides emails and manually merged rows are grouped under one row.">
+              {hideDuplicates ? `${dupTotal} hidden` : 'Hide grouped'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {mergeMode && (
+        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm">
+          <div className="font-medium text-violet-900">Merge mode</div>
+          <div className="text-xs text-violet-700 mt-0.5">Click rows that are the same booking, then choose which one to keep. The others are absorbed into it and leave the queue (you can unmerge later).</div>
+          {selectedIds.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {selectedIds.map(id => {
+                const row = rows.find(r => r.id === id);
+                return (
+                  <label key={id} className="flex items-center gap-2 text-xs text-gray-700">
+                    <input type="radio" name="primary" checked={primaryPick === id} onChange={() => setPrimaryPick(id)} />
+                    <span className="font-medium">Keep #{id}</span>
+                    <span className="truncate text-gray-500">{row?.subject || ''} · {money(row?.quote_total)}</span>
+                  </label>
+                );
+              })}
+              <div className="mt-2 flex items-center gap-2">
+                <button onClick={handleMerge} disabled={selectedIds.length < 2 || !primaryPick}
+                  className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50">
+                  Merge {selectedIds.length} into #{primaryPick}
+                </button>
+                <span className="text-xs text-violet-600">{selectedIds.length < 2 ? 'Select at least 2 rows' : `Keeping #${primaryPick}, absorbing ${selectedIds.length - 1} other${selectedIds.length - 1 === 1 ? '' : 's'}`}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <div className="mt-4 rounded-md bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
 
@@ -387,19 +460,32 @@ export default function ReservationsPage() {
             const conv = convs[r.id];
             const actionBusy = busy[r.id];
             const dup = dupMap.get(r.id);
+            const mergedKids = mergedChildren.get(r.id)?.length || 0;
+            const isMerged = r.merged_into != null;
+            const selected = selectedIds.includes(r.id);
 
             return (
-              <div key={r.id} className={`overflow-hidden rounded-lg border ${dup?.isDup ? 'border-dashed border-amber-300 bg-amber-50/30 opacity-80' : lcMeta.card}`}>
+              <div key={r.id} className={`overflow-hidden rounded-lg border ${selected ? 'border-violet-400 ring-2 ring-violet-200' : (dup?.isDup || isMerged) ? 'border-dashed border-amber-300 bg-amber-50/30 opacity-80' : lcMeta.card}`}>
                 <div className="flex items-stretch">
-                  <div className={`w-1.5 shrink-0 ${dup?.isDup ? 'bg-amber-300' : lcMeta.bar}`} />
+                  <div className={`w-1.5 shrink-0 ${(dup?.isDup || isMerged) ? 'bg-amber-300' : lcMeta.bar}`} />
+                  {mergeMode && (
+                    <button onClick={() => toggleSelect(r.id)} className="flex items-center px-3" title="Select for merge">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded border ${selected ? 'border-violet-600 bg-violet-600 text-white' : 'border-gray-300 bg-white'}`}>{selected ? '✓' : ''}</span>
+                    </button>
+                  )}
                   <div className="flex min-w-0 flex-1 items-stretch gap-3 px-4 py-3">
-                    <button onClick={() => setOpenId(open ? null : r.id)} className="min-w-0 flex-1 text-left">
+                    <button onClick={() => mergeMode ? toggleSelect(r.id) : setOpenId(open ? null : r.id)} className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {dup?.isDup
+                        {isMerged
+                          ? <span className="rounded-full bg-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-900">&#128279; Merged into #{r.merged_into}</span>
+                          : dup?.isDup
                           ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">&#128203; Duplicate of #{dup.canonId}</span>
                           : <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${lcMeta.chip}`}>{lcMeta.label}</span>}
                         {dup && !dup.isDup && dup.count > 1 && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="The same request arrived more than once; copies are grouped here.">{dup.count - 1} duplicate{dup.count - 1 === 1 ? '' : 's'}</span>
+                        )}
+                        {mergedKids > 0 && (
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800" title="Other rows were merged into this one.">{mergedKids} merged</span>
                         )}
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                         {appt && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${appt.cls}`}>{appt.text}</span>}
@@ -420,9 +506,9 @@ export default function ReservationsPage() {
                       </div>
                     </button>
                     {route && <iframe src={route} title={`route-${r.id}`} loading="lazy" className="hidden sm:block w-44 h-24 shrink-0 rounded border border-gray-200" />}
-                    <button onClick={() => setOpenId(open ? null : r.id)} className="text-right shrink-0 self-center">
+                    <button onClick={() => mergeMode ? toggleSelect(r.id) : setOpenId(open ? null : r.id)} className="text-right shrink-0 self-center">
                       <div className="text-lg font-semibold text-gray-900">{money(r.quote_total)}</div>
-                      <div className="text-xs text-gray-400">{open ? 'Hide' : 'Open'}</div>
+                      <div className="text-xs text-gray-400">{mergeMode ? (selected ? 'Selected' : 'Select') : (open ? 'Hide' : 'Open')}</div>
                     </button>
                   </div>
                 </div>
@@ -543,14 +629,25 @@ export default function ReservationsPage() {
 
                     {/* Lifecycle controls */}
                     <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
-                      <span className="text-xs text-gray-400">Mark:</span>
-                      <button onClick={() => handleLifecycle(r.id, 'booked')} disabled={!!actionBusy}
-                        className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">&#9989; Booked</button>
-                      <button onClick={() => handleLifecycle(r.id, 'closed')} disabled={!!actionBusy}
-                        className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200">Closed (no deal)</button>
-                      {(lc === 'booked' || lc === 'closed') && (
-                        <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
-                          className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Reopen</button>
+                      {isMerged ? (
+                        <>
+                          <span className="text-xs text-violet-700">This request was merged into #{r.merged_into}.</span>
+                          <button onClick={() => handleUnmerge(r.id)} disabled={!!actionBusy}
+                            className="rounded-md bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100">Unmerge</button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs text-gray-400">Mark:</span>
+                          <button onClick={() => handleLifecycle(r.id, 'booked')} disabled={!!actionBusy}
+                            className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">&#9989; Booked</button>
+                          <button onClick={() => handleLifecycle(r.id, 'closed')} disabled={!!actionBusy}
+                            className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200">Closed (no deal)</button>
+                          {(lc === 'booked' || lc === 'closed') && (
+                            <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
+                              className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Reopen</button>
+                          )}
+                          {mergedKids > 0 && <span className="text-xs text-violet-600">{mergedKids} other request{mergedKids === 1 ? '' : 's'} merged in</span>}
+                        </>
                       )}
                       {actionBusy && <span className="text-xs text-gray-400">{actionBusy}</span>}
                     </div>

@@ -988,6 +988,7 @@ export interface ReservationQuoteRow {
   our_reply_at?: string | null;
   reply_from?: string | null;
   mailbox?: string | null;
+  merged_into?: number | null;
   raw_body: string | null;
   conversation_id?: string | null;
   responded_at?: string | null;
@@ -1054,6 +1055,16 @@ export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | '
 export function getReservationConversation(id: number) {
   return request<{ messages: ReservationConversationMessage[] }>(
     `/admin/quotes/reservations/${id}/conversation`);
+}
+
+export function mergeReservations(primary_id: number, secondary_ids: number[]) {
+  return request<{ primary: number; merged: number[] }>(
+    `/admin/quotes/reservations/merge`, { method: 'POST', body: JSON.stringify({ primary_id, secondary_ids }) });
+}
+
+export function unmergeReservation(id: number) {
+  return request<{ id: number; merged_into: number | null; lifecycle: string }>(
+    `/admin/quotes/reservations/${id}/unmerge`, { method: 'POST' });
 }
 
 export interface ReservationMetrics {

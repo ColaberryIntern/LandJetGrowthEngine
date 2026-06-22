@@ -56,6 +56,7 @@ export class ReservationQuote extends Model {
   declare ai_draft: ReservationAiDraft | null; // generated reply + rubric
   declare our_reply_at: Date | null;      // when WE last sent a reply (vs responded_at = customer)
   declare reply_from: string | null;      // account the reply goes out from (defaults to mailbox)
+  declare merged_into: number | null;     // if set, this row was manually merged into that row id
   declare created_at: Date;
   declare updated_at: Date;
 }
@@ -83,6 +84,7 @@ export function initReservationQuoteModel(sequelize: Sequelize): typeof Reservat
       ai_draft: { type: DataTypes.JSONB, allowNull: true },
       our_reply_at: { type: DataTypes.DATE, allowNull: true },
       reply_from: { type: DataTypes.TEXT, allowNull: true },
+      merged_into: { type: DataTypes.INTEGER, allowNull: true },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },
