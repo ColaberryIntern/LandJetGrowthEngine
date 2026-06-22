@@ -110,6 +110,42 @@ function tagsFor(r: ReservationQuoteRow): { label: string; cls: string }[] {
   return out;
 }
 
+// Identify the same logical request arriving as multiple emails. BookRides sends
+// more than one notification per request; each lands as its own row. The
+// reservation number is the exact identity; otherwise fall back to a strict
+// passenger+route+date+time signature so genuinely different trips stay separate.
+function dedupKey(r: ReservationQuoteRow): string | null {
+  const t = r.result?.trip || {};
+  if (t.reservation_number) return `res:${t.reservation_number}`;
+  const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+  const parts = [norm(t.passenger_name), norm(t.pickup_address), norm(t.dropoff_address), norm(t.date_of_service), norm(t.start_time)];
+  if (parts.filter(Boolean).length < 4) return null; // not enough signal to call it a duplicate
+  return `trip:${parts.join('|')}`;
+}
+
+interface DupInfo { isDup: boolean; count: number; canonId: number }
+
+// Build duplicate groups and pick a canonical per group (prefer one with a draft,
+// then the most recent, then highest id) so the work already done is kept.
+function buildDupMap(rows: ReservationQuoteRow[]): Map<number, DupInfo> {
+  const groups = new Map<string, ReservationQuoteRow[]>();
+  for (const r of rows) {
+    const k = dedupKey(r);
+    if (!k) continue;
+    (groups.get(k) || groups.set(k, []).get(k)!).push(r);
+  }
+  const out = new Map<number, DupInfo>();
+  for (const grp of groups.values()) {
+    if (grp.length < 2) continue;
+    const canon = [...grp].sort((a, b) =>
+      (Number(!!b.ai_draft) - Number(!!a.ai_draft)) ||
+      (new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime()) ||
+      (b.id - a.id))[0];
+    for (const r of grp) out.set(r.id, { isDup: r.id !== canon.id, count: grp.length, canonId: canon.id });
+  }
+  return out;
+}
+
 function mailboxLabel(m?: string | null): string {
   if (!m) return '';
   if (m.startsWith('ljreservations')) return 'Reservations desk';
@@ -135,6 +171,7 @@ export default function ReservationsPage() {
   const [rows, setRows] = useState<ReservationQuoteRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('needs_reply');
+  const [hideDuplicates, setHideDuplicates] = useState(true);
   const [openId, setOpenId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -223,24 +260,40 @@ export default function ReservationsPage() {
     finally { setBusyFor(id, null); }
   }
 
-  // Client-side filter + live stats from the full set.
-  const visible = rows.filter(r => {
-    const lc = lifecycleOf(r);
-    if (filter === 'all') return true;
-    if (filter === 'resolved') return lc === 'booked' || lc === 'closed';
-    return lc === filter;
-  });
+  // Duplicate detection across the full set. Unique = canonical + singletons.
+  const dupMap = buildDupMap(rows);
+  const dupTotal = rows.filter(r => dupMap.get(r.id)?.isDup).length;
+  const uniqueRows = rows.filter(r => !dupMap.get(r.id)?.isDup);
+
+  // Stats and tab counts reflect UNIQUE requests, so duplicates never inflate the
+  // workload. The list hides duplicates by default (toggle to reveal, badged).
+  const statBase = uniqueRows;
+  const listBase = hideDuplicates ? uniqueRows : rows;
+  // Sort by most recent CUSTOMER activity: their last reply, else when the
+  // request first came in. So a thread the customer just answered jumps to the top.
+  const customerActivity = (r: ReservationQuoteRow) => Math.max(
+    r.responded_at ? new Date(r.responded_at).getTime() : 0,
+    r.received_at ? new Date(r.received_at).getTime() : 0,
+  );
+  const visible = listBase
+    .filter(r => {
+      const lc = lifecycleOf(r);
+      if (filter === 'all') return true;
+      if (filter === 'resolved') return lc === 'booked' || lc === 'closed';
+      return lc === filter;
+    })
+    .sort((a, b) => customerActivity(b) - customerActivity(a));
   const stats = {
-    needs_reply: rows.filter(r => lifecycleOf(r) === 'needs_reply').length,
-    awaiting_customer: rows.filter(r => lifecycleOf(r) === 'awaiting_customer').length,
-    booked: rows.filter(r => lifecycleOf(r) === 'booked').length,
-    pipelineValue: rows.filter(r => !['closed'].includes(lifecycleOf(r))).reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
+    needs_reply: statBase.filter(r => lifecycleOf(r) === 'needs_reply').length,
+    awaiting_customer: statBase.filter(r => lifecycleOf(r) === 'awaiting_customer').length,
+    booked: statBase.filter(r => lifecycleOf(r) === 'booked').length,
+    pipelineValue: statBase.filter(r => !['closed'].includes(lifecycleOf(r))).reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
   };
   const counts: Record<string, number> = {
     needs_reply: stats.needs_reply,
     awaiting_customer: stats.awaiting_customer,
-    resolved: rows.filter(r => ['booked', 'closed'].includes(lifecycleOf(r))).length,
-    all: rows.length,
+    resolved: statBase.filter(r => ['booked', 'closed'].includes(lifecycleOf(r))).length,
+    all: statBase.length,
   };
 
   return (
@@ -290,13 +343,20 @@ export default function ReservationsPage() {
         ))}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         {LIFECYCLE_FILTERS.map(f => (
           <button key={f.key} onClick={() => setFilter(f.key)}
             className={`rounded-full px-3 py-1 text-xs font-medium ${filter === f.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             {f.label} ({counts[f.key] ?? 0})
           </button>
         ))}
+        {dupTotal > 0 && (
+          <button onClick={() => setHideDuplicates(v => !v)}
+            className={`ml-auto rounded-full px-3 py-1 text-xs font-medium ${hideDuplicates ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            title="BookRides can send the same request more than once; copies are grouped under one row.">
+            {hideDuplicates ? `${dupTotal} duplicate${dupTotal === 1 ? '' : 's'} hidden` : 'Hide duplicates'}
+          </button>
+        )}
       </div>
 
       {error && <div className="mt-4 rounded-md bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
@@ -326,15 +386,21 @@ export default function ReservationsPage() {
             const sr = sendResult[r.id];
             const conv = convs[r.id];
             const actionBusy = busy[r.id];
+            const dup = dupMap.get(r.id);
 
             return (
-              <div key={r.id} className={`overflow-hidden rounded-lg border ${lcMeta.card}`}>
+              <div key={r.id} className={`overflow-hidden rounded-lg border ${dup?.isDup ? 'border-dashed border-amber-300 bg-amber-50/30 opacity-80' : lcMeta.card}`}>
                 <div className="flex items-stretch">
-                  <div className={`w-1.5 shrink-0 ${lcMeta.bar}`} />
+                  <div className={`w-1.5 shrink-0 ${dup?.isDup ? 'bg-amber-300' : lcMeta.bar}`} />
                   <div className="flex min-w-0 flex-1 items-stretch gap-3 px-4 py-3">
                     <button onClick={() => setOpenId(open ? null : r.id)} className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${lcMeta.chip}`}>{lcMeta.label}</span>
+                        {dup?.isDup
+                          ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">&#128203; Duplicate of #{dup.canonId}</span>
+                          : <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${lcMeta.chip}`}>{lcMeta.label}</span>}
+                        {dup && !dup.isDup && dup.count > 1 && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="The same request arrived more than once; copies are grouped here.">{dup.count - 1} duplicate{dup.count - 1 === 1 ? '' : 's'}</span>
+                        )}
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                         {appt && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${appt.cls}`}>{appt.text}</span>}
                         <span className="text-xs text-gray-400">received {timeAgo(r.received_at)}</span>
