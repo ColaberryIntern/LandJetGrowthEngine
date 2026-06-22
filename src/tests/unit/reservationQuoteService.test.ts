@@ -126,6 +126,27 @@ describe('decideLifecycleFromThread (lifecycle follows who sent the LAST message
     expect(d.lifecycle).toBeUndefined();
     expect(d.our_reply_at).toBeUndefined();
   });
+
+  it('customer signs off after we replied -> completed (auto-resolved) with resolved_at', () => {
+    const msgs = [{ from: C, t: 100 }, { from: US, t: 200 }, { from: C, t: 300, preview: 'Sounds great, thank you!!' }];
+    const d = decideLifecycleFromThread(msgs, 100, cur);
+    expect(d.lifecycle).toBe('completed');
+    expect(d.resolved_at).toBe(300);
+    expect(d.last_inbound_intent).toBe('gratitude');
+  });
+
+  it('a NEW question after a sign-off re-opens to needs_reply and clears resolved_at', () => {
+    const msgs = [{ from: US, t: 200 }, { from: C, t: 300, preview: 'thanks!' }, { from: C, t: 400, preview: 'Actually, can you change the time?' }];
+    const d = decideLifecycleFromThread(msgs, 100, { lifecycle: 'completed', our_reply_at: 200, responded_at: 300, resolved_at: 300 });
+    expect(d.lifecycle).toBe('needs_reply');
+    expect(d.resolved_at).toBeNull();
+    expect(d.last_inbound_intent).toBe('question');
+  });
+
+  it('a bare sign-off with NO prior reply from us stays needs_reply (we never engaged)', () => {
+    const d = decideLifecycleFromThread([{ from: C, t: 100, preview: 'thanks in advance!' }], 100, cur);
+    expect(d.lifecycle).toBeUndefined(); // already needs_reply
+  });
 });
 
 describe('autoSendEligible (Trust-Before-Intelligence: only act at/above 0.90)', () => {

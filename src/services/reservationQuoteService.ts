@@ -20,6 +20,7 @@ import { logger } from '../config/logger';
 import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '../models/ReservationQuote';
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
+import { classifyInboundIntent, InboundIntent } from './inboundIntent';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -134,29 +135,62 @@ export function isOurAddress(addr: string): boolean {
   return /@landjet\.com\s*$/i.test((addr || '').trim());
 }
 
-export interface ThreadMsg { from: string; t: number }
+export interface ThreadMsg { from: string; t: number; preview?: string }
+
+export interface LifecycleDecision {
+  lifecycle?: ReservationLifecycle;
+  our_reply_at?: number;
+  responded_at?: number;
+  last_inbound_intent?: InboundIntent;
+  resolved_at?: number | null; // number = set, null = clear, undefined = leave as-is
+}
 
 /**
  * Decide the lifecycle + reply timestamps for a thread from its messages.
- * Pure (no I/O) so it is unit-testable. The rule that matters: the LAST message
- * decides who owes the next move -- ours => awaiting_customer, theirs => needs_reply.
+ * Pure (no I/O) so it is unit-testable.
+ *
+ * The last message decides who owes the next move:
+ *  - last from us                          -> awaiting_customer
+ *  - last from customer, but a sign-off    -> completed (auto-resolved; we handled
+ *    ("thanks, sounds great") after we replied   it and they signed off)
+ *  - last from customer, anything else     -> needs_reply
+ * If a new substantive customer message arrives after a sign-off, it recomputes
+ * to needs_reply and the resolution is cleared (it re-opens).
+ *
+ * Never overrides a MANUAL resolution (booked/closed) -- the caller filters those out.
  */
 export function decideLifecycleFromThread(
   msgs: ThreadMsg[],
   origAt: number,
-  current: { lifecycle: string; our_reply_at: number | null; responded_at: number | null },
-): { lifecycle?: ReservationLifecycle; our_reply_at?: number; responded_at?: number } {
+  current: { lifecycle: string; our_reply_at: number | null; responded_at: number | null; resolved_at?: number | null },
+): LifecycleDecision {
   const sorted = msgs.filter((m) => m.from && m.t).sort((a, b) => a.t - b.t);
   if (sorted.length === 0) return {};
   const latest = sorted[sorted.length - 1];
   const lastOurs = [...sorted].reverse().find((m) => isOurAddress(m.from));
   const lastCust = [...sorted].reverse().find((m) => !isOurAddress(m.from) && m.t > origAt);
+  const latestCustomer = [...sorted].reverse().find((m) => !isOurAddress(m.from));
 
-  const out: { lifecycle?: ReservationLifecycle; our_reply_at?: number; responded_at?: number } = {};
-  const newLifecycle: ReservationLifecycle = isOurAddress(latest.from) ? 'awaiting_customer' : 'needs_reply';
+  const latestIsOurs = isOurAddress(latest.from);
+  const intent: InboundIntent = latestIsOurs ? 'other' : classifyInboundIntent(latest.preview || '');
+
+  let newLifecycle: ReservationLifecycle;
+  if (latestIsOurs) newLifecycle = 'awaiting_customer';
+  else if (intent === 'gratitude' && lastOurs) newLifecycle = 'completed'; // customer signed off after we handled it
+  else newLifecycle = 'needs_reply';
+
+  const out: LifecycleDecision = {};
   if (current.lifecycle !== newLifecycle) out.lifecycle = newLifecycle;
   if (lastOurs && (!current.our_reply_at || current.our_reply_at < lastOurs.t)) out.our_reply_at = lastOurs.t;
   if (lastCust && (!current.responded_at || current.responded_at < lastCust.t)) out.responded_at = lastCust.t;
+  if (latestCustomer) out.last_inbound_intent = classifyInboundIntent(latestCustomer.preview || '');
+
+  if (newLifecycle === 'completed') {
+    // Stamp resolved_at on first entry; keep it stable on subsequent passes.
+    if (current.lifecycle !== 'completed' || !current.resolved_at) out.resolved_at = latest.t;
+  } else if (current.resolved_at != null) {
+    out.resolved_at = null; // back to active -> clear the resolution
+  }
   return out;
 }
 
@@ -190,25 +224,30 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
     try {
       const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
       // No $orderby with a conversationId $filter (Graph 400 InefficientFilter); sort below.
-      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$top=25`;
+      // bodyPreview lets us classify the customer's latest message intent cheaply.
+      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime,bodyPreview&$top=25`;
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) continue;
       const data = (await r.json()) as { value?: any[] };
       const msgs: ThreadMsg[] = (data.value || []).map((m) => ({
         from: (m.from?.emailAddress?.address || '').toLowerCase(),
         t: m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0,
+        preview: m.bodyPreview || '',
       }));
       const origAt = rq.received_at ? new Date(rq.received_at).getTime() : 0;
       const decision = decideLifecycleFromThread(msgs, origAt, {
         lifecycle: rq.lifecycle,
         our_reply_at: rq.our_reply_at ? new Date(rq.our_reply_at).getTime() : null,
         responded_at: rq.responded_at ? new Date(rq.responded_at).getTime() : null,
+        resolved_at: rq.resolved_at ? new Date(rq.resolved_at).getTime() : null,
       });
 
       const patch: Record<string, unknown> = {};
       if (decision.lifecycle) patch.lifecycle = decision.lifecycle;
       if (decision.our_reply_at) patch.our_reply_at = new Date(decision.our_reply_at);
       if (decision.responded_at) patch.responded_at = new Date(decision.responded_at);
+      if (decision.last_inbound_intent && decision.last_inbound_intent !== rq.last_inbound_intent) patch.last_inbound_intent = decision.last_inbound_intent;
+      if (decision.resolved_at !== undefined) patch.resolved_at = decision.resolved_at === null ? null : new Date(decision.resolved_at);
       if (Object.keys(patch).length > 0) { await rq.update(patch as any); changed++; }
     } catch { /* skip this row, non-fatal */ }
   }
@@ -578,7 +617,9 @@ export async function sendReservationQuote(id: number): Promise<{ sent: boolean;
 export async function setReservationLifecycle(id: number, lifecycle: ReservationLifecycle): Promise<ReservationQuote> {
   const rq = await ReservationQuote.findByPk(id);
   if (!rq) throw new Error('Reservation quote not found');
-  await rq.update({ lifecycle } as any);
+  // Resolved states carry a resolved_at (for newest-first sorting); reopening clears it.
+  const resolved = lifecycle === 'booked' || lifecycle === 'closed' || lifecycle === 'completed';
+  await rq.update({ lifecycle, resolved_at: resolved ? (rq.resolved_at || new Date()) : null } as any);
   logger.info('reservation lifecycle updated', { id, lifecycle });
   return rq;
 }
@@ -598,7 +639,7 @@ export async function mergeReservations(primaryId: number, secondaryIds: number[
     if (id === primaryId) continue;
     const rq = await ReservationQuote.findByPk(id);
     if (!rq) continue;
-    await rq.update({ merged_into: primaryId, lifecycle: 'closed' } as any);
+    await rq.update({ merged_into: primaryId, lifecycle: 'closed', resolved_at: rq.resolved_at || new Date() } as any);
     merged.push(id);
   }
   logger.info('reservations merged', { primaryId, merged });
@@ -609,7 +650,7 @@ export async function mergeReservations(primaryId: number, secondaryIds: number[
 export async function unmergeReservation(id: number): Promise<ReservationQuote> {
   const rq = await ReservationQuote.findByPk(id);
   if (!rq) throw new Error('Reservation quote not found');
-  await rq.update({ merged_into: null, lifecycle: 'needs_reply' } as any);
+  await rq.update({ merged_into: null, lifecycle: 'needs_reply', resolved_at: null } as any);
   logger.info('reservation unmerged', { id });
   return rq;
 }

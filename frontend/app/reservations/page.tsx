@@ -22,9 +22,12 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 const LIFECYCLE_META: Record<string, { label: string; chip: string; bar: string; card: string }> = {
   needs_reply:       { label: 'Needs reply',  chip: 'bg-rose-100 text-rose-700',     bar: 'bg-rose-500',    card: 'border-rose-200 bg-rose-50/40' },
   awaiting_customer: { label: 'Awaiting customer', chip: 'bg-amber-100 text-amber-800', bar: 'bg-amber-400', card: 'border-amber-200 bg-white' },
+  completed:         { label: 'Completed',    chip: 'bg-teal-100 text-teal-700',     bar: 'bg-teal-400',    card: 'border-teal-200 bg-teal-50/40' },
   booked:            { label: 'Booked',       chip: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500', card: 'border-emerald-200 bg-emerald-50/40' },
   closed:            { label: 'Closed',       chip: 'bg-gray-200 text-gray-600',     bar: 'bg-gray-300',    card: 'border-gray-200 bg-gray-50 opacity-75' },
 };
+
+const RESOLVED_STATES = ['completed', 'booked', 'closed'];
 
 const LIFECYCLE_FILTERS = [
   { key: 'needs_reply', label: 'Needs reply' },
@@ -144,6 +147,16 @@ function buildDupMap(rows: ReservationQuoteRow[]): Map<number, DupInfo> {
     for (const r of grp) out.set(r.id, { isDup: r.id !== canon.id, count: grp.length, canonId: canon.id });
   }
   return out;
+}
+
+// Smart conversation-state tag from the customer's latest message intent. This is
+// what tells the team "this is wrapping up" vs "this actually needs an answer".
+function intentTag(r: ReservationQuoteRow): { label: string; cls: string } | null {
+  const lc = r.lifecycle || 'needs_reply';
+  if (lc === 'completed') return { label: '\u{1F64F} Customer signed off', cls: 'bg-teal-100 text-teal-700' };
+  if (lc === 'needs_reply' && r.last_inbound_intent === 'question') return { label: '❓ Question · needs answer', cls: 'bg-rose-100 text-rose-700' };
+  if (lc === 'needs_reply' && r.last_inbound_intent === 'confirmation') return { label: '✅ Ready to book', cls: 'bg-emerald-100 text-emerald-700' };
+  return null;
 }
 
 function mailboxLabel(m?: string | null): string {
@@ -304,30 +317,31 @@ export default function ReservationsPage() {
   // In merge mode always show the active (uncollapsed) rows so the operator can
   // select among them; otherwise honor the hide-grouped toggle.
   const listBase = (mergeMode || hideDuplicates) ? uniqueRows : rows;
-  // Sort by most recent CUSTOMER activity: their last reply, else when the
-  // request first came in. So a thread the customer just answered jumps to the top.
+  // Sort by most recent CUSTOMER activity (their last reply, else when the request
+  // came in). In the Resolved bucket, sort by when it was resolved -- newest first.
   const customerActivity = (r: ReservationQuoteRow) => Math.max(
     r.responded_at ? new Date(r.responded_at).getTime() : 0,
     r.received_at ? new Date(r.received_at).getTime() : 0,
   );
+  const resolvedAt = (r: ReservationQuoteRow) => (r.resolved_at ? new Date(r.resolved_at).getTime() : 0);
   const visible = listBase
     .filter(r => {
       const lc = lifecycleOf(r);
       if (filter === 'all') return true;
-      if (filter === 'resolved') return lc === 'booked' || lc === 'closed';
+      if (filter === 'resolved') return RESOLVED_STATES.includes(lc);
       return lc === filter;
     })
-    .sort((a, b) => customerActivity(b) - customerActivity(a));
+    .sort((a, b) => filter === 'resolved' ? (resolvedAt(b) - resolvedAt(a)) : (customerActivity(b) - customerActivity(a)));
   const stats = {
     needs_reply: statBase.filter(r => lifecycleOf(r) === 'needs_reply').length,
     awaiting_customer: statBase.filter(r => lifecycleOf(r) === 'awaiting_customer').length,
-    booked: statBase.filter(r => lifecycleOf(r) === 'booked').length,
-    pipelineValue: statBase.filter(r => !['closed'].includes(lifecycleOf(r))).reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
+    resolved: statBase.filter(r => RESOLVED_STATES.includes(lifecycleOf(r))).length,
+    pipelineValue: statBase.filter(r => !RESOLVED_STATES.includes(lifecycleOf(r))).reduce((a, r) => a + (parseFloat(r.quote_total || '0') || 0), 0),
   };
   const counts: Record<string, number> = {
     needs_reply: stats.needs_reply,
     awaiting_customer: stats.awaiting_customer,
-    resolved: statBase.filter(r => ['booked', 'closed'].includes(lifecycleOf(r))).length,
+    resolved: stats.resolved,
     all: statBase.length,
   };
 
@@ -367,7 +381,7 @@ export default function ReservationsPage() {
         {[
           { label: 'Need a reply', value: stats.needs_reply, cls: 'text-rose-600', sub: 'waiting on us' },
           { label: 'Awaiting customer', value: stats.awaiting_customer, cls: 'text-amber-600', sub: 'we replied' },
-          { label: 'Booked', value: stats.booked, cls: 'text-emerald-600', sub: 'resolved' },
+          { label: 'Resolved', value: stats.resolved, cls: 'text-emerald-600', sub: 'booked / done' },
           { label: 'Open pipeline', value: money(stats.pipelineValue), cls: 'text-gray-900', sub: 'unresolved value' },
         ].map((s, i) => (
           <div key={i} className="rounded-lg border border-gray-200 bg-white px-4 py-3">
@@ -487,6 +501,7 @@ export default function ReservationsPage() {
                         {mergedKids > 0 && (
                           <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800" title="Other rows were merged into this one.">{mergedKids} merged</span>
                         )}
+                        {!isMerged && !dup?.isDup && (() => { const it = intentTag(r); return it ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${it.cls}`}>{it.label}</span> : null; })()}
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                         {appt && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${appt.cls}`}>{appt.text}</span>}
                         <span className="text-xs text-gray-400">received {timeAgo(r.received_at)}</span>
@@ -642,10 +657,11 @@ export default function ReservationsPage() {
                             className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">&#9989; Booked</button>
                           <button onClick={() => handleLifecycle(r.id, 'closed')} disabled={!!actionBusy}
                             className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200">Closed (no deal)</button>
-                          {(lc === 'booked' || lc === 'closed') && (
+                          {RESOLVED_STATES.includes(lc) && (
                             <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
                               className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Reopen</button>
                           )}
+                          {lc === 'completed' && <span className="text-xs text-teal-600">Auto-resolved (customer signed off)</span>}
                           {mergedKids > 0 && <span className="text-xs text-violet-600">{mergedKids} other request{mergedKids === 1 ? '' : 's'} merged in</span>}
                         </>
                       )}

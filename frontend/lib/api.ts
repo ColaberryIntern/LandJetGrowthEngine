@@ -983,12 +983,14 @@ export interface ReservationQuoteRow {
   quote_total: string | null;
   confidence: string;
   status: 'auto_ready' | 'needs_review' | 'forward' | 'manual';
-  lifecycle?: 'needs_reply' | 'awaiting_customer' | 'booked' | 'closed';
+  lifecycle?: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed';
   ai_draft?: ReservationAiDraft | null;
   our_reply_at?: string | null;
   reply_from?: string | null;
   mailbox?: string | null;
   merged_into?: number | null;
+  last_inbound_intent?: 'gratitude' | 'confirmation' | 'question' | 'other' | null;
+  resolved_at?: string | null;
   raw_body: string | null;
   conversation_id?: string | null;
   responded_at?: string | null;
@@ -1047,7 +1049,7 @@ export function saveReservationDraft(id: number, subject: string, text: string) 
     `/admin/quotes/reservations/${id}/draft`, { method: 'PUT', body: JSON.stringify({ subject, text }) });
 }
 
-export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'booked' | 'closed') {
+export function setReservationLifecycle(id: number, lifecycle: 'needs_reply' | 'awaiting_customer' | 'completed' | 'booked' | 'closed') {
   return request<{ id: number; lifecycle: string }>(
     `/admin/quotes/reservations/${id}/lifecycle`, { method: 'POST', body: JSON.stringify({ lifecycle }) });
 }

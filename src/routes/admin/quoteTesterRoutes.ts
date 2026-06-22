@@ -559,7 +559,7 @@ router.post('/reservations/:id/lifecycle', authorize('campaigns:write'), async (
   try {
     const { setReservationLifecycle } = await import('../../services/reservationQuoteService');
     const lifecycle = String(req.body?.lifecycle || '');
-    if (!['needs_reply', 'awaiting_customer', 'booked', 'closed'].includes(lifecycle)) {
+    if (!['needs_reply', 'awaiting_customer', 'completed', 'booked', 'closed'].includes(lifecycle)) {
       return res.status(400).json({ error: 'invalid lifecycle' });
     }
     const rq = await setReservationLifecycle(Number(req.params.id), lifecycle as any);
