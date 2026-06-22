@@ -454,15 +454,21 @@ export default function ReservationsPage() {
                           {conv.length === 0 ? <div className="text-xs text-gray-400">No thread history available.</div> : (
                             <>
                               <div className="text-[10px] uppercase tracking-wide text-gray-400">Most recent first</div>
-                              {conv.slice().reverse().map((m, idx) => (
-                                <div key={m.id} className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${m.direction === 'outbound' ? 'ml-auto bg-blue-50 text-blue-900' : 'bg-gray-100 text-gray-700'} ${idx === 0 ? 'ring-1 ring-blue-200' : ''}`}>
-                                  <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px] text-gray-400">
-                                    <span>{m.direction === 'outbound' ? 'LandJet' : (m.from || 'Customer')}{idx === 0 ? ' · latest' : ''}</span>
-                                    <span>{timeAgo(m.at)}</span>
+                              {conv.slice().reverse().map((m, idx) => {
+                                const isBookRides = /bookridesonline/i.test(m.from || '');
+                                const who = m.direction === 'outbound'
+                                  ? 'LandJet · we sent'
+                                  : isBookRides ? 'Customer request (via BookRides) · received' : `${m.from || 'Customer'} · received`;
+                                return (
+                                  <div key={m.id} className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${m.direction === 'outbound' ? 'ml-auto bg-blue-50 text-blue-900' : 'bg-gray-100 text-gray-700'} ${idx === 0 ? 'ring-1 ring-blue-300' : ''}`}>
+                                    <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px]">
+                                      <span className={`font-medium ${m.direction === 'outbound' ? 'text-blue-600' : 'text-gray-500'}`}>{who}{idx === 0 ? ' · latest' : ''}</span>
+                                      <span className="text-gray-400">{timeAgo(m.at)}</span>
+                                    </div>
+                                    <div className="whitespace-pre-wrap">{m.preview}</div>
                                   </div>
-                                  <div className="whitespace-pre-wrap">{m.preview}</div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </>
                           )}
                         </div>
