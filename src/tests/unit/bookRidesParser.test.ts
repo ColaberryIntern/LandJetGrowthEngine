@@ -161,5 +161,20 @@ Chicago O'Hare International Airport, Chicago, IL 60666`;
       expect(trip?.pickup_address).toBe('6110 Hillandale Rd, Davenport, IA 52806');
       expect(trip?.dropoff_address).toContain('IL 60666');
     });
+
+    it('uses the first Stop(s) as the dropoff on a round trip with no Dropoff label', () => {
+      const roundTrip = `LandJet 6/29/26
+
+Reservation #: 3500901
+Service Type: Round Trip
+Pickup
+6110 Hillandale Rd, Davenport, IA 52806
+Stop(s)
+2300 E Devon Ave, Elk Grove Village, IL 60007
+Return Date: 7/13/26`;
+      const trip = parseBookRidesEmail(roundTrip);
+      expect(trip?.pickup_address).toBe('6110 Hillandale Rd, Davenport, IA 52806');
+      expect(trip?.dropoff_address).toBe('2300 E Devon Ave, Elk Grove Village, IL 60007');
+    });
   });
 });

@@ -40,9 +40,26 @@ const FIELD_PATTERNS: Record<keyof Omit<BookRidesTrip, 'raw_extracted_at'>, RegE
   passengers: /Passengers:\s*(\d+)/i,
   luggage: /Luggage:\s*(\d+)/i,
   vehicle: /Vehicle:\s*([^\n]+)/i,
-  pickup_address: /Pickup\s*\n+\s*([^\n]+(?:\n(?!\s*(?:Dropoff|Charges|This email|©))[^\n]+)*)/i,
+  pickup_address: /Pickup\s*\n+\s*([^\n]+(?:\n(?!\s*(?:Dropoff|Stop|Charges|This email|©))[^\n]+)*)/i,
   dropoff_address: /Dropoff\s*\n+\s*([^\n]+(?:\n(?!\s*(?:Pickup|Charges|This email|©|Return Info))[^\n]+)*)/i,
 };
+
+// Round-trip BookRides emails use "Pickup / Stop(s)" with no "Dropoff" label;
+// the first Stop is effectively the destination. Used as a dropoff fallback.
+const STOP_PATTERN = /Stop\(s\)\s*\n+\s*([0-9][^\n]+(?:\n(?!\s*(?:Return|Pickup|Dropoff|Charges|This email|©))[^\n]+)*)/i;
+
+/** Best (most complete: has City, ST ZIP) address among all matches of a global regex. */
+function bestAddress(text: string, pattern: RegExp): string | undefined {
+  const globalRe = new RegExp(pattern.source, 'ig');
+  let best: string | undefined;
+  let bestScore = -1;
+  for (const m of text.matchAll(globalRe)) {
+    const addr = m[1].replace(/\n+/g, ', ').replace(/\s{2,}/g, ' ').trim();
+    const score = (/[A-Z]{2}\s*\d{5}/.test(addr) ? 1000 : 0) + addr.length;
+    if (score > bestScore) { best = addr; bestScore = score; }
+  }
+  return best;
+}
 
 /**
  * Detect if an email body looks like a BookRides notification.
@@ -85,14 +102,7 @@ export function parseBookRidesEmail(body: string): BookRidesTrip | null {
       // FIRST, which may be a truncated quote. Scan ALL occurrences and keep the
       // most complete one (a real street address has a "City, ST ZIP"). This is
       // deterministic, so the same email always prices the same way.
-      const globalRe = new RegExp(pattern.source, 'ig');
-      let best: string | undefined;
-      let bestScore = -1;
-      for (const m of normalized.matchAll(globalRe)) {
-        const addr = m[1].replace(/\n+/g, ', ').replace(/\s{2,}/g, ' ').trim();
-        const score = (/[A-Z]{2}\s*\d{5}/.test(addr) ? 1000 : 0) + addr.length;
-        if (score > bestScore) { best = addr; bestScore = score; }
-      }
+      const best = bestAddress(normalized, pattern);
       if (best) (trip as any)[key] = best;
       continue;
     }
@@ -105,6 +115,13 @@ export function parseBookRidesEmail(body: string): BookRidesTrip | null {
     } else {
       (trip as any)[key] = value;
     }
+  }
+
+  // Round-trip emails omit "Dropoff" and put the destination under "Stop(s)".
+  // Fall back to the first stop so the route (and its map) still resolves.
+  if (!trip.dropoff_address) {
+    const stop = bestAddress(normalized, STOP_PATTERN);
+    if (stop) trip.dropoff_address = stop;
   }
 
   return trip.passenger_name || trip.reservation_number ? trip : null;
