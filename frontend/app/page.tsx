@@ -130,12 +130,12 @@ export default function Home() {
             </div>
           </div>
         </Link>
-        <Link href="/inbound" className="group rounded-xl border border-gray-200 bg-white p-5 transition-all hover:shadow-md hover:border-amber-300">
+        <Link href="/reservations" className="group rounded-xl border border-gray-200 bg-white p-5 transition-all hover:shadow-md hover:border-amber-300">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600 text-lg">&#x1F4E5;</div>
             <div>
-              <p className="font-semibold text-gray-900 group-hover:text-amber-600">Inbound</p>
-              <p className="text-xs text-gray-500">Quote requests</p>
+              <p className="font-semibold text-gray-900 group-hover:text-amber-600">Reservations</p>
+              <p className="text-xs text-gray-500">Inbound quote requests</p>
             </div>
           </div>
         </Link>

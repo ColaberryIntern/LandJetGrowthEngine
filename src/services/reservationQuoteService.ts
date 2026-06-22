@@ -242,6 +242,21 @@ async function enrichWithDistance(result: InboundProcessResult, emailBody: strin
 export interface IngestCounts {
   fetched: number; created: number; skipped_existing: number;
   auto_ready: number; needs_review: number; forward: number; manual: number; errors: number;
+  filtered: number; // non-booking emails skipped on a general mailbox (onlyBookings)
+}
+
+/**
+ * Is this processed email an actual trip/quote request worth surfacing in the
+ * reservations queue? Used to filter noise when we ingest a GENERAL mailbox
+ * (e.g. rlandry@) instead of the dedicated booking mailbox. A dedicated
+ * reservation inbox persists everything; a general inbox persists only requests.
+ */
+export function isBookingIntent(r: InboundProcessResult): boolean {
+  if (r.mode === 'priced' || r.mode === 'forward_only') return true;
+  // NL recognized a real trip but could not route/price it (e.g. unknown town):
+  // still a genuine request a human should answer.
+  if (r.source === 'nl' && r.trip && (r.trip.pickup_address || r.trip.dropoff_address)) return true;
+  return false;
 }
 
 /**
@@ -251,14 +266,16 @@ export interface IngestCounts {
 export async function ingestReservationQuotes(opts: {
   lookbackHours?: number;
   mailbox?: string;
+  onlyBookings?: boolean; // general mailboxes (rlandry@, percy@): persist only real requests, skip noise
   fetcher?: (lookbackHours: number, mailbox: string) => Promise<RawReservationEmail[]>;
 } = {}): Promise<IngestCounts> {
   const lookbackHours = opts.lookbackHours ?? 72;
   const mailbox = opts.mailbox ?? DEFAULT_MAILBOX;
+  const onlyBookings = opts.onlyBookings ?? false;
   const fetcher = opts.fetcher ?? fetchReservationEmails;
 
   const emails = await fetcher(lookbackHours, mailbox);
-  const counts: IngestCounts = { fetched: emails.length, created: 0, skipped_existing: 0, auto_ready: 0, needs_review: 0, forward: 0, manual: 0, errors: 0 };
+  const counts: IngestCounts = { fetched: emails.length, created: 0, skipped_existing: 0, auto_ready: 0, needs_review: 0, forward: 0, manual: 0, errors: 0, filtered: 0 };
 
   for (const e of emails) {
     try {
@@ -267,6 +284,12 @@ export async function ingestReservationQuotes(opts: {
 
       let result = await processInboundEmailNL(e.body, e.from || undefined);
       result = await enrichWithDistance(result, e.body, e.from || undefined);
+
+      // On a general inbox, only persist genuine trip/quote requests so the
+      // reservations queue is not flooded with replies, newsletters, and other
+      // non-booking mail. The dedicated booking mailbox keeps everything.
+      if (onlyBookings && !isBookingIntent(result)) { counts.filtered++; continue; }
+
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 

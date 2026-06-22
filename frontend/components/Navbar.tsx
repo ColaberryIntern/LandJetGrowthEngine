@@ -8,9 +8,7 @@ const PRIMARY_ITEMS = [
   { href: '/outreach', label: 'Outreach' },
   { href: '/conversations', label: 'Conversations' },
   { href: '/campaigns', label: 'Campaigns' },
-  { href: '/inbound', label: 'Inbound' },
   { href: '/reservations', label: 'Reservations' },
-  { href: '/quote-tester', label: 'Quote Tester' },
   { href: '/agents', label: 'Agents' },
 ];
 

@@ -1,4 +1,4 @@
-import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE } from '../../services/reservationQuoteService';
+import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent } from '../../services/reservationQuoteService';
 import { processInboundEmail, detectMarketFromAddress } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
@@ -71,6 +71,20 @@ describe('detectMarketFromAddress (Quad Cities suburbs route, not just the core 
   it('still resolves the core Quad Cities and leaves unknown towns null', () => {
     expect(detectMarketFromAddress('2950 Eastern Ave, Davenport, IA 52803')).toBe('quad_cities');
     expect(detectMarketFromAddress('Louisville, KY')).toBeNull();
+  });
+});
+
+describe('isBookingIntent (filter noise when ingesting a general mailbox)', () => {
+  it('keeps real requests: priced, forward_only, and NL trips with an address', () => {
+    expect(isBookingIntent({ mode: 'priced' } as InboundProcessResult)).toBe(true);
+    expect(isBookingIntent({ mode: 'forward_only' } as InboundProcessResult)).toBe(true);
+    expect(isBookingIntent({ mode: 'manual', source: 'nl', manual_reason: 'nl_no_route', trip: { dropoff_address: 'LeClaire, IA' } } as any)).toBe(true);
+  });
+  it('drops non-bookings: not_bookrides, faq, and parser-noise without an NL trip', () => {
+    expect(isBookingIntent({ mode: 'manual', manual_reason: 'not_bookrides' } as InboundProcessResult)).toBe(false);
+    expect(isBookingIntent({ mode: 'faq' } as InboundProcessResult)).toBe(false);
+    expect(isBookingIntent({ mode: 'manual', manual_reason: 'incomplete_parse', source: 'bookrides' } as InboundProcessResult)).toBe(false);
+    expect(isBookingIntent({ mode: 'manual', source: 'nl' } as InboundProcessResult)).toBe(false);
   });
 });
 

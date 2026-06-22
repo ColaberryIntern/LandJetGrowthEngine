@@ -163,6 +163,9 @@ export default function ReservationsPage() {
           <Link href="/reservations/dashboard" className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
             &#128202; Dashboard
           </Link>
+          <Link href="/reservations/test" className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            &#129514; Test a quote
+          </Link>
           <button onClick={refreshFromMailbox} disabled={refreshing}
             className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
             {refreshing ? 'Checking mailbox...' : 'Refresh from mailbox'}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { ensureAuth } from '@/lib/auth';
 
 type Method = 'paste' | 'manual';
@@ -214,8 +215,9 @@ export default function QuoteTesterPage() {
     <div className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-6 flex items-baseline justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Quote Tester</h1>
-          <p className="mt-1 text-sm text-gray-500">Paste an inbound email or enter trip details manually. See the full pricing engine breakdown, margin, and approval routing.</p>
+          <Link href="/reservations" className="text-sm text-gray-500 hover:text-gray-700">&#8592; Back to Reservations</Link>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">Quote Tester</h1>
+          <p className="mt-1 text-sm text-gray-500">Paste an inbound email or enter trip details manually. Same pricing engine the Reservations queue runs, so you can sanity-check any quote here. See the full breakdown, margin, and approval routing.</p>
         </div>
         <span className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 border border-blue-200">v1 internal</span>
       </div>

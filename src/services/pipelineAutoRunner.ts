@@ -153,7 +153,21 @@ async function runReservations(): Promise<void> {
   const start = Date.now();
   try {
     const { ingestReservationQuotes } = await import('./reservationQuoteService');
+    // Dedicated booking mailbox: persist everything. General mailboxes (Ryan's
+    // inbox, Percy's inbox): persist only real trip/quote requests so the queue
+    // stays clean. One queue, every place a request can land.
+    const extra = (process.env.RESERVATION_EXTRA_MAILBOXES ?? 'rlandry@landjet.com,percy@landjet.com')
+      .split(',').map(s => s.trim()).filter(Boolean);
     const r = await ingestReservationQuotes({ lookbackHours: 24 });
+    for (const mailbox of extra) {
+      try {
+        const er = await ingestReservationQuotes({ lookbackHours: 24, mailbox, onlyBookings: true });
+        r.created += er.created; r.errors += er.errors; r.auto_ready += er.auto_ready;
+        r.needs_review += er.needs_review; r.forward += er.forward;
+      } catch (e) {
+        logger.error('pipeline.reservations extra mailbox failed (non-fatal)', { mailbox, error: (e as Error).message });
+      }
+    }
     if (r.created > 0 || r.errors > 0) {
       logger.info('pipeline.reservations complete', { duration_ms: Date.now() - start, ...r });
     }
