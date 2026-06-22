@@ -1,4 +1,4 @@
-import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent } from '../../services/reservationQuoteService';
+import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent, isOurAddress, decideLifecycleFromThread } from '../../services/reservationQuoteService';
 import { processInboundEmail, detectMarketFromAddress } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
@@ -85,6 +85,46 @@ describe('isBookingIntent (filter noise when ingesting a general mailbox)', () =
     expect(isBookingIntent({ mode: 'faq' } as InboundProcessResult)).toBe(false);
     expect(isBookingIntent({ mode: 'manual', manual_reason: 'incomplete_parse', source: 'bookrides' } as InboundProcessResult)).toBe(false);
     expect(isBookingIntent({ mode: 'manual', source: 'nl' } as InboundProcessResult)).toBe(false);
+  });
+});
+
+describe('decideLifecycleFromThread (lifecycle follows who sent the LAST message)', () => {
+  const cur = { lifecycle: 'needs_reply', our_reply_at: null, responded_at: null };
+  const C = 'bpeterson@ncpinconline.com'; // customer
+  const US = 'ljreservations@landjet.com'; // us
+
+  it('our reply is the last message -> awaiting_customer (even if app never sent it)', () => {
+    const msgs = [{ from: C, t: 100 }, { from: US, t: 200 }, { from: C, t: 300 }, { from: US, t: 400 }];
+    const d = decideLifecycleFromThread(msgs, 100, cur);
+    expect(d.lifecycle).toBe('awaiting_customer');
+    expect(d.our_reply_at).toBe(400);
+    expect(d.responded_at).toBe(300); // last customer message
+  });
+
+  it('customer is the last message -> needs_reply', () => {
+    const msgs = [{ from: C, t: 100 }, { from: US, t: 200 }, { from: C, t: 300 }];
+    const d = decideLifecycleFromThread(msgs, 100, { ...cur, lifecycle: 'awaiting_customer' });
+    expect(d.lifecycle).toBe('needs_reply');
+    expect(d.responded_at).toBe(300);
+  });
+
+  it('only the original inbound, no reply yet -> needs_reply', () => {
+    expect(decideLifecycleFromThread([{ from: C, t: 100 }], 100, cur).lifecycle).toBeUndefined(); // already needs_reply
+    expect(decideLifecycleFromThread([{ from: C, t: 100 }], 100, { ...cur, lifecycle: 'awaiting_customer' }).lifecycle).toBe('needs_reply');
+  });
+
+  it('treats any @landjet.com sender as ours (staff replying from their own address)', () => {
+    expect(isOurAddress('rlandry@landjet.com')).toBe(true);
+    expect(isOurAddress('percy@landjet.com')).toBe(true);
+    expect(isOurAddress('bpeterson@ncpinconline.com')).toBe(false);
+    const d = decideLifecycleFromThread([{ from: C, t: 100 }, { from: 'lorie@landjet.com', t: 200 }], 100, cur);
+    expect(d.lifecycle).toBe('awaiting_customer');
+  });
+
+  it('no change when state already matches', () => {
+    const d = decideLifecycleFromThread([{ from: C, t: 100 }, { from: US, t: 200 }], 100, { lifecycle: 'awaiting_customer', our_reply_at: 200, responded_at: null });
+    expect(d.lifecycle).toBeUndefined();
+    expect(d.our_reply_at).toBeUndefined();
   });
 });
 

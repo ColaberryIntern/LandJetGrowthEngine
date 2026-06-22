@@ -129,10 +129,45 @@ export async function fetchConversationText(mailbox: string, conversationId: str
   }
 }
 
+/** An address is "ours" (LandJet) if it is on the landjet.com domain. */
+export function isOurAddress(addr: string): boolean {
+  return /@landjet\.com\s*$/i.test((addr || '').trim());
+}
+
+export interface ThreadMsg { from: string; t: number }
+
 /**
- * Detect customer replies: for recent priced rows whose thread we know, check
- * the conversation for a message from the customer that is newer than the
- * original reservation email, and stamp responded_at. Best-effort, fail-soft.
+ * Decide the lifecycle + reply timestamps for a thread from its messages.
+ * Pure (no I/O) so it is unit-testable. The rule that matters: the LAST message
+ * decides who owes the next move -- ours => awaiting_customer, theirs => needs_reply.
+ */
+export function decideLifecycleFromThread(
+  msgs: ThreadMsg[],
+  origAt: number,
+  current: { lifecycle: string; our_reply_at: number | null; responded_at: number | null },
+): { lifecycle?: ReservationLifecycle; our_reply_at?: number; responded_at?: number } {
+  const sorted = msgs.filter((m) => m.from && m.t).sort((a, b) => a.t - b.t);
+  if (sorted.length === 0) return {};
+  const latest = sorted[sorted.length - 1];
+  const lastOurs = [...sorted].reverse().find((m) => isOurAddress(m.from));
+  const lastCust = [...sorted].reverse().find((m) => !isOurAddress(m.from) && m.t > origAt);
+
+  const out: { lifecycle?: ReservationLifecycle; our_reply_at?: number; responded_at?: number } = {};
+  const newLifecycle: ReservationLifecycle = isOurAddress(latest.from) ? 'awaiting_customer' : 'needs_reply';
+  if (current.lifecycle !== newLifecycle) out.lifecycle = newLifecycle;
+  if (lastOurs && (!current.our_reply_at || current.our_reply_at < lastOurs.t)) out.our_reply_at = lastOurs.t;
+  if (lastCust && (!current.responded_at || current.responded_at < lastCust.t)) out.responded_at = lastCust.t;
+  return out;
+}
+
+/**
+ * Reconcile each thread's lifecycle from its ACTUAL state -- who sent the last
+ * message -- so the queue is right even when staff reply directly from Outlook
+ * (outside the app's Send button):
+ *   last message is from us       -> awaiting_customer (we answered; their move)
+ *   last message is from customer -> needs_reply       (they are waiting on us)
+ * Also stamps our_reply_at (last reply we sent) and responded_at (last customer
+ * message). Resolved rows (booked/closed) are never touched. Best-effort, fail-soft.
  */
 export async function refreshReservationReplies(opts: { lookbackHours?: number; mailbox?: string } = {}): Promise<{ checked: number; newly_responded: number }> {
   const lookbackHours = opts.lookbackHours ?? 168;
@@ -140,41 +175,45 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
   const { Op } = await import('sequelize');
   const since = new Date(Date.now() - lookbackHours * 3600 * 1000);
   const rows = await ReservationQuote.findAll({
-    where: { mailbox, conversation_id: { [Op.ne]: null }, responded_at: null, received_at: { [Op.gte]: since } } as any,
+    where: {
+      mailbox,
+      conversation_id: { [Op.ne]: null },
+      lifecycle: { [Op.notIn]: ['booked', 'closed'] },
+      received_at: { [Op.gte]: since },
+    } as any,
   });
   if (rows.length === 0) return { checked: 0, newly_responded: 0 };
 
   const token = await getGraphToken();
-  let newly = 0;
+  let changed = 0;
   for (const rq of rows) {
     try {
       const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
-      // No $orderby with a conversationId $filter (Graph 400 InefficientFilter).
-      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$top=20`;
+      // No $orderby with a conversationId $filter (Graph 400 InefficientFilter); sort below.
+      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$top=25`;
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) continue;
       const data = (await r.json()) as { value?: any[] };
+      const msgs: ThreadMsg[] = (data.value || []).map((m) => ({
+        from: (m.from?.emailAddress?.address || '').toLowerCase(),
+        t: m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0,
+      }));
       const origAt = rq.received_at ? new Date(rq.received_at).getTime() : 0;
-      const cust = (rq.from_email || '').toLowerCase();
-      let respAt: string | null = null;
-      for (const m of data.value || []) {
-        const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
-        const t = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0;
-        if (fromAddr && fromAddr === cust && t > origAt) { respAt = m.receivedDateTime; break; }
-      }
-      if (respAt) {
-        // Customer came back. If we were waiting on them, we now owe a reply, so
-        // the row lights up as needs_reply again. Resolved rows (booked/closed)
-        // are left alone.
-        const patch: Record<string, unknown> = { responded_at: new Date(respAt) };
-        if (rq.lifecycle === 'awaiting_customer') patch.lifecycle = 'needs_reply';
-        await rq.update(patch as any);
-        newly++;
-      }
+      const decision = decideLifecycleFromThread(msgs, origAt, {
+        lifecycle: rq.lifecycle,
+        our_reply_at: rq.our_reply_at ? new Date(rq.our_reply_at).getTime() : null,
+        responded_at: rq.responded_at ? new Date(rq.responded_at).getTime() : null,
+      });
+
+      const patch: Record<string, unknown> = {};
+      if (decision.lifecycle) patch.lifecycle = decision.lifecycle;
+      if (decision.our_reply_at) patch.our_reply_at = new Date(decision.our_reply_at);
+      if (decision.responded_at) patch.responded_at = new Date(decision.responded_at);
+      if (Object.keys(patch).length > 0) { await rq.update(patch as any); changed++; }
     } catch { /* skip this row, non-fatal */ }
   }
-  logger.info('reservation replies refreshed', { checked: rows.length, newly_responded: newly });
-  return { checked: rows.length, newly_responded: newly };
+  logger.info('reservation lifecycle reconciled from threads', { checked: rows.length, changed });
+  return { checked: rows.length, newly_responded: changed };
 }
 
 /**
@@ -373,8 +412,9 @@ export async function ingestReservationQuotes(opts: {
     }
   }
 
-  // Best-effort reply detection so the queue shows what has been responded to.
-  await refreshReservationReplies({ lookbackHours: Math.max(lookbackHours, 72), mailbox }).catch((e) => {
+  // Reconcile lifecycle from thread state (who replied last) for ~3 weeks of
+  // rows, so the queue is correct even when staff reply from Outlook directly.
+  await refreshReservationReplies({ lookbackHours: Math.max(lookbackHours, 504), mailbox }).catch((e) => {
     logger.warn('reservation reply refresh failed (non-fatal)', { error: (e as Error).message });
   });
 
