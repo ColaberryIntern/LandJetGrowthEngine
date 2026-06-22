@@ -106,12 +106,16 @@ export async function fetchConversationText(mailbox: string, conversationId: str
   try {
     const token = await getGraphToken();
     const filter = encodeURIComponent(`conversationId eq '${conversationId}'`);
-    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime,body&$orderby=receivedDateTime asc&$top=30`;
+    // NOTE: Graph rejects $orderby together with a conversationId $filter
+    // (400 InefficientFilter), so we sort in code instead.
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime,body&$top=30`;
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) return null;
     const data = (await r.json()) as { value?: any[] };
+    const sorted = (data.value || []).slice().sort((a, b) =>
+      new Date(a.receivedDateTime || 0).getTime() - new Date(b.receivedDateTime || 0).getTime());
     const parts: string[] = [];
-    for (const m of data.value || []) {
+    for (const m of sorted) {
       const who = m.from?.emailAddress?.address || 'unknown';
       const body = m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || '');
       if (body.trim()) parts.push(`From ${who} (${m.receivedDateTime || ''}):\n${body.trim()}`);
@@ -145,7 +149,8 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
   for (const rq of rows) {
     try {
       const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
-      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$orderby=receivedDateTime desc&$top=15`;
+      // No $orderby with a conversationId $filter (Graph 400 InefficientFilter).
+      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=from,receivedDateTime&$top=20`;
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) continue;
       const data = (await r.json()) as { value?: any[] };
@@ -443,12 +448,16 @@ export async function getConversationThread(id: number): Promise<ConversationMes
   try {
     const token = await getGraphToken();
     const filter = encodeURIComponent(`conversationId eq '${rq.conversation_id}'`);
-    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=id,from,receivedDateTime,sentDateTime,body&$orderby=receivedDateTime asc&$top=30`;
+    // No $orderby with a conversationId $filter (Graph 400 InefficientFilter); sort below.
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?$filter=${filter}&$select=id,from,receivedDateTime,sentDateTime,body&$top=30`;
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) return [];
     const data = (await r.json()) as { value?: any[] };
     const me = mailbox.toLowerCase();
-    return (data.value || []).map((m) => {
+    return (data.value || [])
+      .slice()
+      .sort((a, b) => new Date(a.sentDateTime || a.receivedDateTime || 0).getTime() - new Date(b.sentDateTime || b.receivedDateTime || 0).getTime())
+      .map((m) => {
       const from = (m.from?.emailAddress?.address || '').toLowerCase() || null;
       const bodyText = m.body?.contentType === 'html' ? htmlToText(m.body?.content || '') : (m.body?.content || '');
       return {
