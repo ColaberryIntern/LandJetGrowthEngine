@@ -46,7 +46,12 @@ const FIELD_PATTERNS: Record<keyof Omit<BookRidesTrip, 'raw_extracted_at'>, RegE
 
 // Round-trip BookRides emails use "Pickup / Stop(s)" with no "Dropoff" label;
 // the first Stop is effectively the destination. Used as a dropoff fallback.
-const STOP_PATTERN = /Stop\(s\)\s*\n+\s*([0-9][^\n]+(?:\n(?!\s*(?:Return|Pickup|Dropoff|Charges|This email|©))[^\n]+)*)/i;
+const STOP_PATTERN = /Stop\(s\)\s*\n+\s*([A-Za-z0-9][^\n]+(?:\n(?!\s*(?:Return|Pickup|Dropoff|Charges|This email|©))[^\n]+)*)/i;
+
+/** Does a string look like a real destination (street+ZIP, an airport, or "City, ST")? */
+function looksLikeAddress(s: string): boolean {
+  return /\b\d{5}\b/.test(s) || /airport/i.test(s) || /,\s*[A-Z]{2}\b/.test(s);
+}
 
 /** Best (most complete: has City, ST ZIP) address among all matches of a global regex. */
 function bestAddress(text: string, pattern: RegExp): string | undefined {
@@ -121,7 +126,7 @@ export function parseBookRidesEmail(body: string): BookRidesTrip | null {
   // Fall back to the first stop so the route (and its map) still resolves.
   if (!trip.dropoff_address) {
     const stop = bestAddress(normalized, STOP_PATTERN);
-    if (stop) trip.dropoff_address = stop;
+    if (stop && looksLikeAddress(stop)) trip.dropoff_address = stop;
   }
 
   return trip.passenger_name || trip.reservation_number ? trip : null;

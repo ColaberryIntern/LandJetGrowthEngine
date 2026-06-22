@@ -176,5 +176,29 @@ Return Date: 7/13/26`;
       expect(trip?.pickup_address).toBe('6110 Hillandale Rd, Davenport, IA 52806');
       expect(trip?.dropoff_address).toBe('2300 E Devon Ave, Elk Grove Village, IL 60007');
     });
+
+    it('accepts a named-place stop (airport) as the dropoff', () => {
+      const airportRun = `RE: LandJet 8/19
+
+Reservation #: 3500999
+Service Type: Round Trip
+Pickup
+1221 Geneva National Ave S, Lake Geneva, WI 53147
+Stop(s)
+Chicago O'Hare International Airport
+Return Date: 8/21`;
+      const trip = parseBookRidesEmail(airportRun);
+      expect(trip?.dropoff_address).toBe("Chicago O'Hare International Airport");
+    });
+
+    it('does not treat a non-address line after Stop(s) as a dropoff', () => {
+      const noStopAddr = `Reservation #: 3501000
+Pickup
+500 Main St, Davenport, IA 52801
+Stop(s)
+To be determined`;
+      const trip = parseBookRidesEmail(noStopAddr);
+      expect(trip?.dropoff_address).toBeUndefined();
+    });
   });
 });
