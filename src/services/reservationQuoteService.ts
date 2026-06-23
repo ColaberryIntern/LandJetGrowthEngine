@@ -22,6 +22,8 @@ import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, classifyOutboundIntent, InboundIntent } from './inboundIntent';
 import { isNonQuoteEmail, isPostBookingEmail, missingForQuote } from './reservationClassify';
+import { lookupClassifierDecision } from './reservationClassifierRules';
+import { auditAction } from './auditLogService';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -242,6 +244,16 @@ async function reextractIntoRow(rq: ReservationQuote): Promise<Record<string, un
     confidence, status,
     result: result as unknown as Record<string, unknown>,
   };
+}
+
+/** Public single-row re-extraction (used by feedback "the trip is wrong"). */
+export async function reprocessReservationFromThread(id: number): Promise<boolean> {
+  const rq = await ReservationQuote.findByPk(id);
+  if (!rq) return false;
+  const patch = await reextractIntoRow(rq);
+  if (!patch) return false;
+  await rq.update(patch as any);
+  return true;
 }
 
 /**
@@ -498,12 +510,14 @@ export async function ingestReservationQuotes(opts: {
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;
 
-      // Keep inbox noise out of the active queue. Post-booking notices (invoice /
-      // receipt / confirmation) are filed as not_quote even if a stray trip was
-      // parsed from them, since they are not new quote requests. Other automated
-      // noise is filed when it did not parse as a quote.
+      // Keep inbox noise out of the active queue. A LEARNED rule from a human
+      // correction wins first (the system got told once), then post-booking
+      // notices (invoice/receipt/confirmation), then the noise heuristic.
       const isQuote = isBookingIntent(result) || total != null;
-      const lifecycle = isPostBookingEmail(e.subject, e.body) ? 'not_quote'
+      const learned = await lookupClassifierDecision(e.from);
+      const lifecycle = learned === 'not_quote' ? 'not_quote'
+        : learned === 'quote' ? 'needs_reply'
+        : isPostBookingEmail(e.subject, e.body) ? 'not_quote'
         : (!isQuote && isNonQuoteEmail(e.from, e.subject, e.body)) ? 'not_quote'
         : 'needs_reply';
 
@@ -695,6 +709,11 @@ export async function sendReservationQuote(id: number): Promise<{ sent: boolean;
   // until it is booked or closed.
   await rq.update({ result, our_reply_at: now, lifecycle: 'awaiting_customer' } as any);
   logger.info('reservation quote sent', { id, to, from });
+  // Audit the customer-facing send (TBI gap G5): quote sends were previously
+  // unaudited despite being a consequential, money-bearing action.
+  await auditAction('reservation.quote.send', 'reservation_quote', id, {
+    newValue: { to, from, subject: draft.subject, quote_total: rq.quote_total ?? null, status: rq.status },
+  });
   return { sent: true, dry: false, to, from, draft };
 }
 

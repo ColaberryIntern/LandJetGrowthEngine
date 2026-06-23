@@ -599,6 +599,41 @@ router.post('/reservations/merge', authorize('campaigns:write'), async (req: Req
   } catch (error) { next(error); }
 });
 
+// Reclassify (quote / not a quote) AND learn the sender rule for next time.
+router.post('/reservations/:id/reclassify', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { reclassifyReservation } = await import('../../services/reservationFeedbackService');
+    const decision = String(req.body?.decision || '');
+    if (decision !== 'quote' && decision !== 'not_quote') return res.status(400).json({ error: 'decision must be quote or not_quote' });
+    const by = (req as any).user?.email || (req as any).user?.id || null;
+    res.json(await reclassifyReservation(Number(req.params.id), decision as any, by));
+  } catch (error) { next(error); }
+});
+
+// Operator feedback on a reservation: store it (training data) + apply any fix.
+router.post('/reservations/:id/feedback', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { submitFeedback } = await import('../../services/reservationFeedbackService');
+    const category = String(req.body?.category || '').trim();
+    if (!category) return res.status(400).json({ error: 'category is required' });
+    const by = (req as any).user?.email || (req as any).user?.id || null;
+    const result = await submitFeedback(Number(req.params.id), {
+      category,
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+      action: req.body?.action ? String(req.body.action) : undefined,
+      createdBy: by,
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+router.get('/reservations/:id/feedback', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getReservationFeedback } = await import('../../services/reservationFeedbackService');
+    res.json({ feedback: await getReservationFeedback(Number(req.params.id)) });
+  } catch (error) { next(error); }
+});
+
 // Soft delete / restore a reservation row.
 router.post('/reservations/:id/delete', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {

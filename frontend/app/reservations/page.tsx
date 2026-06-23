@@ -6,7 +6,7 @@ import {
   getReservations, ingestReservations, sendReservationQuote,
   generateReservationDraft, saveReservationDraft, setReservationLifecycle,
   getReservationConversation, mergeReservations, unmergeReservation,
-  deleteReservation, restoreReservation,
+  deleteReservation, restoreReservation, reclassifyReservation, submitReservationFeedback,
   type ReservationQuoteRow, type ReservationConversationMessage,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
@@ -243,6 +243,12 @@ export default function ReservationsPage() {
   const [convs, setConvs] = useState<Record<number, ReservationConversationMessage[]>>({});
   const editingRef = useRef(false);
 
+  // Per-row feedback form state.
+  const [fbOpen, setFbOpen] = useState<number | null>(null);
+  const [fbCategory, setFbCategory] = useState('misclassified');
+  const [fbComment, setFbComment] = useState('');
+  const [fbResult, setFbResult] = useState<Record<number, string>>({});
+
   // Manual merge mode: operator selects same-booking rows and picks one to keep.
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -348,6 +354,22 @@ export default function ReservationsPage() {
     setBusyFor(id, 'Removing...');
     try { await deleteReservation(id); await load(false); }
     catch (e) { setError((e as Error).message); }
+    finally { setBusyFor(id, null); }
+  }
+  async function handleReclassify(id: number, decision: 'quote' | 'not_quote') {
+    setBusyFor(id, 'Updating + learning...');
+    try { await reclassifyReservation(id, decision); await load(false); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusyFor(id, null); }
+  }
+  async function handleFeedback(id: number, category: string, comment: string, action?: string) {
+    setBusyFor(id, 'Sending feedback...');
+    try {
+      const r = await submitReservationFeedback(id, { category, comment, action });
+      setFbResult(prev => ({ ...prev, [id]: r.applied ? `Thanks - applied: ${r.applied}.` : 'Thanks - logged. We will use this to improve.' }));
+      setFbOpen(null); setFbComment('');
+      await load(false);
+    } catch (e) { setError((e as Error).message); }
     finally { setBusyFor(id, null); }
   }
   async function handleRestore(id: number) {
@@ -751,8 +773,8 @@ export default function ReservationsPage() {
                       ) : lc === 'not_quote' ? (
                         <>
                           <span className="text-xs text-gray-500">Not a quote request.</span>
-                          <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
-                            className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Actually a quote</button>
+                          <button onClick={() => handleReclassify(r.id, 'quote')} disabled={!!actionBusy}
+                            className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100" title="Restore it AND teach the system this sender is a quote.">Actually a quote</button>
                           <button onClick={() => handleDelete(r.id)} disabled={!!actionBusy}
                             className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200">&#128465;&#65039; Delete</button>
                         </>
@@ -767,14 +789,62 @@ export default function ReservationsPage() {
                             <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
                               className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Reopen</button>
                           )}
-                          <button onClick={() => handleLifecycle(r.id, 'not_quote')} disabled={!!actionBusy}
-                            className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-200" title="This is not a quote request; move it out of the queue.">Not a quote</button>
+                          <button onClick={() => handleReclassify(r.id, 'not_quote')} disabled={!!actionBusy}
+                            className="rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-200" title="Not a quote request -- move it out AND teach the system.">Not a quote</button>
                           {lc === 'completed' && <span className="text-xs text-teal-600">Auto-resolved (customer signed off)</span>}
                           {mergedKids > 0 && <span className="text-xs text-violet-600">{mergedKids} other request{mergedKids === 1 ? '' : 's'} merged in</span>}
                         </>
                       )}
+                      <button onClick={() => { setFbOpen(fbOpen === r.id ? null : r.id); setFbCategory('misclassified'); setFbComment(''); }}
+                        className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50" title="Tell us what's wrong; we fix it and learn.">
+                        &#9888;&#65039; Report an issue
+                      </button>
                       {actionBusy && <span className="text-xs text-gray-400">{actionBusy}</span>}
                     </div>
+
+                    {fbResult[r.id] && <div className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{fbResult[r.id]}</div>}
+
+                    {fbOpen === r.id && (
+                      <div className="rounded-md border border-gray-200 bg-gray-50/70 p-3 space-y-2">
+                        <div className="text-sm font-medium text-gray-700">What&apos;s wrong with this reservation?</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select value={fbCategory} onChange={e => setFbCategory(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
+                            <option value="misclassified">Wrong classification (quote vs not)</option>
+                            <option value="wrong_route">Wrong pickup / dropoff</option>
+                            <option value="wrong_trip">Wrong date / passengers</option>
+                            <option value="wrong_price">Wrong price</option>
+                            <option value="wrong_reply">AI reply was wrong</option>
+                            <option value="wrong_status">Wrong status (needs reply / awaiting / resolved)</option>
+                            <option value="other">Something else</option>
+                          </select>
+                          {/* category-specific one-click fixes */}
+                          {fbCategory === 'misclassified' && lc !== 'not_quote' && (
+                            <button onClick={() => handleFeedback(r.id, 'misclassified', fbComment, 'reclassify_not_quote')} disabled={!!actionBusy}
+                              className="rounded bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300">This is NOT a quote (file + learn)</button>
+                          )}
+                          {fbCategory === 'misclassified' && lc === 'not_quote' && (
+                            <button onClick={() => handleFeedback(r.id, 'misclassified', fbComment, 'reclassify_quote')} disabled={!!actionBusy}
+                              className="rounded bg-rose-100 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-200">This IS a quote (restore + learn)</button>
+                          )}
+                          {(fbCategory === 'wrong_route' || fbCategory === 'wrong_trip' || fbCategory === 'wrong_price') && (
+                            <button onClick={() => handleFeedback(r.id, fbCategory, fbComment, 're_extract')} disabled={!!actionBusy}
+                              className="rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-200">Re-read conversation &amp; fix</button>
+                          )}
+                          {fbCategory === 'wrong_status' && (['needs_reply', 'awaiting_customer', 'booked', 'closed'] as const).map(s => (
+                            <button key={s} onClick={() => handleFeedback(r.id, 'wrong_status', fbComment, `set_lifecycle:${s}`)} disabled={!!actionBusy}
+                              className="rounded bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300">{LIFECYCLE_META[s]?.label || s}</button>
+                          ))}
+                        </div>
+                        <textarea value={fbComment} onChange={e => setFbComment(e.target.value)} rows={2}
+                          placeholder="Describe exactly what's wrong (optional but helps us learn)..."
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => handleFeedback(r.id, fbCategory, fbComment)} disabled={!!actionBusy || (!fbComment.trim())}
+                            className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">Submit feedback</button>
+                          <button onClick={() => setFbOpen(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                        </div>
+                      </div>
+                    )}
 
                     {r.raw_body && (
                       <details className="text-xs text-gray-500">

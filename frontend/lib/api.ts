@@ -1071,6 +1071,16 @@ export function unmergeReservation(id: number) {
     `/admin/quotes/reservations/${id}/unmerge`, { method: 'POST' });
 }
 
+export function reclassifyReservation(id: number, decision: 'quote' | 'not_quote') {
+  return request<{ id: number; lifecycle: string }>(
+    `/admin/quotes/reservations/${id}/reclassify`, { method: 'POST', body: JSON.stringify({ decision }) });
+}
+
+export function submitReservationFeedback(id: number, body: { category: string; comment?: string; action?: string }) {
+  return request<{ stored: true; applied: string | null }>(
+    `/admin/quotes/reservations/${id}/feedback`, { method: 'POST', body: JSON.stringify(body) });
+}
+
 export function deleteReservation(id: number) {
   return request<{ id: number; deleted: boolean }>(`/admin/quotes/reservations/${id}/delete`, { method: 'POST' });
 }
