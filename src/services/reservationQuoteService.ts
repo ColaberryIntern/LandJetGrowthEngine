@@ -21,7 +21,7 @@ import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, classifyOutboundIntent, InboundIntent } from './inboundIntent';
-import { isNonQuoteEmail, isPostBookingEmail, missingForQuote } from './reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail, missingForQuote, firstDateInText } from './reservationClassify';
 import { lookupClassifierDecision } from './reservationClassifierRules';
 import { auditAction } from './auditLogService';
 
@@ -235,6 +235,10 @@ async function reextractIntoRow(rq: ReservationQuote): Promise<Record<string, un
   const text = rq.subject ? `Subject: ${rq.subject}\n\n${threadText}` : threadText;
   let result = await processInboundEmailNL(text, rq.from_email || undefined);
   result = await enrichWithDistance(result, text, rq.from_email || undefined);
+  if (result.trip && !result.trip.date_of_service) {
+    const d = firstDateInText(text);
+    if (d) result.trip.date_of_service = d;
+  }
   const oldMissing = missingForQuote((rq.result as any)?.trip).length;
   const newMissing = missingForQuote(result.trip).length;
   const nowPriced = Boolean(result.quote && result.quote.grand_total > 0);
@@ -518,6 +522,14 @@ export async function ingestReservationQuotes(opts: {
         }
       }
       result = await enrichWithDistance(result, extractText, e.from || undefined);
+
+      // Date fallback: BookRides puts "Date Of Service" in the body, but on reply
+      // threads the date often survives only in the subject ("...6/29/26 & 7/14/26").
+      // If the parsed trip has no date, take the first one from the subject/body.
+      if (result.trip && !result.trip.date_of_service) {
+        const d = firstDateInText(extractText);
+        if (d) result.trip.date_of_service = d;
+      }
 
       // On a general inbox, only persist genuine trip/quote requests so the
       // reservations queue is not flooded with replies, newsletters, and other

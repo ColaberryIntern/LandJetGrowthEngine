@@ -51,6 +51,12 @@ export function isNonQuoteEmail(from?: string | null, subject?: string | null, b
   return false;
 }
 
+/** First MM/DD/YY(YY) date in the text (often in the subject), or null. */
+export function firstDateInText(text?: string | null): string | null {
+  const m = (text || '').match(/\b(\d{1,2}\/\d{1,2}\/(?:\d{4}|\d{2}))\b/);
+  return m ? m[1] : null;
+}
+
 export interface MissingField { key: string; label: string }
 
 /** What a request still needs before we can produce a proper quote. */
