@@ -21,7 +21,7 @@ router.get('/', authorize('campaigns:read'), async (req, res, next) => {
     res.json({ feedback: r.rows, total: r.count });
   } catch (e) { next(e); }
 });
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const fb = await submitFeedback({ ...req.body, user_id: req.user!.userId });
     res.status(201).json({ feedback: fb });
@@ -36,7 +36,7 @@ router.patch('/:id/respond', authorize('campaigns:write'), async (req: Request, 
 });
 
 // Unexpected Engagement
-router.post('/unexpected-engagement', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/unexpected-engagement', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const fb = await logUnexpectedEngagement({
       user_id: req.user!.userId,
@@ -55,7 +55,7 @@ router.get('/consents/stats', authorize('campaigns:read'), async (_req, res, nex
 router.get('/consents/:userId', authorize('campaigns:read'), async (req, res, next) => {
   try { res.json({ consents: await getUserConsents(req.params.userId as string) }); } catch (e) { next(e); }
 });
-router.post('/consents', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/consents', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const consent = await setConsent(req.user!.userId, req.body.consent_type, req.body.granted, req.ip || undefined);
     res.json({ consent });

@@ -2,6 +2,31 @@
 
 **Date:** 2026-06-20 · **Framework:** Trust Before Intelligence (INPACT™ / GOALS™) · **Method:** evidence-based, file:line cited (see `docs/trust-audit/*`).
 
+---
+
+## Re-audit addendum — 2026-06-23
+
+A code-level re-audit (file:line verified, skeptical of prior PROGRESS claims) was run after the 30-day remediation window. Net: **composite 56 → 63**, maturity **2.5 → 2.8 / 5 (Managed)**. The Trust Command Center now derives each condition's status from a **live runtime signal** (audit rows, trace coverage, env config) rather than a static claim.
+
+**Closed since 2026-06-20:**
+- **G1** — feedback write endpoints (`POST /`, `/unexpected-engagement`, `/consents`) now require `authorize('campaigns:write')`. (router already enforced `authenticate`.)
+- **G2** — Mandrill webhook now HMAC-SHA1 verified (`verifyMandrillSignature`, verify-when-`MANDRILL_WEBHOOK_KEY`-configured, constant-time compare). 5 failure-path tests.
+- **G5** — reservation **quote send** now audited (`reservation.quote.send`), joining email.send / lead.route / lead.advance → 4/4 consequential actions auditable.
+- **G8** — per-user `sendLimiter` (40/5min, `SEND_RATE_LIMIT_MAX`) on the 5 manual-send routes.
+- **G7** — `recordAgentRun` now persists `duration_ms` to its column when callers supply it (was permanently null).
+
+**Verified done (infra):** G4 cost capture (`ai_cost_log`), G6 traceId via AsyncLocalStorage on cost + audit rows.
+
+**Honest remaining gaps (reflected as partial/open on the dashboard):**
+- **G3** — still HTTP-only in prod (infra: TLS via Cloudflare/cert). Set `HTTPS_ENABLED=true` once terminated.
+- **G4 coverage** — cost wired to ~6 of ~20 LLM call sites; high-volume callers (email_reply, deal_matcher, email_intelligence, inbound quote, briefing) still untracked → dashboard shows **partial**.
+- **G7** — most agent call sites do not yet pass `duration_ms` → **partial/open** until they adopt it.
+- **G2 enforcement** — code shipped; **partial** until `MANDRILL_WEBHOOK_KEY` is set in prod.
+
+**Revised scores (2026-06-23):** Composite **63** · Governance 68 · Observability 58 · Auditability 68 · Explainability 70 · Security 75 · Privacy 55 · Reliability 62 · Business Impact 50. Recommendation unchanged: **GO WITH CONDITIONS** (HTTPS + full cost coverage are the remaining levers to reach MANAGED-3 / ~70).
+
+---
+
 ## Executive summary
 LandJet Growth Engine is an AI-heavy outreach + quoting platform (10+ gpt-4o capabilities, 6 scheduled jobs, 38 data models, Microsoft-Graph mail, Apollo, Mandrill). On the **central Trust-Before-Intelligence question — "does the AI act on its own, or does a human decide?" — the answer is good:** every customer-facing action is gated (sender whitelist, test-mode default, approval workflows, dry-by-default quote sends, a 0.90 auto-send confidence floor, a hallucination guard with deterministic fallback, and a master automation kill-switch that is OFF by default). **Explainability is the strongest area** (quotes ship with line-item breakdowns + confidence + provenance).
 

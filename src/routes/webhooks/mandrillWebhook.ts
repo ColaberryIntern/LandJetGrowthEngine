@@ -3,6 +3,7 @@ import { InteractionOutcome } from '../../models/InteractionOutcome';
 import { CommunicationLog } from '../../models/CommunicationLog';
 import { Unsubscribe } from '../../models/Unsubscribe';
 import { logger } from '../../config/logger';
+import { verifyMandrillSignature } from '../../middleware/mandrillSignature';
 
 const router = Router();
 
@@ -28,7 +29,7 @@ const EVENT_OUTCOME_MAP: Record<string, string> = {
   unsub: 'unsubscribed',
 };
 
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', verifyMandrillSignature, async (req: Request, res: Response, next: NextFunction) => {
   try {
     let events: MandrillEvent[] = [];
 

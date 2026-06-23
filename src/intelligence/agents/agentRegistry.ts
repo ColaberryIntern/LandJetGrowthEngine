@@ -76,10 +76,16 @@ export async function listAgents(filters: { type?: string; department?: string; 
 export async function recordAgentRun(name: string, metrics?: object, status: 'success' | 'failed' | 'skipped' = 'success', errorMessage?: string): Promise<void> {
   try {
     const { AgentRun } = require('../../models/AgentRun');
+    // Promote duration_ms out of the metrics blob into its own column (TBI G7),
+    // so latency is queryable. Back-compatible: callers that omit it stay null.
+    const durationMs = (metrics && typeof (metrics as Record<string, unknown>).duration_ms === 'number')
+      ? (metrics as Record<string, number>).duration_ms
+      : null;
     // Log to history table
     await AgentRun.create({
       agent_name: name,
       status,
+      duration_ms: durationMs,
       details: metrics || null,
       error_message: errorMessage || null,
     });

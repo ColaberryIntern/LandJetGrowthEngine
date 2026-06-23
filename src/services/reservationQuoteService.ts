@@ -231,8 +231,10 @@ async function reextractIntoRow(rq: ReservationQuote): Promise<Record<string, un
   if (!rq.conversation_id) return null;
   const threadText = await fetchConversationText(rq.mailbox, rq.conversation_id);
   if (!threadText) return null;
-  let result = await processInboundEmailNL(threadText, rq.from_email || undefined);
-  result = await enrichWithDistance(result, threadText, rq.from_email || undefined);
+  // Include the subject (dates/route are often there) when re-extracting.
+  const text = rq.subject ? `Subject: ${rq.subject}\n\n${threadText}` : threadText;
+  let result = await processInboundEmailNL(text, rq.from_email || undefined);
+  result = await enrichWithDistance(result, text, rq.from_email || undefined);
   const oldMissing = missingForQuote((rq.result as any)?.trip).length;
   const newMissing = missingForQuote(result.trip).length;
   const nowPriced = Boolean(result.quote && result.quote.grand_total > 0);
@@ -485,7 +487,10 @@ export async function ingestReservationQuotes(opts: {
       const existing = await ReservationQuote.findOne({ where: { graph_message_id: e.id }, attributes: ['id'] });
       if (existing) { counts.skipped_existing++; continue; }
 
-      let result = await processInboundEmailNL(e.body, e.from || undefined);
+      // Include the SUBJECT in the text we extract from -- dates and routes are
+      // often there ("LandJet ... 6/29/26 & 7/14/26") and the body alone misses them.
+      const extractText = e.subject ? `Subject: ${e.subject}\n\n${e.body}` : e.body;
+      let result = await processInboundEmailNL(extractText, e.from || undefined);
 
       // The latest message alone may not carry a full route (the customer gave
       // the pickup in an earlier email, the dropoff in a later one). If we could
@@ -496,11 +501,12 @@ export async function ingestReservationQuotes(opts: {
       if (!hasRoute && e.conversationId) {
         const threadText = await fetchConversationText(mailbox, e.conversationId);
         if (threadText && threadText.length > (e.body || '').length) {
-          const retry = await processInboundEmailNL(threadText, e.from || undefined);
+          const threadWithSubject = e.subject ? `Subject: ${e.subject}\n\n${threadText}` : threadText;
+          const retry = await processInboundEmailNL(threadWithSubject, e.from || undefined);
           if (retry.trip?.pickup_address && retry.trip?.dropoff_address) result = retry;
         }
       }
-      result = await enrichWithDistance(result, e.body, e.from || undefined);
+      result = await enrichWithDistance(result, extractText, e.from || undefined);
 
       // On a general inbox, only persist genuine trip/quote requests so the
       // reservations queue is not flooded with replies, newsletters, and other

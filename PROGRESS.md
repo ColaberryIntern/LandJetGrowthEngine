@@ -1,7 +1,17 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-06-19
+Last updated: 2026-06-23
+
+---
+
+## Session: 2026-06-23
+
+- [x] **Trust remediation: close P0 security gaps (G1/G2/G8), audit quote-send (G5), persist agent duration (G7), make the Trust dashboard score live/honest**
+  - Date: 2026-06-23
+  - What changed: Re-audited the TBI gaps at file:line (skeptical of prior PROGRESS claims) and closed the real open ones. **G1** — added `authorize('campaigns:write')` to the three unprotected feedback write routes ([feedbackRoutes.ts](src/routes/admin/feedbackRoutes.ts); router already enforced `authenticate`). **G2** — new [mandrillSignature.ts](src/middleware/mandrillSignature.ts) verifies the inbound Mandrill webhook via HMAC-SHA1 (base64) over `url + sorted(key+value)`, constant-time compare; verify-when-`MANDRILL_WEBHOOK_KEY`-configured so deploying it can't drop real events before the prod key lands; wired into [mandrillWebhook.ts](src/routes/webhooks/mandrillWebhook.ts). **G8** — new `sendLimiter` (per-user, 40/5min, `SEND_RATE_LIMIT_MAX`) in [rateLimiter.ts](src/middleware/rateLimiter.ts) applied to the 5 manual-send routes in [outreachRoutes.ts](src/routes/admin/outreachRoutes.ts). **G5** — [sendReservationQuote](src/services/reservationQuoteService.ts) now writes a `reservation.quote.send` audit entry (was unaudited despite being customer-facing). **G7** — [recordAgentRun](src/intelligence/agents/agentRegistry.ts) now persists `duration_ms` to its column when callers supply it (was permanently null). **Score honesty** — [trustDashboardService.ts](src/services/trustDashboardService.ts) updated to the 2026-06-23 re-audit (composite 56→63, maturity 2.8/5) and now emits a live `remediation` scorecard: each gap's status (met/partial/open) is derived from a real runtime signal (audit-action coverage 7d, traceId coverage on `ai_cost_log`, `duration_ms` coverage on `agent_runs`, env config) rather than a static claim; `open_conditions` is computed from it. New [trust page](frontend/app/admin/trust/page.tsx) "Trust remediation — live conditions" panel with LIVE vs CODE provenance chips. `.env.example` documents `MANDRILL_WEBHOOK_KEY`, `MANDRILL_WEBHOOK_URL`, `SEND_RATE_LIMIT_MAX`. Re-audit addendum added to [TRUST_COMPLIANCE_REPORT.md](docs/trust-audit/TRUST_COMPLIANCE_REPORT.md).
+  - Verification: backend `tsc --noEmit` clean + frontend `tsc --noEmit` clean (both exit 0); jest mandrillSignature 5/5 (valid passes, no-key accepts, wrong/missing sig rejected 401, URL-tamper rejected) + reservationQuoteService 32/32. BUILD-BREAK-HARDEN on the webhook: failure modes (forged sig, missing header, wrong URL, no key) each covered by a test.
+  - Notes: Honest remaining gaps shown as partial/open on the dashboard: **G3** HTTPS still infra-only (set `HTTPS_ENABLED=true` after TLS termination); **G4** cost wired to ~6 of ~20 LLM call sites (high-volume callers still untracked → "partial"); **G2** enforcement is "partial" until `MANDRILL_WEBHOOK_KEY` is set in prod; **G7** "partial/open" until agent call sites pass `duration_ms`. Not yet deployed.
 
 ---
 

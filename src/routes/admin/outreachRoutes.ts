@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
+import { sendLimiter } from '../../middleware/rateLimiter';
 import { getLeadsForToday, getMessageContext, generateDraft, advanceLead, skipLead, removeLeadFromCampaign, blockLead, getOutreachSettings, updateOutreachSettings, getStepInfo, interpolateVariables, mergeVariables, trackTestSend, resetTestSends, getTestSendCount, getOrGenerateLinkedInDraft, writeCachedLinkedInDraft } from '../../services/outreachQueryService';
 import { Op } from 'sequelize';
 import { Lead } from '../../models/Lead';
@@ -37,7 +38,7 @@ router.get('/briefing', authorize('campaigns:read'), async (_req: Request, res: 
   }
 });
 
-router.post('/briefing/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/briefing/send', authorize('campaigns:write'), sendLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sendMorningBriefing } = await import('../../services/morningBriefingService');
     const email = req.body.email || 'rmlandry29@gmail.com';
@@ -68,7 +69,7 @@ router.get('/pulse', authorize('campaigns:read'), async (_req: Request, res: Res
   }
 });
 
-router.post('/pulse/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/pulse/send', authorize('campaigns:write'), sendLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { buildPulseSnapshot, renderPulseSubject, renderPulseText, renderPulseHtml } = await import('../../services/ryanPulseService');
     const { sendOutreachEmail } = await import('../../services/outreachEmailService');
@@ -123,7 +124,7 @@ router.post('/inbox/draft-replies', authorize('campaigns:write'), async (req: Re
   }
 });
 
-router.post('/inbox/send-reply', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/inbox/send-reply', authorize('campaigns:write'), sendLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sendReply } = await import('../../services/emailReplyService');
     const { message_id, body } = req.body;
@@ -153,7 +154,7 @@ router.get('/kpi-report', authorize('campaigns:read'), async (_req: Request, res
   } catch (error) { next(error); }
 });
 
-router.post('/kpi-report/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/kpi-report/send', authorize('campaigns:write'), sendLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sendWeeklyKPIEmail } = await import('../../services/kpiReportService');
     const email = req.body.email || 'rmlandry29@gmail.com';
@@ -274,7 +275,7 @@ router.post('/inbound/quote', authorize('campaigns:write'), async (req: Request,
   }
 });
 
-router.post('/inbound/send', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/inbound/send', authorize('campaigns:write'), sendLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { to, subject, body } = req.body;
     if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body are required' });
