@@ -161,13 +161,26 @@ function tagsFor(r: ReservationQuoteRow): { label: string; cls: string }[] {
 // more than one notification per request; each lands as its own row. The
 // reservation number is the exact identity; otherwise fall back to a strict
 // passenger+route+date+time signature so genuinely different trips stay separate.
+// Strip "Re:" / "FW:" / "[External]" prefixes so a forward matches the original.
+function normSubject(s?: string | null): string {
+  let x = (s || '').toLowerCase();
+  let prev = '';
+  while (x !== prev) { prev = x; x = x.replace(/^\s*(re|fw|fwd|aw)\s*:\s*/i, '').replace(/^\s*\[[^\]]*\]\s*/, ''); }
+  return x.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 function dedupKey(r: ReservationQuoteRow): string | null {
   const t = r.result?.trip || {};
   if (t.reservation_number) return `res:${t.reservation_number}`;
   const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
   const parts = [norm(t.passenger_name), norm(t.pickup_address), norm(t.dropoff_address), norm(t.date_of_service), norm(t.start_time)];
-  if (parts.filter(Boolean).length < 4) return null; // not enough signal to call it a duplicate
-  return `trip:${parts.join('|')}`;
+  if (parts.filter(Boolean).length >= 4) return `trip:${parts.join('|')}`;
+  // No trip details to key on (e.g. an internal "FW: June 30th" forward with no
+  // pickup/dropoff yet): fall back to same sender + same subject (prefixes stripped).
+  const subj = normSubject(r.subject);
+  const sender = (r.from_email || '').toLowerCase();
+  if (subj.length >= 4 && sender) return `subj:${sender}|${subj}`;
+  return null;
 }
 
 interface DupInfo { isDup: boolean; count: number; canonId: number }
