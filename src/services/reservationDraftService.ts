@@ -138,12 +138,20 @@ export async function generateDraft(rq: ReservationQuote): Promise<ReservationAi
   const model = process.env.AI_MODEL || 'gpt-4o';
   const apiKey = process.env.OPENAI_API_KEY;
 
+  // Pull the whole conversation once -- used both to gauge engagement and to give
+  // the model context.
+  const history = rq.conversation_id ? await fetchConversationText(rq.mailbox, rq.conversation_id, 6000) : null;
+
   // Conversation stage drives both the prompt and the rubric (computed once):
   //  - need_info : missing details -> ask for them, no price
   //  - follow_up : we already replied/quoted -> serve them, never re-quote
   //  - first_quote: brand-new priceable request -> give the quote
+  // "Already engaged" is read from the THREAD (a prior reply from any landjet.com
+  // sender), since our_reply_at is only set for app-sent replies and is often null.
   const missing = missingForQuote((rq.result as any)?.trip);
-  const alreadyEngaged = Boolean(rq.our_reply_at);
+  const priorReplyInThread = history ? /From\s+\S*@landjet\.com/i.test(history) : false;
+  const alreadyEngaged = Boolean(rq.our_reply_at) || priorReplyInThread ||
+    ['awaiting_customer', 'completed', 'booked', 'closed'].includes(rq.lifecycle);
   const stage: DraftStage = (!facts.total && missing.length) ? 'need_info'
     : alreadyEngaged ? 'follow_up'
     : 'first_quote';
@@ -159,9 +167,7 @@ export async function generateDraft(rq: ReservationQuote): Promise<ReservationAi
         ? '\n\nReal past replies from this account to learn the voice from (do not copy facts, only the style):\n' +
           exemplars.map((e, i) => `--- example ${i + 1} ---\n${e.reply_excerpt.slice(0, 500)}`).join('\n\n')
         : '';
-      // Pull the whole conversation so the reply is written in context of
-      // everything discussed, not just the latest message.
-      const history = rq.conversation_id ? await fetchConversationText(rq.mailbox, rq.conversation_id, 6000) : null;
+      // Conversation context (fetched once above) so the reply fits the thread.
       const historyBlock = history
         ? `\n\nFull conversation so far (oldest first) -- reply in context of all of it, do not repeat what was already settled:\n${history}`
         : '';
