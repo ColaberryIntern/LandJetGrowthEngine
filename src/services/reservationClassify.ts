@@ -19,15 +19,22 @@ const NOISE_SUBJECT = /(added to (their|your) stor|has responded to your request
 
 // A POST-BOOKING notice (invoice, receipt, or trip confirmation) is about a trip
 // already handled, not a new quote request -- and BookRides sends these from the
-// SAME address as quote requests, so we detect them by content, not by sender.
-const POST_BOOKING_SUBJECT = /\b(invoice|receipt|statement)\b|services completed|(transportation|reservation|booking|trip) confirmation|payment (received|confirmation)/i;
-const POST_BOOKING_BODY = /invoice\s*[:#]\s*#?\d|grand total due|amount due|balance due|paid in full|download invoice|bill to:|please rate us on google|transportation confirmation/i;
+// SAME address as quote requests. We detect them by SUBJECT, which is reliable;
+// the BODY is NOT, because BookRides QUOTE-REQUEST emails share footer text with
+// invoices ("Grand Total", "Please rate us on Google"), which previously caused
+// real quote requests to be mis-filed as not_quote.
+const POST_BOOKING_SUBJECT = /\b(invoice|receipt|statement)\b|services completed|(transportation|reservation|booking|trip) confirmation|payment (received|confirmation|request)/i;
+
+// A quote request is NEVER a post-booking notice, whatever its body says.
+const QUOTE_REQUEST_SUBJECT = /quote request|requested? a quote|request(?:ing)? a quote|quote for a trip|new (reservation|quote)/i;
 
 /** Is this a post-booking notice (invoice / receipt / confirmation) rather than a new request? */
 export function isPostBookingEmail(subject?: string | null, body?: string | null): boolean {
-  if (POST_BOOKING_SUBJECT.test(subject || '')) return true;
-  if (POST_BOOKING_BODY.test((body || '').slice(0, 1500))) return true;
-  return false;
+  const s = subject || '';
+  if (QUOTE_REQUEST_SUBJECT.test(s)) return false; // an explicit quote request is a request
+  // Subject-only invoice/receipt/statement check. ("invoice"/"receipt"/"statement"
+  // can appear in a quote-request body too, so we deliberately do not scan the body.)
+  return POST_BOOKING_SUBJECT.test(s);
 }
 
 /** True when the email is automated/non-customer noise rather than a quote request. */

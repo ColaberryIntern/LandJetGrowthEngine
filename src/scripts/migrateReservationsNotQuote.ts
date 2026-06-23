@@ -36,6 +36,18 @@ async function main(): Promise<void> {
     }
   }
   console.log(`backfill: moved ${moved} noise rows to not_quote (scanned ${rows.length}).`);
+
+  // Reverse direction: fix FALSE POSITIVES -- rows sitting in not_quote that are
+  // not actually noise (real quote requests previously mis-filed). Restore them.
+  const filed = await ReservationQuote.findAll({ where: { lifecycle: 'not_quote', deleted_at: null } as any });
+  let restored = 0;
+  for (const rq of filed) {
+    if (!isNonQuoteEmail(rq.from_email, rq.subject, rq.raw_body)) {
+      await rq.update({ lifecycle: 'needs_reply', resolved_at: null } as any);
+      restored++;
+    }
+  }
+  console.log(`backfill: restored ${restored} mis-filed rows from not_quote to needs_reply (scanned ${filed.length}).`);
   console.log('migrateReservationsNotQuote complete.');
   process.exit(0);
 }

@@ -24,6 +24,15 @@ describe('isNonQuoteEmail (keep inbox noise out of Needs reply)', () => {
     // A real quote request is still NOT post-booking.
     expect(isPostBookingEmail('stacey Spillum requested a quote for a trip', 'Quote Request')).toBe(false);
   });
+
+  it('does NOT mis-file a quote request whose BODY has invoice-style footer text', () => {
+    // BookRides quote-request emails share footer text with invoices ("Grand
+    // Total", "Please rate us on Google") -- that must not flip them to not_quote.
+    const body = 'Trip Details ... Grand Total $1,119.19 ... Download our app. Please rate us on Google!';
+    expect(isPostBookingEmail('Quote Request for a trip on Saturday, September 12 2026', body)).toBe(false);
+    expect(isPostBookingEmail('Jason Klunder requested a quote for a trip on 09/12/2026', body)).toBe(false);
+    expect(isNonQuoteEmail('no-reply@bookridesonline.com', 'Quote Request for a trip on Saturday, September 12 2026', body)).toBe(false);
+  });
 });
 
 describe('missingForQuote (what a request still needs)', () => {
