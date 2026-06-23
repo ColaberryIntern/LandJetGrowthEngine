@@ -7,6 +7,12 @@ Last updated: 2026-06-23
 
 ## Session: 2026-06-23
 
+- [x] **Reservations: dedupe forwards by sender + subject (no trip details to key on)**
+  - Date: 2026-06-23
+  - What changed: Two rows for the same request ("June 30th" + "FW: June 30th" from the same internal forwarder) were not auto-deduped because neither had trip details. Added a fallback to `dedupKey` ([reservations/page.tsx](frontend/app/reservations/page.tsx)): when the reservation-number and trip-detail keys are unavailable, group by sender + normalized subject (`normSubject` strips Re:/FW:/[External] prefixes). Canonical stays the most-recent row (the forward), matching "precedence to who it got forwarded to".
+  - Verification: frontend tsc clean; deployed; /reservations 200.
+  - Notes: visual auto-grouping (collapses to one row + "N duplicates" badge, reversible via the toggle), consistent with the existing exact-duplicate behavior.
+
 - [x] **Reservations: subject-aware extraction, "Ready to book" gating, Awaiting button, sticky manual status**
   - Date: 2026-06-23
   - What changed: (1) "Ready to book" contradiction -- the green tag is the customer-intent tag, firing on "confirming I received your email"; tightened the confirmation classifier ([inboundIntent.ts](src/services/inboundIntent.ts), no bare "confirm") and gated the tag so it only shows when the trip is complete (priced / nothing missing) ([reservations/page.tsx](frontend/app/reservations/page.tsx)). (2) Read the SUBJECT in extraction -- dates/routes are often there ("...Kenneth Guy 6/29/26 & 7/14/26") and the body alone missed them; ingest + reextract prepend "Subject: ..." for the NL path, and `firstDateInText` ([reservationClassify.ts](src/services/reservationClassify.ts)) backfills the trip date from the subject even on the BookRides parser path. (3) "Awaiting customer" button in Needs reply (+ a "Needs reply" button back). (4) Manual status sticks: `setReservationLifecycle` stamps `manual_lifecycle_at`; the reconcile respects a hand-set status (no auto lifecycle / incomplete override) until a NEW message arrives, then resumes auto. Schema via idempotent [migrateReservationsManualLifecycle.ts](src/scripts/migrateReservationsManualLifecycle.ts).
