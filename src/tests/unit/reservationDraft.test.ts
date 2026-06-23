@@ -33,6 +33,14 @@ describe('scoreDraft (self-evaluating rubric)', () => {
     expect(r.score).toBeLessThan(0.7);
   });
 
+  it('on a follow-up, NOT re-quoting is rewarded and a stray price is penalized', () => {
+    const good = scoreDraft({ subject: 'Re', text: 'Hi Greg,\n\nThe driver will reach you 24 hours prior with details. Let us know if you need anything else.\n\nBest,\nLandJet' }, rq(), true, 'follow_up');
+    expect(good.breakdown.no_new_quote).toBe(true);
+    expect('includes_price' in good.breakdown).toBe(false);
+    const bad = scoreDraft({ subject: 'Re', text: 'Hi Greg,\n\nGood news, the new total is $727.39. Please confirm.\n\nBest,\nLandJet' }, rq(), true, 'follow_up');
+    expect(bad.breakdown.no_new_quote).toBe(false);
+  });
+
   it('excludes price/route checks when the request has neither (fair denominator)', () => {
     const r = scoreDraft(
       { subject: 'Re', text: 'Hello there,\n\nThank you for your note. We will be in touch shortly with details.\n\nThanks,\nLandJet' },

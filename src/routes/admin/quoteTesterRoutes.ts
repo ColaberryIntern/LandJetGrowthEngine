@@ -42,7 +42,9 @@ import {
   detectMarketForTrip,
   extractStopsFromTrip,
   mapServiceType,
+  processInboundEmailNL,
 } from '../../services/inboundQuoteEngine';
+import { roadMilesBetween } from '../../services/googleDistance';
 import { SystemSetting } from '../../models/SystemSetting';
 
 const router = Router();
@@ -293,37 +295,53 @@ router.post('/test', authorize('campaigns:read'), async (req: Request, res: Resp
       if (!email_body || typeof email_body !== 'string') {
         return res.status(400).json({ error: 'email_body is required for paste mode' });
       }
+      // Use the SAME pipeline the live Reservations queue runs: rigid BookRides
+      // parse first, then AI extraction for free-form / Ruby / concierge emails.
+      // (Previously this only did the BookRides parse, so non-BookRides emails the
+      // queue handles fine failed here with "Could not parse".)
       if (!isBookRidesEmail(email_body)) {
-        // Allow it anyway -- maybe a different inbound format -- but flag.
-        parseError = 'Body does not look like a BookRides email. Trying anyway.';
+        parseError = 'Not a BookRides email; read with AI extraction (same as the live queue).';
       }
-      const trip = parseBookRidesEmail(email_body);
-      if (!trip) {
-        return res.status(400).json({ error: 'Could not parse trip details from the email. Use manual mode instead.' });
+      const result = await processInboundEmailNL(email_body);
+      const trip = result.trip;
+      if (!trip || !trip.pickup_address || !trip.dropoff_address) {
+        return res.status(400).json({
+          error: 'Could not extract a pickup and dropoff from this email' +
+            (result.manual_reason ? ` (${result.manual_reason})` : '') + '. Use manual mode.',
+          parsed_trip: trip || null,
+        });
       }
-      parsedTrip = trip;
-      const market = detectMarketForTrip(email_body, trip);
+      const market = result.market || detectMarketForTrip(email_body, trip);
       if (!market) {
         return res.status(400).json({
-          error: 'Could not detect market from email. Use manual mode with explicit market.',
+          error: 'Could not detect a LandJet market for this trip. Use manual mode with an explicit market.',
           parsed_trip: trip,
         });
       }
-      const stops = extractStopsFromTrip(trip);
+      parsedTrip = trip;
+      const service_type = mapServiceType(trip.service_type);
+      const isRound = /round/i.test(trip.service_type || '');
+      const flat = detectFlatRateRoute(trip.pickup_address, trip.dropoff_address);
+      // Real road miles like the live queue's distance enrichment; flat routes
+      // need none. Fall back to the 200 mi minimum if the lookup is unavailable.
+      let miles = 200;
+      if (!flat) {
+        const oneWay = await roadMilesBetween(trip.pickup_address, trip.dropoff_address);
+        if (oneWay && oneWay > 0) miles = isRound ? oneWay * 2 : oneWay;
+      }
       resolvedInput = {
         market,
-        service_type: mapServiceType(trip.service_type),
-        // BookRides parser does not extract miles -- caller can override via
-        // manual mode for the distance. Default to 200 so the engine returns
-        // the minimum-mileage fallback rather than $0.
-        passenger_miles: 200,
-        stops,
+        customer_category: detectCustomerCategory(trip.passenger_email),
+        service_type,
+        passenger_miles: miles,
+        stops: extractStopsFromTrip(trip),
         payment: 'credit_card',
         customer_email: trip.passenger_email,
+        flat_rate_amount: flat ? flat.price : undefined,
       };
       mapOrigin = trip.pickup_address || null;
       mapDestination = trip.dropoff_address || null;
-      mapRoundTrip = /round\s*trip/i.test(trip.service_type || '');
+      mapRoundTrip = isRound;
     } else if (method === 'manual') {
       if (!quote_input || typeof quote_input !== 'object') {
         return res.status(400).json({ error: 'quote_input is required for manual mode' });
