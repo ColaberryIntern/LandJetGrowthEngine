@@ -7,6 +7,11 @@ Last updated: 2026-06-19
 
 ## Session: 2026-06-20
 
+- [x] **Reservations: AI reply composer only when it's our turn (hide in Awaiting/Resolved)**
+  - Date: 2026-06-23
+  - What changed: The "Generate AI reply" composer showed in Awaiting customer (we already replied), which is wrong. Gated the composer on `canReply = lifecycle === 'needs_reply'` so it only appears when the ball is in our court ([reservations/page.tsx](frontend/app/reservations/page.tsx)). The "what's missing" panel now says "We already asked... awaiting their reply" instead of pointing at a non-existent button when not our turn.
+  - Verification: frontend tsc clean; deployed.
+
 - [x] **Reservations: resolve when WE close the thread; Past trips bucket once trip passes**
   - Date: 2026-06-22
   - What changed: A reservation is Resolved when there's no more work for us -- including when WE send the closing message, not only when the customer signs off. Previously a courtesy close from the desk (Lorie's "Thank you for letting us know") left the row stuck in Awaiting customer. New [classifyOutboundIntent](src/services/inboundIntent.ts): a closing courtesy from us (no price/question/CTA) vs an open one (quote/question/confirm-to-book). [decideLifecycleFromThread](src/services/reservationQuoteService.ts) maps a closing last-message-from-us to `completed` (resolved); an open one stays awaiting_customer; a later customer question still re-opens to needs_reply. Past trips: a resolved reservation stays in Resolved until its trip date passes, then moves to a new "Past trips" tab (hidden by default, viewable); Resolved + All exclude past trips ([tripPassed](frontend/app/reservations/page.tsx)).

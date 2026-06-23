@@ -540,9 +540,10 @@ export default function ReservationsPage() {
             // Show "missing" only for real-but-incomplete requests (some info present,
             // not priced, not filed as non-quote).
             const showMissing = lc !== 'not_quote' && !r.quote_total && miss.length > 0 && miss.length < 4;
-            // Composer is available for priceable rows AND incomplete-but-real
-            // requests (to draft a "please send us X" note).
-            const canSend = r.status === 'auto_ready' || r.status === 'needs_review' || showMissing;
+            // The AI reply composer only belongs when it is OUR turn (needs_reply).
+            // In Awaiting/Resolved/etc. we already replied, so no "Generate AI reply".
+            const canReply = lc === 'needs_reply';
+            const canSend = canReply && (r.status === 'auto_ready' || r.status === 'needs_review' || showMissing);
             const route = mapSrc(trip?.pickup_address, trip?.dropoff_address);
             const appt = apptRelative(trip?.date_of_service, (trip as { start_time?: string })?.start_time);
             const tg = tagsFor(r);
@@ -640,7 +641,9 @@ export default function ReservationsPage() {
                       <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm">
                         <div className="font-medium text-orange-800">To send a proper quote, we still need:</div>
                         <ul className="mt-1 list-disc pl-5 text-orange-700">{miss.map((m, i) => <li key={i}>{m}</li>)}</ul>
-                        <div className="mt-1 text-xs text-orange-600">Use &quot;Generate AI reply&quot; below to draft a note asking the customer for exactly these.</div>
+                        {canReply
+                          ? <div className="mt-1 text-xs text-orange-600">Use &quot;Generate AI reply&quot; below to draft a note asking the customer for exactly these.</div>
+                          : <div className="mt-1 text-xs text-orange-600">We already asked the customer for these and are awaiting their reply.</div>}
                       </div>
                     )}
 
