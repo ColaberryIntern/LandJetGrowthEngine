@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import { Lead } from '../models/Lead';
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { recordLlmUsage } from './aiCost';
 
 export interface DealSummary {
   deal_name: string;
@@ -85,6 +86,7 @@ Only return the top ${limit} matches. Sort by score descending.`,
     if (!response.ok) throw new Error('AI matching failed');
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'deal_matching', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const matches = JSON.parse(cleaned);

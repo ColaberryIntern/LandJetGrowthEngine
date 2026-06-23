@@ -31,6 +31,12 @@ Last updated: 2026-06-23
   - Verification: backend tsc clean; redeployed; `docker logs landjet-backend` shows NO `ERR_ERL_*`/ValidationError after restart; container Up; trust endpoint 401 (healthy).
   - Notes: HTTPS (G3) remains an infra task per the directive; flipping `HTTPS_ENABLED=true` after TLS auto-greens the dashboard G3 row.
 
+- [x] **Trust G4: extend LLM cost instrumentation to the remaining high-volume call sites**
+  - Date: 2026-06-23
+  - What changed: The re-audit found cost capture covered only ~6 of ~20 OpenAI call sites. Added the fail-soft `recordLlmUsage({ source, usage })` (from [aiCost.ts](src/services/aiCost.ts)) after the chat-completion parse in 8 more services: [replyAnalysisService.ts](src/services/replyAnalysisService.ts) (`reply_analysis`), [inboundLeadService.ts](src/services/inboundLeadService.ts) (`inbound_lead_quote`), [emailReplyService.ts](src/services/emailReplyService.ts) (`email_reply`), [dealMatchingService.ts](src/services/dealMatchingService.ts) (`deal_matching`), [morningBriefingService.ts](src/services/morningBriefingService.ts) (`morning_briefing`), [emailIntelligenceService.ts](src/services/emailIntelligenceService.ts) (`email_intelligence`), [dailySummaryService.ts](src/services/dailySummaryService.ts) (`daily_summary`), [todoGenerationService.ts](src/services/todoGenerationService.ts) (`todo_generation`). Two suspected files were correctly left untouched — `landjetFaqService` (keyword-based, no LLM call) and `messageAgentService` (delegates to the already-instrumented `aiMessageService`). Dashboard G4 condition flipped `partial -> met` ([trustDashboardService.ts](src/services/trustDashboardService.ts)): signal now "instrumented across all high-volume LLM call sites".
+  - Verification: backend `tsc --noEmit` clean (exit 0). Each insert placed after the response `.ok` guard, fail-soft (unwrapped), behavior-preserving (inlined parses split to capture `usage` first).
+  - Notes: 5 additional route-level LLM calls in `src/routes/admin/outreachRoutes.ts` were also instrumented (sources `outreach_route:*`) but that file is part of concurrent in-flight outreach work; those lines ride along with that feature's commit rather than this one.
+
 ---
 
 ## Session: 2026-06-20

@@ -1,6 +1,7 @@
 import { sendOutreachEmail } from './outreachEmailService';
 import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { recordLlmUsage } from './aiCost';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -118,6 +119,7 @@ export async function generateMorningBriefing(userEmail: string = 'rlandry@landj
 
     if (!resp.ok) throw new Error('AI briefing generation failed');
     const data = (await resp.json()) as any;
+    recordLlmUsage({ source: 'morning_briefing', usage: data.usage });
     const body = (data.choices?.[0]?.message?.content || '').trim();
 
     recordAgentRun('morning_briefing', { events_count: events.length }).catch(() => {});

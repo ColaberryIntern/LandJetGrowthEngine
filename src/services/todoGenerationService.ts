@@ -1,5 +1,6 @@
 import { logger } from '../config/logger';
 import { ClassifiedData } from '../models/EmailThread';
+import { recordLlmUsage } from './aiCost';
 
 export interface StructuredTodo {
   content: string;
@@ -86,6 +87,7 @@ Return a JSON array of strings. Max 7 items.`,
     if (!response.ok) return rawTodos;
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'todo_generation', usage: data.usage });
     const content = data.choices?.[0]?.message?.content || '';
     const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const refined = JSON.parse(cleaned) as string[];

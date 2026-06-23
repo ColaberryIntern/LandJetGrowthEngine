@@ -3,6 +3,7 @@ import { logger } from '../config/logger';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
 import { Lead } from '../models/Lead';
 import { CommunicationLog } from '../models/CommunicationLog';
+import { recordLlmUsage } from './aiCost';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -201,6 +202,7 @@ Return JSON array: [{ index, draft_subject, draft_body, category, confidence }]`
 
     if (!resp.ok) throw new Error('AI reply generation failed');
     const data = (await resp.json()) as any;
+    recordLlmUsage({ source: 'email_reply', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const drafts = JSON.parse(cleaned);

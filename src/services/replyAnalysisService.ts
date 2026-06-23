@@ -18,6 +18,7 @@ import { CommunicationLog } from '../models/CommunicationLog';
 import { Lead } from '../models/Lead';
 import { logger } from '../config/logger';
 import { htmlToText } from './reservationQuoteService';
+import { recordLlmUsage } from './aiCost';
 
 const REPLY_MAILBOX = process.env.WEEKLY_BRIEFING_REPLY_MAILBOX || 'rlandry@landjet.com';
 const OUR_SENDERS = new Set(['rlandry@landjet.com', 'ryan@landjet.com', 'ryan.landry@landjet.com']);
@@ -74,7 +75,9 @@ async function generateProposed(
       body: JSON.stringify({ model: process.env.AI_MODEL || 'gpt-4o', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.6, max_tokens: 400 }),
     });
     if (!r.ok) return { body: '', error: r.status === 429 ? 'AI quota exceeded' : `AI unavailable (${r.status})` };
-    const body = (((await r.json()) as any).choices?.[0]?.message?.content || '').trim();
+    const data = (await r.json()) as any;
+    recordLlmUsage({ source: 'reply_analysis', usage: data.usage });
+    const body = (data.choices?.[0]?.message?.content || '').trim();
     return body ? { body, error: null } : { body: '', error: 'AI returned empty' };
   } catch (e) { return { body: '', error: (e as Error).message }; }
 }

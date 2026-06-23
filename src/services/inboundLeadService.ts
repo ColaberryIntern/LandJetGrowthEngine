@@ -5,6 +5,7 @@ import { processInboundEmail, InboundProcessResult } from './inboundQuoteEngine'
 import { QuoteOutput } from './landjetPricing';
 import { FaqMatch } from './landjetFaqService';
 import { validateAiQuoteBody, renderTemplateQuoteBody, QuoteContextForGuard } from './quoteResponseGuard';
+import { recordLlmUsage } from './aiCost';
 
 export interface QuoteRequest {
   lead_id?: number;
@@ -108,6 +109,7 @@ export async function generateQuoteResponse(request: QuoteRequest): Promise<Quot
     if (!response.ok) throw new Error('AI generation failed');
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'inbound_lead_quote', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 

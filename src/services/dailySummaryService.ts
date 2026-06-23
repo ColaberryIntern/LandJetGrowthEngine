@@ -4,6 +4,7 @@ import { CommunicationFeedback } from '../models/CommunicationFeedback';
 import { Op } from 'sequelize';
 import { logger } from '../config/logger';
 import { getFeedbackStats } from './communicationFeedbackService';
+import { recordLlmUsage } from './aiCost';
 
 export interface DailySummary {
   summary: string;
@@ -151,6 +152,7 @@ async function generateAISummary(
     }
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'daily_summary', usage: data.usage });
     return data.choices?.[0]?.message?.content || `Daily Summary: ${totalEmails} emails.`;
   } catch (error) {
     logger.error('Daily summary generation failed', { error: (error as Error).message });

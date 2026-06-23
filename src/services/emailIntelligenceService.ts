@@ -1,6 +1,7 @@
 import { logger } from '../config/logger';
 import { ClassifiedData } from '../models/EmailThread';
 import { recordAgentRun } from '../intelligence/agents/agentRegistry';
+import { recordLlmUsage } from './aiCost';
 
 /**
  * Classify an email using OpenAI to extract intent, priority, and action items.
@@ -78,6 +79,7 @@ ${(body || '').substring(0, 4000)}`;
     }
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'email_intelligence', usage: data.usage });
     const rawContent = data.choices?.[0]?.message?.content || '';
 
     // Strip any markdown fences
