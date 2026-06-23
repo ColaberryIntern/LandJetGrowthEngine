@@ -66,6 +66,7 @@ export class ReservationQuote extends Model {
   declare last_inbound_intent: string | null; // gratitude|confirmation|question|other (customer's latest msg)
   declare resolved_at: Date | null;       // when it entered the Resolved bucket (for newest-first sort)
   declare deleted_at: Date | null;        // soft delete: hidden from all views, recoverable
+  declare manual_lifecycle_at: Date | null; // operator set the lifecycle by hand; reconcile respects it until new activity
   declare created_at: Date;
   declare updated_at: Date;
 }
@@ -97,6 +98,7 @@ export function initReservationQuoteModel(sequelize: Sequelize): typeof Reservat
       last_inbound_intent: { type: DataTypes.TEXT, allowNull: true },
       resolved_at: { type: DataTypes.DATE, allowNull: true },
       deleted_at: { type: DataTypes.DATE, allowNull: true },
+      manual_lifecycle_at: { type: DataTypes.DATE, allowNull: true },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },

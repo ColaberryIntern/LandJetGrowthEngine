@@ -27,8 +27,9 @@ export function classifyInboundIntent(text: string): InboundIntent {
     /\b(can you|could you|would you|will you|what(?:'s| is| are| time)|when |where |how (much|many|long|do|does|would)|do you|does it|is it|is there|are there|can we|could we|any chance|any way|reschedul|cancel|change the|update the|instead|add (a|an|another)|what about|let me know if|is that)\b/.test(t);
   if (hasQuestion) return 'question';
 
+  // An explicit go-ahead to BOOK -- not a bare "confirming I received your email".
   const isConfirmation =
-    /\b(confirm(ed|ing|s)?|let'?s (do it|book|proceed|go|move forward)|please (book|proceed|go ahead|schedule|move forward)|go ahead|book it|we'?re good to go|approved?|yes,? (let'?s|please|go|that works|book|proceed)|that works for us|we accept|ready to book)\b/.test(t);
+    /\b(let'?s (do it|book|proceed|go|move forward)|please (book|proceed|go ahead|schedule)|go ahead and (book|schedule|proceed|move)|book it|we'?re good to go|ready to book|we accept|approved to (book|proceed)|yes,? (let'?s|book it|proceed|go ahead)|confirm(ed|ing)? (the|our) (booking|reservation|trip))\b/.test(t);
   if (isConfirmation) return 'confirmation';
 
   const isGratitude =

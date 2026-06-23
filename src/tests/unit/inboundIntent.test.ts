@@ -21,6 +21,12 @@ describe('classifyInboundIntent', () => {
     expect(intentNeedsReply('confirmation')).toBe(true);
   });
 
+  it('does NOT treat "confirming I received your email" as a booking confirmation', () => {
+    // This was firing a "Ready to book" tag on an incomplete request.
+    expect(classifyInboundIntent('Hi Mark - confirming I received this email. I look forward to getting the quote!')).not.toBe('confirmation');
+    expect(classifyInboundIntent('Just confirming receipt, thanks.')).not.toBe('confirmation');
+  });
+
   it('falls back to other for a substantive non-question message', () => {
     expect(classifyInboundIntent('Here is the address for the pickup: 123 Main St.')).toBe('other');
     expect(classifyInboundIntent('')).toBe('other');

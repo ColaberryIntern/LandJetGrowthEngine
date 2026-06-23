@@ -199,7 +199,9 @@ function intentTag(r: ReservationQuoteRow): { label: string; cls: string } | nul
   const lc = r.lifecycle || 'needs_reply';
   if (lc === 'completed') return { label: '\u{1F64F} Customer signed off', cls: 'bg-teal-100 text-teal-700' };
   if (lc === 'needs_reply' && r.last_inbound_intent === 'question') return { label: '❓ Question · needs answer', cls: 'bg-rose-100 text-rose-700' };
-  if (lc === 'needs_reply' && r.last_inbound_intent === 'confirmation') return { label: '✅ Ready to book', cls: 'bg-emerald-100 text-emerald-700' };
+  // "Ready to book" only makes sense when we actually have everything to quote.
+  const incomplete = !r.quote_total && missingFields(r).length > 0;
+  if (lc === 'needs_reply' && r.last_inbound_intent === 'confirmation' && !incomplete) return { label: '✅ Ready to book', cls: 'bg-emerald-100 text-emerald-700' };
   return null;
 }
 
@@ -781,6 +783,14 @@ export default function ReservationsPage() {
                       ) : (
                         <>
                           <span className="text-xs text-gray-400">Mark:</span>
+                          {lc !== 'awaiting_customer' && (
+                            <button onClick={() => handleLifecycle(r.id, 'awaiting_customer')} disabled={!!actionBusy}
+                              className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100" title="We are waiting on the customer; move this out of Needs reply.">Awaiting customer</button>
+                          )}
+                          {lc === 'awaiting_customer' && (
+                            <button onClick={() => handleLifecycle(r.id, 'needs_reply')} disabled={!!actionBusy}
+                              className="rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">Needs reply</button>
+                          )}
                           <button onClick={() => handleLifecycle(r.id, 'booked')} disabled={!!actionBusy}
                             className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">&#9989; Booked</button>
                           <button onClick={() => handleLifecycle(r.id, 'closed')} disabled={!!actionBusy}

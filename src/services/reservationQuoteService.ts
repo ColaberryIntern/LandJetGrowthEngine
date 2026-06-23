@@ -309,28 +309,39 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
       });
 
       const patch: Record<string, unknown> = {};
-      if (decision.lifecycle) patch.lifecycle = decision.lifecycle;
+      // Timestamps + intent always refresh (they are facts about the thread).
       if (decision.our_reply_at) patch.our_reply_at = new Date(decision.our_reply_at);
       if (decision.responded_at) patch.responded_at = new Date(decision.responded_at);
       if (decision.last_inbound_intent && decision.last_inbound_intent !== rq.last_inbound_intent) patch.last_inbound_intent = decision.last_inbound_intent;
-      if (decision.resolved_at !== undefined) patch.resolved_at = decision.resolved_at === null ? null : new Date(decision.resolved_at);
 
-      // When the customer just replied on an INCOMPLETE request, they may have
-      // supplied the missing info -- re-read the whole thread and re-price so the
-      // "Missing" flag clears if it is now complete.
-      if (decision.responded_at !== undefined && isIncompleteRequest(rq)) {
-        const reproc = await reextractIntoRow(rq);
-        if (reproc) Object.assign(patch, reproc);
-      }
+      // If the operator set the lifecycle by hand, respect it until NEW activity
+      // arrives in the thread (a message newer than the manual change). No auto
+      // lifecycle/resolved/incomplete override while the manual lock holds.
+      const latestT = msgs.reduce((mx, m) => Math.max(mx, m.t), 0);
+      const manualAt = rq.manual_lifecycle_at ? new Date(rq.manual_lifecycle_at).getTime() : 0;
+      const manualLocked = manualAt > 0 && latestT <= manualAt;
 
-      // An incomplete quote request is OUTSTANDING work: it belongs in Needs reply
-      // (per Ali), not Awaiting/Resolved, until we have enough to quote it. Use the
-      // freshest data (any re-extraction patch applied above).
-      const effectiveTotal = patch.quote_total !== undefined ? patch.quote_total : rq.quote_total;
-      const effectiveResult = (patch.result as any) || rq.result;
-      if (isIncompleteRequest(rq, effectiveResult, effectiveTotal as any)) {
-        if (rq.lifecycle !== 'needs_reply' || patch.lifecycle) patch.lifecycle = 'needs_reply';
-        if (rq.resolved_at != null || patch.resolved_at) patch.resolved_at = null;
+      if (!manualLocked) {
+        if (manualAt > 0) patch.manual_lifecycle_at = null; // new activity -> release the lock, resume auto
+        if (decision.lifecycle) patch.lifecycle = decision.lifecycle;
+        if (decision.resolved_at !== undefined) patch.resolved_at = decision.resolved_at === null ? null : new Date(decision.resolved_at);
+
+        // When the customer just replied on an INCOMPLETE request, they may have
+        // supplied the missing info -- re-read the whole thread and re-price so the
+        // "Missing" flag clears if it is now complete.
+        if (decision.responded_at !== undefined && isIncompleteRequest(rq)) {
+          const reproc = await reextractIntoRow(rq);
+          if (reproc) Object.assign(patch, reproc);
+        }
+
+        // An incomplete quote request is OUTSTANDING work: it belongs in Needs reply
+        // (per Ali), not Awaiting/Resolved, until we have enough to quote it.
+        const effectiveTotal = patch.quote_total !== undefined ? patch.quote_total : rq.quote_total;
+        const effectiveResult = (patch.result as any) || rq.result;
+        if (isIncompleteRequest(rq, effectiveResult, effectiveTotal as any)) {
+          if (rq.lifecycle !== 'needs_reply' || patch.lifecycle) patch.lifecycle = 'needs_reply';
+          if (rq.resolved_at != null || patch.resolved_at) patch.resolved_at = null;
+        }
       }
 
       if (Object.keys(patch).length > 0) { await rq.update(patch as any); changed++; }
@@ -729,7 +740,9 @@ export async function setReservationLifecycle(id: number, lifecycle: Reservation
   if (!rq) throw new Error('Reservation quote not found');
   // Resolved states carry a resolved_at (for newest-first sorting); reopening clears it.
   const resolved = lifecycle === 'booked' || lifecycle === 'closed' || lifecycle === 'completed';
-  await rq.update({ lifecycle, resolved_at: resolved ? (rq.resolved_at || new Date()) : null } as any);
+  // Stamp this as an operator decision so the reconcile respects it (and does not
+  // auto-flip it back) until new activity arrives in the thread.
+  await rq.update({ lifecycle, resolved_at: resolved ? (rq.resolved_at || new Date()) : null, manual_lifecycle_at: new Date() } as any);
   logger.info('reservation lifecycle updated', { id, lifecycle });
   return rq;
 }
