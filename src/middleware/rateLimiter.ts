@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Request } from 'express';
 
 export const apiLimiter = rateLimit({
@@ -36,7 +36,9 @@ export const sendLimiter = rateLimit({
   max: Number(process.env.SEND_RATE_LIMIT_MAX) || 40,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => req.user?.userId || req.ip || 'unknown',
+  // Key by authenticated user id; fall back to the IPv6-safe IP helper so a
+  // client cannot rotate within its /64 to evade the limit (ERR_ERL_KEY_GEN_IPV6).
+  keyGenerator: (req: Request) => req.user?.userId || (req.ip ? ipKeyGenerator(req.ip) : 'unknown'),
   message: {
     error: 'Send rate limit exceeded. Slow down or wait a few minutes before sending again.',
     code: 'SEND_RATE_LIMIT_EXCEEDED',
