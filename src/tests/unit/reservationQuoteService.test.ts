@@ -1,4 +1,4 @@
-import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent, isOurAddress, decideLifecycleFromThread } from '../../services/reservationQuoteService';
+import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent, isOurAddress, decideLifecycleFromThread, isIncompleteRequest } from '../../services/reservationQuoteService';
 import { processInboundEmail, detectMarketFromAddress } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
@@ -159,6 +159,28 @@ describe('decideLifecycleFromThread (lifecycle follows who sent the LAST message
     const msgs = [{ from: C, t: 100, preview: 'how much?' }, { from: US, t: 200, preview: 'Your quote is $900. Reply to confirm and we will book it.' }];
     const d = decideLifecycleFromThread(msgs, 100, cur);
     expect(d.lifecycle).toBe('awaiting_customer');
+  });
+});
+
+describe('isIncompleteRequest (a quote missing info is outstanding work -> Needs reply)', () => {
+  it('flags an NL request with a route but missing date/passengers', () => {
+    const rq = { lifecycle: 'awaiting_customer', quote_total: null, status: 'needs_review',
+      result: { source: 'nl', trip: { pickup_address: 'Waverly, IA', dropoff_address: 'Burlington, IA' } } } as any;
+    expect(isIncompleteRequest(rq)).toBe(true);
+  });
+  it('does NOT flag a priced request (complete)', () => {
+    const rq = { lifecycle: 'awaiting_customer', quote_total: '991.89', status: 'needs_review',
+      result: { source: 'nl', trip: { pickup_address: 'A', dropoff_address: 'B' } } } as any;
+    expect(isIncompleteRequest(rq)).toBe(false);
+  });
+  it('does NOT flag a not_quote row', () => {
+    const rq = { lifecycle: 'not_quote', quote_total: null, status: 'manual', result: { trip: {} } } as any;
+    expect(isIncompleteRequest(rq)).toBe(false);
+  });
+  it('honors freshest data overrides (re-extraction supplied a price)', () => {
+    const rq = { lifecycle: 'needs_reply', quote_total: null, status: 'needs_review',
+      result: { source: 'nl', trip: { pickup_address: 'A', dropoff_address: 'B' } } } as any;
+    expect(isIncompleteRequest(rq, { source: 'nl', trip: { pickup_address: 'A', dropoff_address: 'B', date_of_service: '07/17/2026', passengers: 4 } }, 900)).toBe(false);
   });
 });
 

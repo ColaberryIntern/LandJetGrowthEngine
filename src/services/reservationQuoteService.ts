@@ -21,7 +21,7 @@ import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, classifyOutboundIntent, InboundIntent } from './inboundIntent';
-import { isNonQuoteEmail, isPostBookingEmail } from './reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail, missingForQuote } from './reservationClassify';
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || '';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || '';
@@ -202,6 +202,49 @@ export function decideLifecycleFromThread(
 }
 
 /**
+ * Is this a real quote request that cannot be priced yet because details are
+ * missing? Such rows are outstanding work and belong in Needs reply (per Ali),
+ * not Awaiting/Resolved. `result`/`total` overrides let callers test freshest data.
+ */
+export function isIncompleteRequest(
+  rq: ReservationQuote,
+  result?: Record<string, unknown> | null,
+  total?: string | number | null,
+): boolean {
+  if (rq.lifecycle === 'not_quote') return false;
+  const t = total !== undefined ? total : rq.quote_total;
+  if (t != null) return false; // already priced -> complete
+  const res = (result ?? rq.result) as any;
+  const trip = res?.trip;
+  const looksLikeRequest = res?.source === 'nl' || Boolean(trip?.pickup_address || trip?.dropoff_address) || rq.status === 'needs_review';
+  return looksLikeRequest && missingForQuote(trip).length > 0;
+}
+
+/**
+ * Re-read the whole thread and re-price, so an incomplete request that the
+ * customer has since completed (gave the date / passengers) clears its "Missing"
+ * flag. Returns the row patch if it improved (more complete or now priced), else null.
+ */
+async function reextractIntoRow(rq: ReservationQuote): Promise<Record<string, unknown> | null> {
+  if (!rq.conversation_id) return null;
+  const threadText = await fetchConversationText(rq.mailbox, rq.conversation_id);
+  if (!threadText) return null;
+  let result = await processInboundEmailNL(threadText, rq.from_email || undefined);
+  result = await enrichWithDistance(result, threadText, rq.from_email || undefined);
+  const oldMissing = missingForQuote((rq.result as any)?.trip).length;
+  const newMissing = missingForQuote(result.trip).length;
+  const nowPriced = Boolean(result.quote && result.quote.grand_total > 0);
+  if (!nowPriced && newMissing >= oldMissing) return null; // no improvement -> leave as-is
+  const { confidence, status } = deriveConfidenceAndStatus(result);
+  return {
+    market: result.market || rq.market,
+    quote_total: result.quote ? result.quote.grand_total : rq.quote_total,
+    confidence, status,
+    result: result as unknown as Record<string, unknown>,
+  };
+}
+
+/**
  * Reconcile each thread's lifecycle from its ACTUAL state -- who sent the last
  * message -- so the queue is right even when staff reply directly from Outlook
  * (outside the app's Send button):
@@ -257,6 +300,25 @@ export async function refreshReservationReplies(opts: { lookbackHours?: number; 
       if (decision.responded_at) patch.responded_at = new Date(decision.responded_at);
       if (decision.last_inbound_intent && decision.last_inbound_intent !== rq.last_inbound_intent) patch.last_inbound_intent = decision.last_inbound_intent;
       if (decision.resolved_at !== undefined) patch.resolved_at = decision.resolved_at === null ? null : new Date(decision.resolved_at);
+
+      // When the customer just replied on an INCOMPLETE request, they may have
+      // supplied the missing info -- re-read the whole thread and re-price so the
+      // "Missing" flag clears if it is now complete.
+      if (decision.responded_at !== undefined && isIncompleteRequest(rq)) {
+        const reproc = await reextractIntoRow(rq);
+        if (reproc) Object.assign(patch, reproc);
+      }
+
+      // An incomplete quote request is OUTSTANDING work: it belongs in Needs reply
+      // (per Ali), not Awaiting/Resolved, until we have enough to quote it. Use the
+      // freshest data (any re-extraction patch applied above).
+      const effectiveTotal = patch.quote_total !== undefined ? patch.quote_total : rq.quote_total;
+      const effectiveResult = (patch.result as any) || rq.result;
+      if (isIncompleteRequest(rq, effectiveResult, effectiveTotal as any)) {
+        if (rq.lifecycle !== 'needs_reply' || patch.lifecycle) patch.lifecycle = 'needs_reply';
+        if (rq.resolved_at != null || patch.resolved_at) patch.resolved_at = null;
+      }
+
       if (Object.keys(patch).length > 0) { await rq.update(patch as any); changed++; }
     } catch { /* skip this row, non-fatal */ }
   }
