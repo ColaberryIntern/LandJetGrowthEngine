@@ -46,6 +46,11 @@ import attachmentRoutes from './routes/admin/attachmentRoutes';
 export function createApp() {
   const app = express();
 
+  // Behind a single nginx reverse proxy in prod: trust exactly one hop so req.ip
+  // resolves to the real client (not the proxy) and express-rate-limit can key
+  // per-client accurately. '1' (not 'true') keeps X-Forwarded-For unspoofable.
+  app.set('trust proxy', 1);
+
   // Security middleware
   app.use(helmet());
   app.use(cors());
