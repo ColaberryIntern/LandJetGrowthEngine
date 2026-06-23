@@ -5,9 +5,10 @@ import {
   getOutreachToday, advanceOutreachContact, skipOutreachContact, removeOutreachContact, blockOutreachContact,
   assignContactCampaign, getCampaigns,
   getOutreachSettings, updateOutreachSettings,
+  getSenders, updateSenders,
   getTestSendCount, resetTestSends,
   swapLead, rewriteDraft,
-  OutreachContact, OutreachSettings,
+  OutreachContact, OutreachSettings, SenderProfileDTO,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
 import { ExtensionInstallButton } from '@/components/ExtensionInstallButton';
@@ -36,6 +37,11 @@ export default function OutreachPage() {
   const [testSendCount, setTestSendCount] = useState(0);
   const [resetting, setResetting] = useState(false);
   const [signatureView, setSignatureView] = useState<'code' | 'preview'>('code');
+  // Per-sender identity (name, title, area, signature). Each outreach mailbox
+  // has one owner; the title drives what shows in their signature.
+  const [senders, setSenders] = useState<SenderProfileDTO[]>([]);
+  const [titleOptions, setTitleOptions] = useState<string[]>([]);
+  const [savingSenders, setSavingSenders] = useState(false);
   const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
   const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
   const [originalDrafts, setOriginalDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // stores pre-rewrite originals
@@ -120,6 +126,36 @@ export default function OutreachPage() {
       const saved = await updateOutreachSettings({ [key]: value });
       setSettings(prev => ({ ...prev, ...saved }));
     } catch {}
+  }
+
+  // Load sender profiles when the settings panel opens (once).
+  useEffect(() => {
+    if (!showSettings || senders.length) return;
+    (async () => {
+      try {
+        const data = await getSenders();
+        setSenders(data.profiles);
+        setTitleOptions(data.title_options || []);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings]);
+
+  async function handleSaveSenders() {
+    setSavingSenders(true);
+    try {
+      const saved = await updateSenders({ profiles: senders });
+      setSenders(saved.profiles);
+      showNotice('Sender profiles saved.');
+    } catch {
+      showNotice('Could not save sender profiles.');
+    } finally {
+      setSavingSenders(false);
+    }
+  }
+
+  function updateSenderField(email: string, field: keyof SenderProfileDTO, value: string | string[]) {
+    setSenders(prev => prev.map(p => (p.email === email ? { ...p, [field]: value } : p)));
   }
 
   useEffect(() => {
@@ -474,6 +510,58 @@ export default function OutreachPage() {
                   )}
                 </div>
               )}
+            </div>
+            {/* Sender Profiles -- per-person identity (name, title, area, signature) */}
+            <div className="border-t border-gray-100 pt-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-medium text-gray-700">Sender Profiles</p>
+                <button type="button" onClick={handleSaveSenders} disabled={savingSenders}
+                  className="rounded-md bg-gray-900 px-3 py-1 text-xs text-white hover:bg-gray-800 disabled:opacity-50">
+                  {savingSenders ? 'Saving...' : 'Save profiles'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Each mailbox sends as its owner with their own title and signature. Title drives what shows in the signature.</p>
+              <div className="space-y-3">
+                {senders.length === 0 && <p className="text-xs text-gray-400 italic">Loading profiles...</p>}
+                {senders.map(p => (
+                  <div key={p.email} className="rounded-md border border-gray-200 p-3">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-400">Name</label>
+                        <input type="text" value={p.name} onChange={e => updateSenderField(p.email, 'name', e.target.value)}
+                          className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400">Title</label>
+                        <select value={titleOptions.includes(p.title) ? p.title : '__custom'}
+                          onChange={e => { if (e.target.value !== '__custom') updateSenderField(p.email, 'title', e.target.value); }}
+                          className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none">
+                          {titleOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                          <option value="__custom">Custom...</option>
+                        </select>
+                        {!titleOptions.includes(p.title) && (
+                          <input type="text" value={p.title} placeholder="Custom title"
+                            onChange={e => updateSenderField(p.email, 'title', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400">Area (states)</label>
+                        <input type="text" value={(p.area || []).join(', ')}
+                          onChange={e => updateSenderField(p.email, 'area', e.target.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean))}
+                          placeholder="e.g. TX (blank = all)"
+                          className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-xs text-gray-400">{p.email}</span>
+                    </div>
+                    {p.signature_preview && (
+                      <div className="mt-2 rounded-md border border-gray-100 bg-gray-50 p-2 text-sm" dangerouslySetInnerHTML={{ __html: p.signature_preview }} />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
             {/* Send Schedule */}
             <div className="border-t border-gray-100 pt-3">

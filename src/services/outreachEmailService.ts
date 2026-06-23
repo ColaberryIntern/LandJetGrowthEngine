@@ -15,6 +15,7 @@ import { Lead } from '../models/Lead';
 import { Campaign } from '../models/Campaign';
 import { categoryMatches } from './leadClassification';
 import { validateEmail } from './emailValidationService';
+import { getSendersConfig, resolveProfile, detectIdentityConflict } from './senderProfileService';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
@@ -126,14 +127,30 @@ const SENDER_MAP: Record<string, string> = {
 // list, the send is rejected with a typed error rather than going out
 // from an unexpected address. To intentionally add a new sender, add it
 // here AND confirm it has a corresponding M365 mailbox + Graph permission.
+// Entries are stored lowercased; isAllowedSender() normalizes the candidate
+// so stray casing/whitespace on a real sender cannot wrongly reject it.
+// Percy + Grant added 2026-06-23 (Ali: each rep sends from their own mailbox);
+// all three are reachable via the existing tenant-wide Graph app.
 export const ALLOWED_SENDERS = new Set<string>([
   'rlandry@landjet.com',
+  'percy@landjet.com',
+  'gnecker@landjet.com',
   // Test redirect address used by outreach test_mode -- gmail; only valid
   // because test_mode rewrites the `to` and never actually transmits from
   // it, but Graph still rejects unknown senders so we whitelist it for
   // unit tests that go through sendOutreachEmail in test mode.
   'rmlandry29@gmail.com',
+  // Optional extra senders provisioned without a code change (comma-separated).
+  ...(process.env.OUTREACH_EXTRA_SENDERS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean),
 ]);
+
+/** Whitelist check that is robust to casing/whitespace on the candidate. */
+export function isAllowedSender(email: string | null | undefined): boolean {
+  return ALLOWED_SENDERS.has((email || '').trim().toLowerCase());
+}
 
 /**
  * Resolve the sender address for a given send. Order of precedence:
@@ -270,13 +287,35 @@ async function checkCategoryGuard(
  */
 export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const fromEmail = (input.from || SENDER_MAP.general).trim();
-  const senderName = input.senderName || 'Ryan Landry';
 
-  if (!ALLOWED_SENDERS.has(fromEmail)) {
+  if (!isAllowedSender(fromEmail)) {
     const error = `Sender ${fromEmail} is not in ALLOWED_SENDERS. Update src/services/outreachEmailService.ts to add it after provisioning the Graph mailbox.`;
     logger.error('Outreach send blocked by sender guard', { fromEmail, allowed: [...ALLOWED_SENDERS] });
     await writeCommLog(input, fromEmail, 'failed', null, { error, sender_guard: true }).catch(e =>
       logger.warn('comm log write failed (sender_guard)', { err: e.message }),
+    );
+    return { success: false, error, from: fromEmail };
+  }
+
+  // Identity resolution: the from-address owns the identity. Default the display
+  // name and signature from that mailbox's profile so a caller that forgets
+  // them (or passes the wrong person's) never goes out misattributed. An
+  // explicitly-provided name/signature is honored but then validated below.
+  const sendersConfig = await getSendersConfig();
+  const owner = resolveProfile(fromEmail, sendersConfig);
+  const senderName = (input.senderName && input.senderName.trim()) || owner?.name || 'LandJet';
+  const signature = (input.signature && input.signature.trim()) || owner?.signature || undefined;
+
+  // Identity-consistency guard: refuse to send when the display name or the
+  // signature describes a DIFFERENT known person than the from-address (the
+  // exact "percy@ with Ryan's signature" regression we are closing). Unknown
+  // senders (e.g. the gmail test redirect) have no profile and are skipped.
+  const conflict = detectIdentityConflict({ fromEmail, displayName: senderName, signature, config: sendersConfig });
+  if (conflict) {
+    const error = `Identity guard: from ${fromEmail} (${owner?.name || 'unknown'}) but the message carries "${conflict}". Use the sender's own name + signature.`;
+    logger.error('Outreach send blocked by identity guard', { fromEmail, owner: owner?.name, conflict });
+    await writeCommLog(input, fromEmail, 'failed', null, { error, identity_guard: true }).catch(e =>
+      logger.warn('comm log write failed (identity_guard)', { err: e.message }),
     );
     return { success: false, error, from: fromEmail };
   }
@@ -341,7 +380,7 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
     if (input.html && input.html.trim()) {
       contentType = 'HTML';
       content = input.html;
-    } else if (input.signature && input.signature.trim()) {
+    } else if (signature && signature.trim()) {
       contentType = 'HTML';
       // Convert plain text body to HTML (preserve line breaks) and append signature
       const htmlBody = cleanBody
@@ -349,7 +388,7 @@ export async function sendOutreachEmail(input: SendEmailInput): Promise<SendEmai
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>');
-      content = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333">${htmlBody}<br><br>${input.signature}</div>`;
+      content = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333">${htmlBody}<br><br>${signature}</div>`;
     }
 
     const message: Record<string, unknown> = {

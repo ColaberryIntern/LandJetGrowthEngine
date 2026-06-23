@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
 import { createLead, getLeadById, updateLead, listLeads, parseStatesParam } from '../../services/leadService';
+import { effectiveStates, getUserAllowedStates } from '../../services/leadScope';
 import { createAuditLog } from '../../services/auditLogService';
 import { logger } from '../../config/logger';
 import { Lead } from '../../models/Lead';
@@ -36,6 +37,13 @@ router.post('/', authorize('leads:write'), async (req: Request, res: Response, n
 
 router.get('/', authorize('leads:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Server-side area enforcement: clamp the requested states to the
+    // authenticated user's allowed scope so a TX rep cannot pull IA leads by
+    // editing the query string. Empty allowed scope (Ryan) = no restriction.
+    const allowedStates = await getUserAllowedStates(req.user!.userId);
+    const requestedStates = parseStatesParam(req.query.states);
+    const scopedStates = effectiveStates(allowedStates, requestedStates);
+
     const filters = {
       status: req.query.status as string,
       pipeline_stage: req.query.pipeline_stage as string,
@@ -44,7 +52,7 @@ router.get('/', authorize('leads:read'), async (req: Request, res: Response, nex
       lead_source_type: req.query.lead_source_type as string,
       state: req.query.state as string,
       city: req.query.city as string,
-      states: parseStatesParam(req.query.states),
+      states: scopedStates,
       search: req.query.search as string,
       min_score: req.query.min_score ? Number(req.query.min_score) : undefined,
       max_score: req.query.max_score ? Number(req.query.max_score) : undefined,

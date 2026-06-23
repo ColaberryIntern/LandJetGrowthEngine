@@ -10,8 +10,11 @@ import { User } from '../../models/User';
 import { createSequence } from '../../services/sequenceService';
 import { validateEmail, validateBatch } from '../../services/emailValidationService';
 import { sendOutreachEmail, testConnection, loadAttachmentFromPath, resolveSender } from '../../services/outreachEmailService';
+import { getSenderProfile, getSendersConfig, saveSendersConfig, buildSignature, TITLE_OPTIONS } from '../../services/senderProfileService';
+import { personalize } from '../../services/outreachPersonalization';
 import { recordAgentRun } from '../../intelligence/agents/agentRegistry';
 import { campaignVertical } from '../../services/leadClassification';
+import { recordLlmUsage } from '../../services/aiCost';
 import { logger } from '../../config/logger';
 
 const router = Router();
@@ -231,6 +234,7 @@ router.get('/inbound/scan', authorize('campaigns:read'), async (req: Request, re
     if (!aiResp.ok) return res.json({ inquiries: allEmails.slice(0, 5), total: allEmails.length });
 
     const data = (await aiResp.json()) as any;
+    recordLlmUsage({ source: 'outreach_route:inbound_scan_classify', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
@@ -313,6 +317,51 @@ router.post('/settings', authorize('campaigns:write'), async (req: Request, res:
   try {
     const settings = await updateOutreachSettings(req.body);
     res.json(settings);
+  } catch (error) { next(error); }
+});
+
+// --- Sender profiles (per-person identity: name, title, area, signature) ---
+// Each outreach mailbox has ONE owner. These endpoints let the team manage the
+// title shown in each signature (Ryan CEO / Percy COO / Grant Business
+// Development) and preview the rendered signature, without a code change.
+router.get('/senders', authorize('campaigns:read'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const config = await getSendersConfig();
+    // Return each profile with its rendered signature so the UI can preview it.
+    const profiles = Object.values(config.profiles).map(p => ({
+      ...p,
+      signature_preview: buildSignature(config.template, p),
+    }));
+    res.json({ template: config.template, profiles, title_options: TITLE_OPTIONS });
+  } catch (error) { next(error); }
+});
+
+router.put('/senders', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const body = req.body || {};
+    if (!body.profiles || typeof body.profiles !== 'object') {
+      return res.status(400).json({ error: 'profiles object is required' });
+    }
+    // Validate each profile minimally before persisting.
+    const profiles: Record<string, any> = {};
+    for (const [key, raw] of Object.entries<any>(body.profiles)) {
+      const email = (raw?.email || key || '').trim().toLowerCase();
+      if (!email) return res.status(400).json({ error: 'each profile needs an email' });
+      if (!raw?.name?.trim()) return res.status(400).json({ error: `profile ${email} needs a name` });
+      profiles[email] = {
+        email,
+        name: String(raw.name).trim(),
+        title: String(raw.title || '').trim(),
+        area: Array.isArray(raw.area) ? raw.area.map((s: unknown) => String(s).trim().toUpperCase()).filter(Boolean) : [],
+        signature_override: raw.signature_override ? String(raw.signature_override) : undefined,
+      };
+    }
+    const saved = await saveSendersConfig({
+      template: typeof body.template === 'string' && body.template.trim() ? body.template : (await getSendersConfig()).template,
+      profiles,
+    });
+    const out = Object.values(saved.profiles).map(p => ({ ...p, signature_preview: buildSignature(saved.template, p) }));
+    res.json({ template: saved.template, profiles: out, title_options: TITLE_OPTIONS });
   } catch (error) { next(error); }
 });
 
@@ -466,6 +515,7 @@ Keep existing delay_days and channel from current steps EXACTLY. Output exactly 
     if (!response.ok) return res.status(500).json({ error: 'AI request failed' });
 
     const data = (await response.json()) as any;
+    recordLlmUsage({ source: 'outreach_route:rewrite_prompts', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -886,6 +936,7 @@ router.post('/swap-lead', authorize('campaigns:write'), async (req: Request, res
           });
           if (aiResp.ok) {
             const aiData = (await aiResp.json()) as any;
+            recordLlmUsage({ source: 'outreach_route:swap_lead_linkedin', usage: aiData.usage });
             const msg = (aiData.choices?.[0]?.message?.content || '').trim();
             if (msg) linkedinMessage = msg;
             else aiError = 'AI returned an empty response.';
@@ -996,6 +1047,7 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
     }
 
     const data = (await aiResp.json()) as any;
+    recordLlmUsage({ source: 'outreach_route:rewrite_draft', usage: data.usage });
     const raw = (data.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
@@ -1166,6 +1218,7 @@ router.post('/:id/campaign', authorize('campaigns:write'), async (req: Request, 
           });
           if (aiResp.ok) {
             const aiData = (await aiResp.json()) as any;
+            recordLlmUsage({ source: 'outreach_route:campaign_move_linkedin', usage: aiData.usage });
             const msg = (aiData.choices?.[0]?.message?.content || '').trim();
             if (msg) linkedinMessage = msg;
             else aiError = 'AI returned an empty response.';
@@ -1273,7 +1326,14 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         campaignName: campaign?.name || '',
         vertical: leadBefore.vertical,
       });
-      const senderName = campaign?.settings?.sender_name || 'Ryan Landry';
+
+      // Identity comes from the FROM-ADDRESS's profile, not a campaign-level
+      // sender_name default. This is the fix for sends leaving percy@/gnecker@
+      // while still signed "Ryan Landry": the person who owns the mailbox owns
+      // the display name + signature. Campaign/global values are only a
+      // fallback when the address has no profile.
+      const profile = await getSenderProfile(senderEmail);
+      const senderName = profile?.name || (campaign?.settings as any)?.sender_name || 'Ryan Landry';
 
       // Test mode: redirect to test email, keep lead's name/subject/body intact
       const globalSettings = await getOutreachSettings();
@@ -1287,8 +1347,29 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
         await trackTestSend(leadBefore);
       }
 
-      // Use campaign-specific signature if set, otherwise global signature
-      const signature = (campaign?.settings as any)?.email_signature || globalSettings.email_signature || '';
+      // Signature follows the same identity rule: the sender's own profile
+      // signature wins, then any campaign override, then the global default.
+      const signature = profile?.signature || (campaign?.settings as any)?.email_signature || globalSettings.email_signature || '';
+
+      // Personalization safety-net: strip any residual {{token}} and fix an
+      // empty greeting ("Hi ,") so a merge-field miss never ships literally to
+      // the prospect. Idempotent on already-filled text. Logged when it fires.
+      try {
+        const vars = await mergeVariables(leadBefore, campaign);
+        const ps = personalize(emailSubject || '', vars);
+        const pb = personalize(emailBody || '', vars);
+        emailSubject = ps.text;
+        emailBody = pb.text;
+        const issues = [...new Set([...ps.unresolved, ...pb.unresolved])];
+        if (issues.length || ps.fallbacksUsed.length || pb.fallbacksUsed.length) {
+          logger.warn('Personalization guard adjusted outbound email', {
+            lead_id: leadBefore.id, unresolved: issues,
+            fallbacks: [...new Set([...ps.fallbacksUsed, ...pb.fallbacksUsed])],
+          });
+        }
+      } catch (e) {
+        logger.warn('Personalization guard skipped (non-fatal)', { lead_id: leadBefore.id, error: (e as Error).message });
+      }
 
       // Ryan WhatsApp 2026-06-01 ask: attach the investor deck on a specific
       // investor-campaign step, intro deck after the second industry touch.

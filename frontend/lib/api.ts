@@ -262,6 +262,35 @@ export function updateOutreachSettings(settings: Partial<OutreachSettings>) {
   });
 }
 
+// --- Sender profiles (per-person identity: name, title, area, signature) ---
+export interface SenderProfileDTO {
+  email: string;
+  name: string;
+  title: string;
+  area: string[];
+  signature_override?: string;
+  signature_preview?: string;
+}
+export interface SendersConfigDTO {
+  template: string;
+  profiles: SenderProfileDTO[];
+  title_options: string[];
+}
+
+export function getSenders() {
+  return request<SendersConfigDTO>('/admin/outreach/senders');
+}
+
+export function updateSenders(payload: { template?: string; profiles: SenderProfileDTO[] }) {
+  // Server keys profiles by email; send as a map.
+  const profileMap: Record<string, SenderProfileDTO> = {};
+  for (const p of payload.profiles) profileMap[p.email] = p;
+  return request<SendersConfigDTO>('/admin/outreach/senders', {
+    method: 'PUT',
+    body: JSON.stringify({ template: payload.template, profiles: profileMap }),
+  });
+}
+
 export function getTestSendCount() {
   return request<{ count: number }>('/admin/outreach/test-sends/count');
 }
