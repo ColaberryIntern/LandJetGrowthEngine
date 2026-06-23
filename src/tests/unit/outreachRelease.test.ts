@@ -13,11 +13,14 @@ import {
 } from '../../services/outreachReleaseChecks';
 import {
   DEFAULT_SENDERS_CONFIG,
+  DEFAULT_SENDER_PROFILES,
+  DEFAULT_SIGNATURE_TEMPLATE,
   resolveProfile,
   buildSignature,
   tokenizeSignature,
   detectIdentityConflict,
   getEffectiveTitle,
+  mergeConfig,
 } from '../../services/senderProfileService';
 import { isAllowedSender } from '../../services/outreachEmailService';
 import { personalize, findUnresolvedTokens, escapeHtmlField } from '../../services/outreachPersonalization';
@@ -103,6 +106,40 @@ describe('sender profile identity', () => {
     expect(getEffectiveTitle('')).toBe('Team');
     expect(getEffectiveTitle('  ')).toBe('Team');
     expect(getEffectiveTitle('COO')).toBe('COO');
+  });
+
+  // Regression: caught in prod verification 2026-06-23. Ryan's real signature
+  // embeds his personal mobile, his Calendly, and a spelled-out title. One
+  // person's rich signature_override must NEVER leak into another's signature,
+  // and the title must be each person's own.
+  it('a rich personal signature_override on one sender never leaks to another', () => {
+    const ryanRich =
+      '<table><tr><td><strong>Ryan Landry</strong><br><span>Chief Executive Officer</span></td></tr>' +
+      '<tr><td>M: <a href="tel:9494122682">949.412.2682</a></td></tr>' +
+      '<tr><td><a href="https://calendly.com/rlandry-landjet/30min">Book a meeting</a></td></tr></table>';
+    const cfg2 = mergeConfig({
+      template: DEFAULT_SIGNATURE_TEMPLATE,
+      profiles: {
+        'rlandry@landjet.com': { ...DEFAULT_SENDER_PROFILES['rlandry@landjet.com'], signature_override: ryanRich },
+      },
+    });
+    const ryan = resolveProfile('rlandry@landjet.com', cfg2)!;
+    const percy = resolveProfile('percy@landjet.com', cfg2)!;
+    const grant = resolveProfile('gnecker@landjet.com', cfg2)!;
+
+    // Ryan keeps his own details.
+    expect(ryan.signature).toContain('949.412.2682');
+    expect(ryan.signature).toContain('Chief Executive Officer');
+
+    // Percy + Grant inherit NONE of Ryan's personal data, and show their own title.
+    for (const other of [percy, grant]) {
+      expect(other.signature).not.toContain('949.412.2682');
+      expect(other.signature).not.toContain('calendly.com/rlandry');
+      expect(other.signature).not.toContain('Chief Executive Officer');
+      expect(other.signature).toContain(other.name);
+    }
+    expect(percy.signature).toContain('COO');
+    expect(grant.signature).toContain('Business Development');
   });
 });
 

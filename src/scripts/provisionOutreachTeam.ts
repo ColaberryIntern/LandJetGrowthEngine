@@ -7,7 +7,6 @@ import { getOutreachSettings } from '../services/outreachQueryService';
 import {
   DEFAULT_SENDER_PROFILES,
   DEFAULT_SIGNATURE_TEMPLATE,
-  tokenizeSignature,
   saveSendersConfig,
   type SenderProfile,
 } from '../services/senderProfileService';
@@ -91,35 +90,39 @@ async function provisionUsers(apply: boolean): Promise<void> {
   }
 }
 
-/** Derive a shared template from Ryan's existing signature so the team inherits
- *  his exact look. Falls back to the built-in template if Ryan has no stored
- *  signature or if tokenizing left his name behind (we must never ship a
- *  template that hardcodes one person for everyone). */
-async function buildTemplate(): Promise<string> {
-  const settings = await getOutreachSettings();
-  const ryanSig = (settings.email_signature || '').trim();
-  const ryanTitle = (settings.sender_role || 'CEO').split(',')[0].trim() || 'CEO';
-  if (!ryanSig) {
-    console.log('No stored Ryan signature found; using the built-in default template.');
-    return DEFAULT_SIGNATURE_TEMPLATE;
-  }
-  const tokenized = tokenizeSignature(ryanSig, { name: 'Ryan Landry', title: ryanTitle });
-  if (!tokenized.includes('{{sender_name}}') || /Ryan\s+Landry/.test(tokenized)) {
-    console.log('Could not cleanly tokenize Ryan\'s signature; using the built-in default template.');
-    return DEFAULT_SIGNATURE_TEMPLATE;
-  }
-  console.log('Derived shared signature template from Ryan\'s stored signature.');
-  return tokenized;
-}
-
+/**
+ * Seed the per-sender profiles.
+ *
+ * IMPORTANT: a person's existing signature cannot be auto-reused for everyone --
+ * Ryan's stored signature embeds HIS personal mobile, HIS Calendly link, and
+ * his spelled-out title ("Chief Executive Officer"). Tokenizing it for the team
+ * would put Ryan's cell phone + booking link under Percy's and Grant's names.
+ * So:
+ *   - Ryan keeps his EXACT existing signature (it is his) via signature_override.
+ *   - Percy + Grant use the clean shared branded template (their name, correct
+ *     title, their own email, landjet.com) -- no leaked personal contact info.
+ *     They can paste their own richer signature in Settings later.
+ */
 async function provisionSenders(apply: boolean): Promise<void> {
   console.log('=== Sender profiles =======================================');
-  const template = await buildTemplate();
+  const settings = await getOutreachSettings();
+  const ryanSig = (settings.email_signature || '').trim();
+  const template = DEFAULT_SIGNATURE_TEMPLATE;
+
   const profiles: Record<string, SenderProfile> = {};
   for (const [k, v] of Object.entries(DEFAULT_SENDER_PROFILES)) profiles[k] = { ...v };
 
+  if (ryanSig) {
+    profiles['rlandry@landjet.com'].signature_override = ryanSig;
+    console.log('Ryan keeps his exact existing signature (signature_override).');
+  } else {
+    console.log('No stored Ryan signature found; Ryan uses the shared template.');
+  }
+  console.log('Percy + Grant use the clean shared branded template (own name/title/email; no leaked personal data).');
+
   for (const p of Object.values(profiles)) {
-    console.log(`  ${p.email}  ->  ${p.name}, ${p.title}  area=${JSON.stringify(p.area)}`);
+    const sig = p.signature_override ? 'own signature' : 'shared template';
+    console.log(`  ${p.email}  ->  ${p.name}, ${p.title}  area=${JSON.stringify(p.area)}  [${sig}]`);
   }
   if (apply) {
     await saveSendersConfig({ template, profiles });
