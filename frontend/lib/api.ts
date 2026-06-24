@@ -243,6 +243,7 @@ export interface OutreachSettings {
   sender_role: string;
   sender_email: string;
   email_signature: string;
+  draft_guardrails?: string;
   test_mode: boolean;
   test_email: string;
   send_days: number[];
@@ -1112,6 +1113,13 @@ export function submitReservationFeedback(id: number, body: { category: string; 
 
 export function deleteReservation(id: number) {
   return request<{ id: number; deleted: boolean }>(`/admin/quotes/reservations/${id}/delete`, { method: 'POST' });
+}
+
+// Outreach "report an issue" -- free text is triaged + auto-fixed server-side;
+// the response tells the operator what changed (or that it was queued).
+export function submitOutreachFeedback(body: { category: string; comment?: string; contact_id?: string }) {
+  return request<{ stored: true; status: 'applied' | 'needs_review' | 'failed'; applied: string | null }>(
+    `/admin/outreach/feedback`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export function restoreReservation(id: number) {

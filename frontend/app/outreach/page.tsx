@@ -8,6 +8,7 @@ import {
   getSenders, updateSenders,
   getTestSendCount, resetTestSends,
   swapLead, rewriteDraft,
+  submitOutreachFeedback,
   OutreachContact, OutreachSettings, SenderProfileDTO,
 } from '@/lib/api';
 import { ensureAuth } from '@/lib/auth';
@@ -54,6 +55,29 @@ export default function OutreachPage() {
     { tone: 'personal', label: 'More Personal' },
     { tone: 'direct', label: 'More Direct' },
   ]);
+
+  // "Report an issue": Ryan logs a problem in his own words; the server triages
+  // it, auto-applies safe fixes, and emails back what changed. Replaces the
+  // WhatsApp round-trip.
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [fbCategory, setFbCategory] = useState('message_too_long');
+  const [fbComment, setFbComment] = useState('');
+  const [fbSubmitting, setFbSubmitting] = useState(false);
+  const [fbResult, setFbResult] = useState<{ status: string; applied: string | null } | null>(null);
+  async function handleSubmitFeedback() {
+    if (!fbComment.trim()) { setFbResult({ status: 'failed', applied: 'Please describe the issue first.' }); return; }
+    setFbSubmitting(true);
+    setFbResult(null);
+    try {
+      const res = await submitOutreachFeedback({ category: fbCategory, comment: fbComment.trim() });
+      setFbResult({ status: res.status, applied: res.applied });
+      setFbComment('');
+    } catch (e) {
+      setFbResult({ status: 'failed', applied: (e as Error).message || 'Something went wrong. Please try again.' });
+    } finally {
+      setFbSubmitting(false);
+    }
+  }
 
   // Admin filter state. Initial value seeds from user.default_filters.states
   // via useDefaultFilters once the profile fetch resolves (2026-06-14 refactor:
@@ -413,6 +437,10 @@ export default function OutreachPage() {
         </div>
         <div className="flex items-center gap-2">
           <ExtensionInstallButton />
+          <button onClick={() => { setShowFeedback(true); setFbResult(null); }}
+            className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">
+            Report an issue
+          </button>
           <button onClick={() => setShowSettings(!showSettings)}
             className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">
             Settings
@@ -423,6 +451,55 @@ export default function OutreachPage() {
           </button>
         </div>
       </div>
+
+      {/* Report-an-issue modal. Free text -> server triage -> auto-fix + email. */}
+      {showFeedback && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Report an issue</h2>
+                <p className="mt-0.5 text-sm text-gray-500">Tell us what&apos;s wrong with the outreach. We&apos;ll fix what we safely can and email you what changed.</p>
+              </div>
+              <button onClick={() => setShowFeedback(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close">&times;</button>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-gray-700">What kind of issue?</label>
+            <select value={fbCategory} onChange={e => setFbCategory(e.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+              <option value="message_too_long">Messages are too long</option>
+              <option value="wrong_wording">Wording / tone is off</option>
+              <option value="wrong_signature">Wrong signature</option>
+              <option value="wrong_sender">Wrong sender name or title</option>
+              <option value="do_not_contact">Should not be contacting someone</option>
+              <option value="wrong_campaign">Contact is in the wrong campaign</option>
+              <option value="send_pace">Sending too many / too few per day</option>
+              <option value="other">Something else</option>
+            </select>
+
+            <label className="mt-4 block text-sm font-medium text-gray-700">Describe it</label>
+            <textarea value={fbComment} onChange={e => setFbComment(e.target.value)} rows={4}
+              placeholder="e.g. The emails are too long, keep them to 3 sentences. And stop saying 'boardroom on wheels'."
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+
+            {fbResult && (
+              <div className={`mt-3 rounded-md px-3 py-2 text-sm ${fbResult.status === 'applied' ? 'bg-green-50 text-green-800 border border-green-200' : fbResult.status === 'needs_review' ? 'bg-blue-50 text-blue-800 border border-blue-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                {fbResult.status === 'applied' ? 'Done -- ' : fbResult.status === 'needs_review' ? 'Logged -- ' : ''}{fbResult.applied}
+                {fbResult.status !== 'failed' && <span className="block mt-1 text-xs opacity-80">A confirmation email is on its way.</span>}
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button onClick={() => setShowFeedback(false)}
+                className="rounded-md border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Close</button>
+              <button onClick={handleSubmitFeedback} disabled={fbSubmitting}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                {fbSubmitting ? 'Submitting...' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Admin filter bar -- Territory + State + City + Campaign. Channel
          is hidden because each step has its own channel; filtering on it
@@ -510,6 +587,16 @@ export default function OutreachPage() {
                   )}
                 </div>
               )}
+            </div>
+            {/* Writing rules -- voice/style guardrails the "Report an issue" loop
+               accumulates from feedback. Editable here so a bad rule can be
+               reviewed or removed (one rule per line). */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-sm font-medium text-gray-700">Writing rules</p>
+              <p className="text-xs text-gray-500 mb-1">Applied to every draft. Added automatically when you report an issue; edit or clear here. One rule per line.</p>
+              <textarea value={settings.draft_guardrails || ''} onChange={e => handleSettingsChange('draft_guardrails', e.target.value)}
+                rows={3} placeholder="e.g. Keep emails to 3 sentences."
+                className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-gray-400 focus:outline-none resize-y" />
             </div>
             {/* Sender Profiles -- per-person identity (name, title, area, signature) */}
             <div className="border-t border-gray-100 pt-3">

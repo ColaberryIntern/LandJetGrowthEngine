@@ -91,6 +91,7 @@ export interface OutreachSettings {
   sender_role: string;
   sender_email: string;
   email_signature: string;
+  draft_guardrails: string;   // voice/style rules learned from operator feedback, injected into every draft prompt
   test_mode: boolean;
   test_email: string;
   send_days: number[];
@@ -107,6 +108,7 @@ const DEFAULTS: OutreachSettings = {
   sender_role: 'CEO, LandJet',
   sender_email: 'rlandry@landjet.com',
   email_signature: '',
+  draft_guardrails: '',
   test_mode: true,
   test_email: 'rmlandry29@gmail.com',
   send_days: [1, 2, 3, 4, 5],
@@ -133,6 +135,7 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
       sender_role: val.sender_role ?? DEFAULTS.sender_role,
       sender_email: val.sender_email ?? DEFAULTS.sender_email,
       email_signature: val.email_signature ?? DEFAULTS.email_signature,
+      draft_guardrails: val.draft_guardrails ?? DEFAULTS.draft_guardrails,
       test_mode: val.test_mode ?? DEFAULTS.test_mode,
       test_email: val.test_email ?? DEFAULTS.test_email,
       send_days: val.send_days ?? DEFAULTS.send_days,
@@ -253,7 +256,7 @@ function templateDraft(name: string, context: string, prompt: string, senderName
 
 async function generateAIDraft(
   name: string, company: string | null, context: string, prompt: string,
-  senderName: string, senderRole: string,
+  senderName: string, senderRole: string, guardrails?: string,
 ): Promise<{ subject: string; body: string } | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -276,7 +279,7 @@ async function generateAIDraft(
       body: JSON.stringify({
         model: process.env.AI_MODEL || 'gpt-4o',
         messages: [
-          { role: 'system', content: `You are writing as ${senderName}, ${senderRole}. Write a concise, high-quality outbound email. Keep it under 120 words. Be specific, not generic. Match the tone of the prompt. Return JSON with "subject" and "body" fields only. The body should be plain text, not HTML. Sign off as ${senderFirstName}.` },
+          { role: 'system', content: `You are writing as ${senderName}, ${senderRole}. Write a concise, high-quality outbound email. Keep it under 120 words. Be specific, not generic. Match the tone of the prompt. Return JSON with "subject" and "body" fields only. The body should be plain text, not HTML. Sign off as ${senderFirstName}.${guardrails && guardrails.trim() ? `\n\nAdditional guidance you MUST follow (from the sender's own feedback):\n${guardrails.trim()}` : ''}` },
           { role: 'user', content: userContent },
         ],
         temperature: 0.7,
@@ -351,7 +354,7 @@ export async function generateDraft(lead: Lead, campaignPrompt?: string | null):
   const aiEnabled = campaignSettings?.ai_drafts_enabled ?? globalSettings.ai_drafts_enabled ?? (process.env.USE_AI_DRAFTS === 'true');
 
   if (aiEnabled) {
-    const aiResult = await generateAIDraft(name, lead.company, context, prompt, senderName, senderRole);
+    const aiResult = await generateAIDraft(name, lead.company, context, prompt, senderName, senderRole, globalSettings.draft_guardrails);
     if (aiResult) {
       recordAgentRun('draft_writer').catch(() => {});
       recordAgentRun('email_polisher').catch(() => {});

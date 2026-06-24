@@ -1018,9 +1018,13 @@ router.post('/rewrite-draft', authorize('campaigns:write'), async (req: Request,
     // Channel-aware prompt: emails get subject + body + sign-off; LinkedIn
     // messages have NO subject, NO sign-off line, and a hard char cap so the
     // rewrite respects LinkedIn's 300-char connection-note limit.
+    // Voice/style rules learned from sender feedback apply to rewrites too.
+    const guardrailClause = settings.draft_guardrails && settings.draft_guardrails.trim()
+      ? ` Additional guidance you MUST follow (from the sender's own feedback): ${settings.draft_guardrails.trim()}`
+      : '';
     const systemPrompt = isLinkedIn
-      ? `You are rewriting a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'message'} as ${settings.sender_name}, ${settings.sender_role}. ${LINKEDIN_TONE_INSTRUCTIONS[tone]} Return ONLY the rewritten message text -- no JSON, no labels, no quotation marks, no greeting/sign-off boilerplate beyond what's natural in a LinkedIn note. The message MUST be under ${linkedInMaxChars} characters. The recipient is ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}.`
-      : `You are rewriting an outreach email as ${settings.sender_name}, ${settings.sender_role}. ${EMAIL_TONE_INSTRUCTIONS[tone]} Return JSON with "subject" and "body" fields only. Sign off as ${senderFirst}. Plain text, no HTML.`;
+      ? `You are rewriting a LinkedIn ${channel === 'linkedin_connect' ? 'connection request note' : 'message'} as ${settings.sender_name}, ${settings.sender_role}. ${LINKEDIN_TONE_INSTRUCTIONS[tone]} Return ONLY the rewritten message text -- no JSON, no labels, no quotation marks, no greeting/sign-off boilerplate beyond what's natural in a LinkedIn note. The message MUST be under ${linkedInMaxChars} characters. The recipient is ${lead.first_name} ${lead.last_name} at ${lead.company || 'their company'}.${guardrailClause}`
+      : `You are rewriting an outreach email as ${settings.sender_name}, ${settings.sender_role}. ${EMAIL_TONE_INSTRUCTIONS[tone]} Return JSON with "subject" and "body" fields only. Sign off as ${senderFirst}. Plain text, no HTML.${guardrailClause}`;
 
     const userPrompt = isLinkedIn
       ? `Current message:\n${current_body || ''}`
@@ -1457,6 +1461,30 @@ router.post('/:id/block', authorize('campaigns:write'), async (req: Request, res
       status: result.lead.status,
       dnc_created: result.dncCreated,
     });
+  } catch (error) { next(error); }
+});
+
+/**
+ * Header-level "report an issue" feedback for the Outreach page. Free text is
+ * triaged by an LLM into a bounded, safe action (add a voice guardrail, change
+ * an allow-listed setting, block/reassign a contact) and applied where safe;
+ * everything else is held for review. A confirmation email goes out either way.
+ * Not nested under /:id because most feedback is global, but an optional
+ * contact_id scopes block/reassign actions to one contact.
+ */
+router.post('/feedback', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { submitOutreachFeedback } = await import('../../services/outreachFeedbackService');
+    const category = String(req.body?.category || '').trim();
+    if (!category) return res.status(400).json({ error: 'category is required' });
+    const by = (req as any).user?.email || (req as any).user?.id || null;
+    const result = await submitOutreachFeedback({
+      contactId: req.body?.contact_id ? String(req.body.contact_id) : null,
+      category,
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+      createdBy: by,
+    });
+    res.json(result);
   } catch (error) { next(error); }
 });
 

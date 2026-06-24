@@ -509,3 +509,55 @@ export async function testConnection(fromEmail?: string): Promise<{ success: boo
     return { success: false, error: (error as Error).message };
   }
 }
+
+export interface SystemEmailInput {
+  from: string;            // a landjet.com mailbox the tenant Graph app can send as
+  to: string;              // primary recipient
+  cc?: string | null;      // optional cc
+  subject: string;
+  html: string;            // full HTML body
+}
+
+/**
+ * Send an internal system notification via the same tenant Graph integration
+ * used for outreach (reuses getGraphToken + the users/{from}/sendMail pattern).
+ * This is for system-to-team mail (e.g. "here's what we changed from your
+ * feedback"), NOT prospect outreach -- so it skips category guards, comm-log
+ * lead binding, and sender-identity resolution.
+ *
+ * Failure modes: Graph token request or sendMail can fail (network, auth, 4xx).
+ * The function never throws -- it returns { success:false, error } so callers
+ * can treat the notification as best-effort and not fail the parent operation.
+ */
+export async function sendSystemEmail(input: SystemEmailInput): Promise<{ success: boolean; error?: string }> {
+  try {
+    const token = await getGraphToken();
+    const message: Record<string, unknown> = {
+      subject: input.subject,
+      body: { contentType: 'HTML', content: input.html },
+      toRecipients: [{ emailAddress: { address: input.to } }],
+    };
+    if (input.cc && input.cc.trim()) {
+      message.ccRecipients = [{ emailAddress: { address: input.cc.trim() } }];
+    }
+
+    const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${input.from}/sendMail`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+
+    if (resp.status === 202 || resp.status === 200) {
+      logger.info('System email sent via Graph API', { to: input.to, cc: input.cc || null, from: input.from, subject: input.subject });
+      return { success: true };
+    }
+    const errorData = await resp.json().catch(() => ({}));
+    const errorMsg = (errorData as any)?.error?.message || `Graph API error: ${resp.status}`;
+    logger.error('System email failed', { to: input.to, from: input.from, status: resp.status, error: errorMsg });
+    return { success: false, error: errorMsg };
+  } catch (error) {
+    const msg = (error as Error).message;
+    logger.error('System email exception', { to: input.to, from: input.from, error: msg });
+    return { success: false, error: msg };
+  }
+}
