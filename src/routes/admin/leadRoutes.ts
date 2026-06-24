@@ -1,8 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { authorize } from '../../middleware/authorize';
-import { createLead, getLeadById, updateLead, listLeads, parseStatesParam } from '../../services/leadService';
-import { effectiveStates, getUserAllowedStates } from '../../services/leadScope';
+import { createLead, getLeadById, updateLead, listLeads, parseStatesParam, buildStatesPattern } from '../../services/leadService';
+import { effectiveStates, getUserAllowedStates, isStateInScope } from '../../services/leadScope';
 import { createAuditLog } from '../../services/auditLogService';
 import { logger } from '../../config/logger';
 import { Lead } from '../../models/Lead';
@@ -89,6 +89,12 @@ router.get('/distinct', authorize('leads:read'), async (req: Request, res: Respo
     if (field === 'city' && req.query.state) {
       whereClause.state = { [Op.iLike]: req.query.state as string };
     }
+    // Area enforcement: a scoped rep's filter-bar dropdowns must only list
+    // values within their territory (so Percy's chips never show IA cities).
+    const distinctAllowed = await getUserAllowedStates(req.user!.userId);
+    if (distinctAllowed.length > 0) {
+      whereClause.state = { [Op.iRegexp]: buildStatesPattern(distinctAllowed) };
+    }
 
     const rows = await Lead.findAll({
       attributes: [[fn('DISTINCT', col(field)), field]],
@@ -117,11 +123,15 @@ router.get('/export', authorize('leads:read'), async (req: Request, res: Respons
       return res.status(400).json({ error: 'Format must be "json" or "csv"' });
     }
 
+    // Area enforcement on export too: a scoped rep must not be able to dump
+    // the whole pool via /export (the leak that bypassed the list scope).
+    const exportAllowed = await getUserAllowedStates(req.user!.userId);
     const result = await listLeads({
       status: req.query.status as string,
       pipeline_stage: req.query.pipeline_stage as string,
       temperature: req.query.temperature as string,
       industry: req.query.industry as string,
+      states: effectiveStates(exportAllowed, parseStatesParam(req.query.states)),
       limit: 5000,
       offset: 0,
     });
@@ -164,6 +174,14 @@ router.get('/export', authorize('leads:read'), async (req: Request, res: Respons
 router.get('/:id', authorize('leads:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const lead = await getLeadById(Number(req.params.id));
+    // Area enforcement on the detail endpoint: a scoped rep must not open a
+    // lead outside their territory by guessing its id. Out-of-scope reads
+    // return 404 (indistinguishable from a missing lead). Ryan (no scope)
+    // sees everything.
+    const allowed = await getUserAllowedStates(req.user!.userId);
+    if (lead && !isStateInScope(allowed, (lead as { state?: string | null }).state)) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
     res.json({ lead });
   } catch (error) {
     next(error);

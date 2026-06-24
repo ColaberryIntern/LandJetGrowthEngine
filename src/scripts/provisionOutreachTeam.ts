@@ -36,16 +36,20 @@ interface SeedUser {
   email: string;
   first_name: string;
   last_name: string;
-  role: 'admin' | 'account_manager';
+  role: 'admin' | 'manager' | 'account_manager';
   states: string[];
 }
 
 // Roles grant app permissions; AREA scope (states) is enforced separately and
 // role-agnostically (see leadScope.ts), so Percy being admin still only sees TX.
+// Grant is `manager` (NOT account_manager): the outreach send route requires
+// `campaigns:write`, which account_manager lacks -- account_manager could read
+// his leads but never SEND. `manager` has leads:read + campaigns:write, which
+// is exactly what a sending rep needs (no admin/user-management powers).
 const TEAM: SeedUser[] = [
   { email: 'rlandry@landjet.com', first_name: 'Ryan', last_name: 'Landry', role: 'admin', states: [] },
   { email: 'percy@landjet.com', first_name: 'Percy', last_name: 'Kapadia', role: 'admin', states: ['TX'] },
-  { email: 'gnecker@landjet.com', first_name: 'Grant', last_name: 'Necker', role: 'account_manager', states: ['IA'] },
+  { email: 'gnecker@landjet.com', first_name: 'Grant', last_name: 'Necker', role: 'manager', states: ['IA'] },
 ];
 
 async function provisionUsers(apply: boolean): Promise<void> {
@@ -73,17 +77,19 @@ async function provisionUsers(apply: boolean): Promise<void> {
 
     const changes: string[] = [];
     if (existing.status !== 'active') changes.push(`status ${existing.status}->active`);
+    if (existing.role !== seed.role) changes.push(`role ${existing.role}->${seed.role}`);
     const curStates = JSON.stringify((existing.default_filters as { states?: unknown })?.states ?? null);
     if (curStates !== JSON.stringify(seed.states)) changes.push(`states ${curStates}->${JSON.stringify(seed.states)}`);
 
     if (changes.length === 0) {
-      console.log(`OK     ${seed.email}  (active, states already ${JSON.stringify(seed.states)})`);
+      console.log(`OK     ${seed.email}  (active, role ${seed.role}, states already ${JSON.stringify(seed.states)})`);
       continue;
     }
     console.log(`UPDATE ${seed.email}  ${changes.join(', ')}`);
     if (apply) {
       await existing.update({
         status: 'active',
+        role: seed.role as any,
         default_filters: { ...(existing.default_filters as object), states: seed.states },
       });
     }

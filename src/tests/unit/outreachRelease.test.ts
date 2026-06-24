@@ -24,7 +24,7 @@ import {
 } from '../../services/senderProfileService';
 import { isAllowedSender } from '../../services/outreachEmailService';
 import { personalize, findUnresolvedTokens, escapeHtmlField } from '../../services/outreachPersonalization';
-import { effectiveStates } from '../../services/leadScope';
+import { effectiveStates, isStateInScope } from '../../services/leadScope';
 
 describe('Outreach release matrix (20 checks x 5 scenarios)', () => {
   const matrix = runReleaseChecks();
@@ -210,5 +210,31 @@ describe('effectiveStates (area enforcement)', () => {
     const eff = effectiveStates(['TX'], ['CA', 'NY']);
     expect(eff).toEqual(['TX']);
     expect(eff && eff.length).toBeGreaterThan(0);
+  });
+});
+
+describe('isStateInScope (detail/export/distinct enforcement)', () => {
+  it('an unrestricted user (Ryan) sees any state, including null', () => {
+    expect(isStateInScope([], 'TX')).toBe(true);
+    expect(isStateInScope([], null)).toBe(true);
+    expect(isStateInScope(undefined, 'IA')).toBe(true);
+  });
+
+  it('matches both the 2-letter code and the full name, case-insensitively', () => {
+    expect(isStateInScope(['TX'], 'TX')).toBe(true);
+    expect(isStateInScope(['TX'], 'texas')).toBe(true);
+    expect(isStateInScope(['TX'], 'Texas')).toBe(true);
+  });
+
+  it('blocks an out-of-area lead for a scoped user (Percy on IA, Grant on TX)', () => {
+    expect(isStateInScope(['TX'], 'IA')).toBe(false);
+    expect(isStateInScope(['IA'], 'TX')).toBe(false);
+    expect(isStateInScope(['TX'], 'CA')).toBe(false);
+  });
+
+  it('a scoped user does not see a null/blank-state lead (isolation over convenience)', () => {
+    expect(isStateInScope(['TX'], null)).toBe(false);
+    expect(isStateInScope(['TX'], '')).toBe(false);
+    expect(isStateInScope(['TX'], '  ')).toBe(false);
   });
 });

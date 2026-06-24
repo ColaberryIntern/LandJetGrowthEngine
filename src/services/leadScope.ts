@@ -18,6 +18,7 @@
 
 import { User } from '../models/User';
 import { logger } from '../config/logger';
+import { buildStatesPattern } from './leadService';
 
 function norm(states: string[] | undefined | null): string[] {
   if (!Array.isArray(states)) return [];
@@ -49,6 +50,20 @@ export function effectiveStates(
   if (r.length === 0) return a;
   const overlap = r.filter(s => a.includes(s));
   return overlap.length ? overlap : a;
+}
+
+/**
+ * Whether a single lead's state is within an allowed scope. Pure.
+ * Empty allowed = unrestricted (true). A scoped user does NOT see a
+ * null/blank-state lead (consistent with the list, whose state predicate
+ * excludes nulls) -- isolation over convenience. Matches both the 2-letter
+ * code and the full state name, case-insensitively.
+ */
+export function isStateInScope(allowed: string[] | undefined, state: string | null | undefined): boolean {
+  const a = norm(allowed);
+  if (a.length === 0) return true;
+  if (!state || typeof state !== 'string' || !state.trim()) return false;
+  return new RegExp(buildStatesPattern(a), 'i').test(state.trim());
 }
 
 // --- allowed-states accessor (cached, DB-backed) --------------------------
