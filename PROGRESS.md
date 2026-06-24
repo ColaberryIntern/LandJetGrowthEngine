@@ -7,6 +7,12 @@ Last updated: 2026-06-23
 
 ## Session: 2026-06-23
 
+- [x] **Reservations: persistent auto-merge of duplicate forwards (ingest + backfill)**
+  - Date: 2026-06-24
+  - What changed: Upgraded the visual forward-dedup to a real, persistent merge per Ali. New `reservationDedupKey` (reservation number / trip signature / sender + normalized subject) + `autoMergeDuplicates` ([reservationQuoteService.ts](src/services/reservationQuoteService.ts)) group ACTIVE rows by key and absorb the extras into a canonical (prefer one with a draft, then most recent = the forward) via the existing `mergeReservations` (sets merged_into + closes the duplicate; unmerge restores). Runs every reservations ingest cycle ([pipelineAutoRunner.ts](src/services/pipelineAutoRunner.ts)) and as a one-off [backfill](src/scripts/autoMergeReservationDuplicates.ts). Idempotent (merged/closed rows excluded).
+  - Verification: backend tsc clean; jest reservationQuoteService 35/35 (FW:/RE:/[External] of the same subject collapse; different subjects do not; reservation number preferred). Deployed; backfill merged 13 duplicates across 11 groups -- the three "June 30th" rows (#104,#102) absorbed into the forward #138 (canonical), BookRides duplicate pairs cleaned up. /reservations 200.
+  - Notes: only ACTIVE (needs_reply/awaiting_customer) rows are auto-merged; canonical = forward/latest unless an older row already has a draft.
+
 - [x] **Outreach signatures: fix prod-data leak (Ryan keeps his own signature; Percy/Grant get the clean branded template)**
   - Date: 2026-06-23
   - What changed: Live prod verification (with Sequelize models initialized) of the seeded `outreach.senders` exposed two real defects in deriving everyone's signature from Ryan's stored one: (1) the title rendered "Chief Executive Officer" for Percy (Ryan's signature spells the title out; the tokenizer only knew "CEO"), and (2) Percy's signature carried **Ryan's personal mobile (949.412.2682) and Ryan's Calendly link**. Auto-tokenizing one person's real signature for the whole team is unsafe. [provisionOutreachTeam.ts](src/scripts/provisionOutreachTeam.ts) now sets the shared `template` to the clean branded `DEFAULT_SIGNATURE_TEMPLATE` (name/title/email/website, fully tokenized, no personal data) and gives Ryan a `signature_override` = his EXACT existing signature (it is his). Percy + Grant render from the clean template with their own name, correct title (COO / Business Development), and their own email -- no leaked contact info.
