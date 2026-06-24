@@ -47,7 +47,7 @@ Last updated: 2026-06-23
   - Date: 2026-06-23
   - What changed: Two prod issues the new `sendLimiter` surfaced behind nginx. (1) [app.ts](src/app.ts) now `app.set('trust proxy', 1)` — was unset, so express-rate-limit threw `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` and `req.ip` was the proxy, not the client. '1' (single nginx hop), not 'true', keeps XFF unspoofable. (2) [rateLimiter.ts](src/middleware/rateLimiter.ts) `sendLimiter` keyGenerator now routes the IP fallback through `ipKeyGenerator` (express-rate-limit v8 export) so IPv6 clients can't rotate within their /64 to bypass (`ERR_ERL_KEY_GEN_IPV6`); user id remains the primary key. Also added [directives/enable-https-g3.md](directives/enable-https-g3.md) (Cloudflare + Let's Encrypt runbook for the remaining G3).
   - Verification: backend tsc clean; redeployed; `docker logs landjet-backend` shows NO `ERR_ERL_*`/ValidationError after restart; container Up; trust endpoint 401 (healthy).
-  - Notes: HTTPS (G3) remains an infra task per the directive; flipping `HTTPS_ENABLED=true` after TLS auto-greens the dashboard G3 row.
+  - Notes: HTTPS (G3) remains an infra task per the directive; flipping `HTTPS_ENABLED=true` after TLS auto-greens the dashboard G3 row. (2026-06-24 follow-up: inspected the box — growth.landjet.com is host-nginx :80 only; host :443 is held by another app's `op-nginx` container, so enabling HTTPS is a cross-tenant/owner decision, not a safe autonomous change. Directive updated with the verified state + the two clean paths, Cloudflare recommended.)
 
 - [x] **Trust G4: extend LLM cost instrumentation to the remaining high-volume call sites**
   - Date: 2026-06-23
@@ -915,6 +915,13 @@ Foundation for the TX customer-outreach split Ryan proposed 2026-06-08 (BC 99747
   - Notes:
     - Once deployed, the workflow Ryan asked for is one screen: open campaign -> Strategy tab -> step 1 -> pick "LandJet Investor Deck 2026.pdf" from the dropdown -> Save All. The wire-investor-deck-step-1 (BC 9950199326) and wire-intro-deck-step-1 (BC 9950199337) todos then take ~30 seconds each via this UI.
     - Default empty value is `""` in the select; that maps to `null` on the step (`onChange={e => updateStep(i, 'attachment_path', e.target.value || null)}`).
+
+- [x] **Outreach attachments persistence fix (prod volume mount)**
+  - Date: 2026-06-24
+  - Why: The attachments feature (upload UI + per-step picker + send-time wiring) was fully built and verified live, but the backend had NO volume mount for the attachments directory and `OUTREACH_ATTACHMENTS_DIR` was unset. It defaulted to `/opt/landjet-growth-engine/attachments` *inside the container*, so every `docker compose up -d --build backend` deploy wiped all uploaded decks. Silent data-loss defect that undermined the feature Ryan asked for.
+  - What changed: Added `volumes: - ./attachments:/opt/landjet-growth-engine/attachments` to the `backend` service in `docker-compose.production.yml` on the VPS (this file is server-local / untracked, not in git). Backed up the prior compose to `docker-compose.production.yml.bak-20260624`. Recreated the backend container (`up -d backend`, no rebuild) to apply the mount. Host dir `/opt/landjet-growth-engine/attachments` already existed (created 2026-06-02) and held a pre-existing `LandJet-Intro.pdf` that had been invisible until now (nothing was mounted).
+  - Verification: `docker compose config` valid; `docker inspect` confirms `/opt/landjet-growth-engine/attachments -> /opt/landjet-growth-engine/attachments` mount; backend container healthy after recreate; `loadAttachmentFromPath('LandJet-Investor-Deck-2026.pdf')` returns `application/pdf` base64 from inside the container. Decks now survive deploys.
+  - Notes: Decks themselves are data, not code, so they live on the host volume (not git). Wiring decks to live campaign steps is held pending Ali's confirmed file -> campaign -> step mapping (Ryan did not specify steps and sent confidential investor material that must not ride a cold step-1 send).
 
 - [x] **AI hallucination guard on inbound quote response (BookRides flow)**
   - Date: 2026-06-09 (BC 9946698753)

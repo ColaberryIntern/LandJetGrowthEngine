@@ -4,7 +4,11 @@
 
 **Owner:** Infra (Ali / ops). This is an infrastructure task; it ships no application code beyond a one-line env flag.
 
-**Current state:** The site is HTTP-only. nginx terminates on `:80` in the LandJet stack (`/nginx`, `docker-compose.production.yml`). The VPS (`95.216.199.47`) is multi-tenant (~30 containers).
+**Current state (verified on the box 2026-06-24):** `growth.landjet.com` is served by the **host** nginx, **port 80 only** (`/etc/nginx/sites-available/growth-landjet`, symlinked enabled), proxying `/api/ -> 127.0.0.1:3011` (landjet-backend) and `/ -> 127.0.0.1:4000` (landjet-frontend). No TLS server block, and `/etc/letsencrypt/live/` is empty (no cert issued yet).
+
+**The blocker:** host port **:443 is already held by a different app's container (`op-nginx`, `server_name _;` catch-all)**, not the host nginx. So the host nginx cannot simply bind :443 to serve growth over HTTPS without colliding with — and risking — that other tenant. `certbot` is installed on the host and port 80 is controllable, so issuing a cert is easy; *terminating* HTTPS on 443 is the conflict. This makes HTTPS an owner decision, not a safe autonomous change. The two clean paths:
+- **Cloudflare (recommended):** edge TLS, origin stays host :80 — sidesteps the :443 conflict entirely. Needs DNS/Cloudflare access (Ali).
+- **Reclaim/ share :443 on the origin:** decide whether `op-nginx` can yield :443 or act as the shared TLS ingress for growth too — a cross-tenant infra decision (Ali).
 
 ---
 
