@@ -173,6 +173,13 @@ async function runReservations(): Promise<void> {
     if (r.created > 0 || r.errors > 0) {
       logger.info('pipeline.reservations complete', { duration_ms: Date.now() - start, ...r });
     }
+    // Absorb same-request duplicate forwards on their own (no operator needed).
+    try {
+      const { autoMergeDuplicates } = await import('./reservationQuoteService');
+      await autoMergeDuplicates();
+    } catch (e) {
+      logger.warn('pipeline.reservations auto-merge failed (non-fatal)', { error: (e as Error).message });
+    }
     // Keep the voice models fresh: re-mine Sent Items + rebuild tone profiles
     // roughly once a day (this cron runs every ~10 min). The exemplar corpus
     // growing is what makes the draft rubric better over time.

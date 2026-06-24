@@ -759,6 +759,71 @@ export async function setReservationLifecycle(id: number, lifecycle: Reservation
   return rq;
 }
 
+/** Strip Re:/FW:/[External] prefixes so a forward matches the original subject. */
+function normSubjectForDedup(s?: string | null): string {
+  let x = (s || '').toLowerCase();
+  let prev = '';
+  while (x !== prev) { prev = x; x = x.replace(/^\s*(re|fw|fwd|aw)\s*:\s*/i, '').replace(/^\s*\[[^\]]*\]\s*/, ''); }
+  return x.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * A stable identity for a request so duplicates collapse: the BookRides
+ * reservation number, else the trip signature, else sender + normalized subject
+ * (handles a "FW: June 30th" forward of the same request with no trip details).
+ * Mirrors the frontend dedup so the UI and the persistent merge agree.
+ */
+export function reservationDedupKey(rq: ReservationQuote): string | null {
+  const t = (rq.result as any)?.trip || {};
+  if (t.reservation_number) return `res:${t.reservation_number}`;
+  const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+  const parts = [norm(t.passenger_name), norm(t.pickup_address), norm(t.dropoff_address), norm(t.date_of_service), norm(t.start_time)];
+  if (parts.filter(Boolean).length >= 4) return `trip:${parts.join('|')}`;
+  const subj = normSubjectForDedup(rq.subject);
+  const sender = (rq.from_email || '').toLowerCase();
+  if (subj.length >= 4 && sender) return `subj:${sender}|${subj}`;
+  return null;
+}
+
+/**
+ * Persistently merge same-request duplicates on their own (no operator needed).
+ * Groups ACTIVE rows by dedup key and absorbs the extras into a canonical (prefer
+ * one with a draft, then the most recent -- the forward), via mergeReservations.
+ * Idempotent: merged/closed rows are excluded, so re-running is a no-op.
+ */
+export async function autoMergeDuplicates(opts: { windowDays?: number } = {}): Promise<{ groups: number; merged: number }> {
+  const { Op } = await import('sequelize');
+  const since = new Date(Date.now() - (opts.windowDays ?? 45) * 86400000);
+  const rows = await ReservationQuote.findAll({
+    where: {
+      deleted_at: null,
+      merged_into: null,
+      lifecycle: { [Op.in]: ['needs_reply', 'awaiting_customer'] },
+      received_at: { [Op.gte]: since },
+    } as any,
+  });
+  const groups = new Map<string, ReservationQuote[]>();
+  for (const r of rows) {
+    const k = reservationDedupKey(r);
+    if (!k) continue;
+    (groups.get(k) || groups.set(k, []).get(k)!).push(r);
+  }
+  let groupCount = 0, mergedCount = 0;
+  for (const grp of groups.values()) {
+    if (grp.length < 2) continue;
+    const sorted = [...grp].sort((a, b) =>
+      (Number(Boolean(b.ai_draft)) - Number(Boolean(a.ai_draft))) ||
+      (new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime()) ||
+      (b.id - a.id));
+    const canon = sorted[0];
+    const secondaries = sorted.slice(1).map((r) => r.id);
+    try { await mergeReservations(canon.id, secondaries); groupCount++; mergedCount += secondaries.length; }
+    catch (e) { logger.warn('auto-merge group failed (non-fatal)', { error: (e as Error).message }); }
+  }
+  if (mergedCount > 0) logger.info('auto-merge duplicates complete', { groups: groupCount, merged: mergedCount });
+  return { groups: groupCount, merged: mergedCount };
+}
+
 /**
  * Manually merge reservations: the operator decides several rows are the same
  * person/booking and picks one to keep. The others get a merged_into pointer and

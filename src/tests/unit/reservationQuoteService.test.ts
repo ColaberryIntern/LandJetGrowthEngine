@@ -1,4 +1,4 @@
-import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent, isOurAddress, decideLifecycleFromThread, isIncompleteRequest } from '../../services/reservationQuoteService';
+import { deriveConfidenceAndStatus, htmlToText, autoSendEligible, AUTOSEND_MIN_CONFIDENCE, isBookingIntent, isOurAddress, decideLifecycleFromThread, isIncompleteRequest, reservationDedupKey } from '../../services/reservationQuoteService';
 import { processInboundEmail, detectMarketFromAddress } from '../../services/inboundQuoteEngine';
 import type { InboundProcessResult } from '../../services/inboundQuoteEngine';
 
@@ -181,6 +181,25 @@ describe('isIncompleteRequest (a quote missing info is outstanding work -> Needs
     const rq = { lifecycle: 'needs_reply', quote_total: null, status: 'needs_review',
       result: { source: 'nl', trip: { pickup_address: 'A', dropoff_address: 'B' } } } as any;
     expect(isIncompleteRequest(rq, { source: 'nl', trip: { pickup_address: 'A', dropoff_address: 'B', date_of_service: '07/17/2026', passengers: 4 } }, 900)).toBe(false);
+  });
+});
+
+describe('reservationDedupKey (forwards of the same request collapse)', () => {
+  it('a FW: and the original with no trip details key the same (sender + subject)', () => {
+    const a = { subject: 'FW: June 30th', from_email: 'mross@landjet.com', result: { trip: {} } } as any;
+    const b = { subject: 'June 30th', from_email: 'mross@landjet.com', result: { trip: {} } } as any;
+    const c = { subject: 'Re: [External] FW: June 30th', from_email: 'mross@landjet.com', result: { trip: {} } } as any;
+    expect(reservationDedupKey(a)).toBe(reservationDedupKey(b));
+    expect(reservationDedupKey(c)).toBe(reservationDedupKey(b));
+  });
+  it('different subjects from the same sender do NOT collapse', () => {
+    const a = { subject: 'June 30th', from_email: 'mross@landjet.com', result: { trip: {} } } as any;
+    const b = { subject: 'July 4th', from_email: 'mross@landjet.com', result: { trip: {} } } as any;
+    expect(reservationDedupKey(a)).not.toBe(reservationDedupKey(b));
+  });
+  it('prefers the BookRides reservation number when present', () => {
+    const a = { subject: 'x', from_email: 'y@z.com', result: { trip: { reservation_number: '3503372' } } } as any;
+    expect(reservationDedupKey(a)).toBe('res:3503372');
   });
 });
 
