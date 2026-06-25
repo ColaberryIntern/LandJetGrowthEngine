@@ -31,6 +31,12 @@ export default function CampaignDetailPage() {
   // back to [] on failure so the editor still renders.
   const [attachmentFiles, setAttachmentFiles] = useState<{ filename: string }[]>([]);
 
+  // The single document this campaign attaches. Ryan picks it once here, then
+  // checks it on whichever email steps he wants via a per-step checkbox.
+  // Persisted in campaign.settings.attachment_document; falls back to whatever
+  // file an existing step already points at so prior wiring shows up.
+  const [campaignDoc, setCampaignDoc] = useState<string>('');
+
   // Settings state
   const [senderName, setSenderName] = useState('Ryan Landry');
   const [senderRole, setSenderRole] = useState('CEO, LandJet');
@@ -73,6 +79,11 @@ export default function CampaignDetailPage() {
           setCampaign(c);
           setPrompt(c.ai_system_prompt || '');
           setSteps(c.sequence_steps || []);
+          setCampaignDoc(
+            c.settings?.attachment_document ||
+            (c.sequence_steps || []).find((s: any) => s.attachment_path)?.attachment_path ||
+            '',
+          );
           setSenderName(c.settings?.sender_name || 'Ryan Landry');
           setSenderRole(c.settings?.sender_role || 'CEO, LandJet');
           setSenderEmail(c.settings?.sender_email || 'rmlandry29@gmail.com');
@@ -108,6 +119,7 @@ export default function CampaignDetailPage() {
         setCampaignPriority(c.settings.priority || campaignPriority);
         setEmailSignature(c.settings.email_signature || emailSignature);
         setMaxSteps(typeof c.settings.max_steps === 'number' ? c.settings.max_steps : 0);
+        if ('attachment_document' in c.settings) setCampaignDoc(c.settings.attachment_document || '');
       }
       if (c.channel_config?.email?.daily_limit !== undefined) setEmailsPerDay(c.channel_config.email.daily_limit);
       setFlash(section);
@@ -138,6 +150,34 @@ export default function CampaignDetailPage() {
     const updated = [...steps];
     updated[index] = { ...updated[index], [field]: value };
     setSteps(updated);
+  }
+
+  // Change which document the campaign attaches. Re-points every step that is
+  // currently set to attach (so the checked boxes always reflect the chosen
+  // document). Picking "None" detaches every step.
+  function changeCampaignDoc(filename: string) {
+    setCampaignDoc(filename);
+    setSteps(prev => prev.map((s: any) => (s.attachment_path ? { ...s, attachment_path: filename || null } : s)));
+  }
+
+  // Open an attachment in a new tab. The download endpoint requires the bearer
+  // token, so we fetch it as a blob and open an object URL rather than a plain
+  // link (which would not carry the auth header).
+  async function openAttachment(filename: string) {
+    if (!filename) return;
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const r = await fetch(`/api/admin/attachments/${encodeURIComponent(filename)}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!r.ok) { alert('Could not open the document. It may have been moved or deleted.'); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      alert('Could not open the document.');
+    }
   }
 
   // Load the file list for the attachment picker once per page load.
@@ -534,6 +574,35 @@ export default function CampaignDetailPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Sequence Steps</p>
                 {flash === 'steps' && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Saved</span>}
               </div>
+
+              {/* Campaign document: pick once, then check it on any email step below */}
+              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-medium text-gray-700">Campaign document:</label>
+                  <select
+                    value={campaignDoc}
+                    onChange={e => changeCampaignDoc(e.target.value)}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-gray-500 focus:outline-none">
+                    <option value="">None</option>
+                    {attachmentFiles.map(f => (
+                      <option key={f.filename} value={f.filename}>{f.filename}</option>
+                    ))}
+                    {campaignDoc && !attachmentFiles.some(f => f.filename === campaignDoc) && (
+                      <option value={campaignDoc}>{campaignDoc} (missing)</option>
+                    )}
+                  </select>
+                  {campaignDoc && (
+                    <button type="button" onClick={() => openAttachment(campaignDoc)}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800">View</button>
+                  )}
+                  <a href="/admin/attachments" target="_blank" rel="noopener noreferrer"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800">Upload / update document</a>
+                </div>
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Pick the document for this campaign, then check the box on any email step below to attach it. Update the file itself on the attachments page; the link points to the latest version automatically.
+                </p>
+              </div>
+
               <div className="mt-3 space-y-4">
                 {(steps.length > 0 ? steps : [
                   { step: 1, delay_days: 0, channel: 'email', prompt: '' },
@@ -604,23 +673,21 @@ export default function CampaignDetailPage() {
                         placeholder={ch.startsWith('linkedin') ? 'Message to send (will be interpolated with variables)' : 'Step-specific prompt (overrides campaign prompt for this stage)'}
                         className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-gray-500 focus:outline-none bg-white" />
                       {ch === 'email' && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <label className="text-xs font-medium text-gray-600">Attachment:</label>
-                          <select
-                            value={s.attachment_path || ''}
-                            onChange={e => updateStep(i, 'attachment_path', e.target.value || null)}
-                            className="flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-gray-500 focus:outline-none">
-                            <option value="">No attachment</option>
-                            {attachmentFiles.map(f => (
-                              <option key={f.filename} value={f.filename}>{f.filename}</option>
-                            ))}
-                            {s.attachment_path && !attachmentFiles.some(f => f.filename === s.attachment_path) && (
-                              <option value={s.attachment_path}>{s.attachment_path} (missing)</option>
-                            )}
-                          </select>
-                          {attachmentFiles.length === 0 && (
-                            <a href="/admin/attachments" target="_blank" rel="noopener noreferrer"
-                              className="text-xs text-blue-600 hover:text-blue-800">Upload one</a>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <label className={`flex items-center gap-2 text-xs font-medium ${campaignDoc ? 'text-gray-700' : 'text-gray-400'}`}>
+                            <input
+                              type="checkbox"
+                              disabled={!campaignDoc}
+                              checked={!!s.attachment_path}
+                              onChange={e => updateStep(i, 'attachment_path', e.target.checked ? campaignDoc : null)}
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-gray-900 focus:ring-gray-500 disabled:opacity-50" />
+                            {campaignDoc
+                              ? <span>Attach <span className="font-mono text-gray-600">{campaignDoc}</span> to this email</span>
+                              : <span>Attach campaign document (pick one above first)</span>}
+                          </label>
+                          {s.attachment_path && (
+                            <button type="button" onClick={() => openAttachment(s.attachment_path)}
+                              className="text-xs font-medium text-blue-600 hover:text-blue-800">View</button>
                           )}
                         </div>
                       )}
@@ -635,7 +702,7 @@ export default function CampaignDetailPage() {
               }} className="mt-2 w-full rounded-md border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-700">
                 + Add Step
               </button>
-              <button onClick={() => saveField('steps', { sequence_steps: steps, ai_system_prompt: prompt.trim() })} disabled={saving === 'steps'}
+              <button onClick={() => saveField('steps', { sequence_steps: steps, ai_system_prompt: prompt.trim(), settings: { attachment_document: campaignDoc || null } })} disabled={saving === 'steps'}
                 className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
                 title="Saves both the campaign prompt and all sequence steps">
                 {saving === 'steps' ? 'Saving...' : 'Save All'}

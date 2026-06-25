@@ -89,6 +89,41 @@ router.post('/', authorize('campaigns:write'), async (req: Request, res: Respons
   }
 });
 
+// Download / view a single attachment inline. Powers the "View" link in the
+// campaign editor so a user can open the exact PDF a step will attach. Served
+// with an inline disposition so the browser opens it in a tab rather than
+// force-downloading. Same safePath guard as upload/delete (no traversal, only
+// whitelisted extensions).
+const CONTENT_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+};
+
+router.get('/:filename/download', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const raw = req.params.filename;
+    const filename = Array.isArray(raw) ? raw[0] : (raw || '');
+    const dest = safePath(filename);
+    if (!dest) return res.status(400).json({ error: 'Invalid filename' });
+    try {
+      const buf = await fs.readFile(dest);
+      const ext = path.extname(filename).toLowerCase();
+      res.setHeader('Content-Type', CONTENT_TYPES[ext] || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      return res.send(buf);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      throw e;
+    }
+  } catch (error) { next(error); }
+});
+
 // Delete an attachment
 router.delete('/:filename', authorize('campaigns:write'), async (req: Request, res: Response, next: NextFunction) => {
   try {
