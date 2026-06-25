@@ -1,9 +1,17 @@
 # PROGRESS.md
 **LandJet Growth Engine -- Task Tracking & Session History**
 
-Last updated: 2026-06-24
+Last updated: 2026-06-25
 
 ---
+
+## Session: 2026-06-25
+
+- [x] **Outreach feedback: live smoke test + fix `sendSystemEmail` address hygiene (trailing-space recipient rejection)**
+  - Date: 2026-06-25
+  - What changed: Ran the feedback loop once end-to-end against the deployed API + real OpenAI triage + real Graph (minted a Ryan JWT via `refreshToken`, POSTed "emails are too long, keep to 3 sentences"). The loop PASSED (200, `add_guardrail`, `status=applied`, row stored) but the confirmation email FAILED: the stored `sender_email` carries a trailing space (`"rlandry@landjet.com "`) and Graph rejects the whole send ("recipient is not resolved"). The bulkhead held — request still returned 200, no email half-sent. Hardened [sendSystemEmail](src/services/outreachEmailService.ts) to trim `from`/`to`/`cc`, `encodeURIComponent` the `from` in the URL, and return a typed failure when `from`/`to` are empty. Cleaned up the smoke-test side effects in prod (cleared the test guardrail from `outreach.settings`, deleted the test `outreach_feedback` row).
+  - Verification: backend `tsc --noEmit` clean; new jest [sendSystemEmail.test.ts](src/tests/unit/sendSystemEmail.test.ts) **2/2** (trailing-space on from/to/cc is trimmed so Graph resolves; empty `to` returns a typed failure, no throw). Live re-verify after deploy: one Graph notification to ali@colaberry.com with a deliberately dirty `from` -> success.
+  - Notes: TWO live findings surfaced for follow-up — (1) prod outreach `test_mode` is **false**, so feedback confirmation emails address the real Ryan + cc Ali (not a test inbox); (2) the stored `sender_email` setting itself has a trailing space, which the send path now trims defensively but the dirty value may affect other call sites — worth cleaning the stored setting. Both flagged to Ali, not yet actioned.
 
 ## Session: 2026-06-24
 

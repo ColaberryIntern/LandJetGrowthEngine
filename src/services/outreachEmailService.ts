@@ -531,33 +531,41 @@ export interface SystemEmailInput {
  */
 export async function sendSystemEmail(input: SystemEmailInput): Promise<{ success: boolean; error?: string }> {
   try {
+    // Trim every address: stored settings (e.g. sender_email) can carry a
+    // trailing space, and Graph rejects the whole send with "recipient is not
+    // resolved" if any address isn't clean.
+    const from = (input.from || '').trim();
+    const to = (input.to || '').trim();
+    const cc = (input.cc || '').trim();
+    if (!from || !to) return { success: false, error: 'sendSystemEmail: from and to are required' };
+
     const token = await getGraphToken();
     const message: Record<string, unknown> = {
       subject: input.subject,
       body: { contentType: 'HTML', content: input.html },
-      toRecipients: [{ emailAddress: { address: input.to } }],
+      toRecipients: [{ emailAddress: { address: to } }],
     };
-    if (input.cc && input.cc.trim()) {
-      message.ccRecipients = [{ emailAddress: { address: input.cc.trim() } }];
+    if (cc) {
+      message.ccRecipients = [{ emailAddress: { address: cc } }];
     }
 
-    const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${input.from}/sendMail`, {
+    const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     });
 
     if (resp.status === 202 || resp.status === 200) {
-      logger.info('System email sent via Graph API', { to: input.to, cc: input.cc || null, from: input.from, subject: input.subject });
+      logger.info('System email sent via Graph API', { to, cc: cc || null, from, subject: input.subject });
       return { success: true };
     }
     const errorData = await resp.json().catch(() => ({}));
     const errorMsg = (errorData as any)?.error?.message || `Graph API error: ${resp.status}`;
-    logger.error('System email failed', { to: input.to, from: input.from, status: resp.status, error: errorMsg });
+    logger.error('System email failed', { to, from, status: resp.status, error: errorMsg });
     return { success: false, error: errorMsg };
   } catch (error) {
     const msg = (error as Error).message;
-    logger.error('System email exception', { to: input.to, from: input.from, error: msg });
+    logger.error('System email exception', { to: (input.to || '').trim(), from: (input.from || '').trim(), error: msg });
     return { success: false, error: msg };
   }
 }
