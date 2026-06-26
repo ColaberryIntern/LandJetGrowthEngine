@@ -797,6 +797,16 @@ router.post('/campaigns/:campaignId/upload', authorize('campaigns:write'), async
 
 // --- Today's Outreach ---
 
+// The single document a campaign can attach to its emails. Set on the campaign
+// Strategy tab (settings.attachment_document); falls back to whatever file a
+// sequence step already points at so older per-step wiring still surfaces.
+function campaignAttachmentDoc(campaign: any): string | null {
+  const fromSettings = campaign?.settings?.attachment_document;
+  if (fromSettings) return fromSettings;
+  const steps = (campaign?.sequence_steps as any[]) || [];
+  return steps.find((s: any) => s?.attachment_path)?.attachment_path || null;
+}
+
 router.get('/today', authorize('campaigns:read'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { parseStatesParam } = await import('../../services/leadService');
@@ -867,6 +877,11 @@ router.get('/today', authorize('campaigns:read'), async (req: Request, res: Resp
         ai_error: aiError,
         draft: channel === 'email' ? await generateDraft(c, campaign?.ai_system_prompt) : { subject: '', body: linkedinMessage || '', prompt: '', source: 'template' as const },
         status: c.outreach_status,
+        // Attachment control for the per-send checkbox on this card. document =
+        // the campaign's document (null if none); default = whether THIS step is
+        // already configured to attach it.
+        attachment_document: campaignAttachmentDoc(campaign),
+        attachment_default: !!(stepInfo as any)?.attachment_path,
       };
     }));
 
@@ -1381,7 +1396,16 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       // (relative to OUTREACH_ATTACHMENTS_DIR). We load + base64-encode here
       // and forward to Graph. Missing file logs a warning and the send still
       // goes out without the attachment rather than failing the whole step.
-      const attachmentPath = (stepInfo as any)?.attachment_path as string | undefined;
+      // Per-send override from the review queue checkbox (req.body.attach_document):
+      //   true  -> attach the campaign document (even if this step was not configured to)
+      //   false -> attach nothing this send
+      //   undefined (legacy/API callers) -> fall back to the step's own attachment_path
+      const stepDoc = (stepInfo as any)?.attachment_path as string | undefined;
+      const explicitAttach = (req.body || {}).attach_document as boolean | undefined;
+      let attachmentPath: string | undefined;
+      if (explicitAttach === true) attachmentPath = campaignAttachmentDoc(campaign) || stepDoc;
+      else if (explicitAttach === false) attachmentPath = undefined;
+      else attachmentPath = stepDoc;
       const attachments = attachmentPath
         ? [await loadAttachmentFromPath(attachmentPath)].filter((a): a is NonNullable<typeof a> => a !== null)
         : undefined;
