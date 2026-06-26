@@ -1396,16 +1396,23 @@ router.post('/:id/advance', authorize('campaigns:write'), async (req: Request, r
       // (relative to OUTREACH_ATTACHMENTS_DIR). We load + base64-encode here
       // and forward to Graph. Missing file logs a warning and the send still
       // goes out without the attachment rather than failing the whole step.
-      // Per-send override from the review queue checkbox (req.body.attach_document):
-      //   true  -> attach the campaign document (even if this step was not configured to)
-      //   false -> attach nothing this send
-      //   undefined (legacy/API callers) -> fall back to the step's own attachment_path
+      // Per-send attachment choice from the review queue dropdown:
+      //   attachment_filename: string -> attach that library file ('' = none)
+      //   attach_document: true/false -> attach the campaign document / nothing
+      //   neither (legacy/API callers) -> fall back to the step's attachment_path
+      // loadAttachmentFromPath enforces the safePath traversal/extension guard.
       const stepDoc = (stepInfo as any)?.attachment_path as string | undefined;
-      const explicitAttach = (req.body || {}).attach_document as boolean | undefined;
+      const reqBody = (req.body || {}) as { attachment_filename?: unknown; attach_document?: unknown };
       let attachmentPath: string | undefined;
-      if (explicitAttach === true) attachmentPath = campaignAttachmentDoc(campaign) || stepDoc;
-      else if (explicitAttach === false) attachmentPath = undefined;
-      else attachmentPath = stepDoc;
+      if (typeof reqBody.attachment_filename === 'string') {
+        attachmentPath = reqBody.attachment_filename.trim() || undefined;
+      } else if (reqBody.attach_document === true) {
+        attachmentPath = campaignAttachmentDoc(campaign) || stepDoc;
+      } else if (reqBody.attach_document === false) {
+        attachmentPath = undefined;
+      } else {
+        attachmentPath = stepDoc;
+      }
       const attachments = attachmentPath
         ? [await loadAttachmentFromPath(attachmentPath)].filter((a): a is NonNullable<typeof a> => a !== null)
         : undefined;

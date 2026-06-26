@@ -45,10 +45,11 @@ export default function OutreachPage() {
   const [savingSenders, setSavingSenders] = useState(false);
   const [draftEdits, setDraftEdits] = useState<Record<string, { subject: string; body: string }>>({});
 
-  // Per-send "attach the campaign document?" choice, keyed by contact. Undefined
-  // means "use the contact's attachment_default"; an explicit true/false is the
-  // operator's override for this one send.
-  const [attachChoice, setAttachChoice] = useState<Record<string, boolean>>({});
+  // Per-send attachment choice, keyed by contact: a filename, or '' for none.
+  // Undefined means "not touched" -> the card defaults to the campaign document.
+  const [attachSel, setAttachSel] = useState<Record<string, string>>({});
+  // Library of uploadable documents, fetched once, for the per-card dropdown.
+  const [attachmentFiles, setAttachmentFiles] = useState<{ filename: string }[]>([]);
   const [rewriting, setRewriting] = useState<string | null>(null); // "leadId-tone"
   const [originalDrafts, setOriginalDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // stores pre-rewrite originals
   // When the user picks a different campaign from the dropdown, we don't
@@ -216,6 +217,19 @@ export default function OutreachPage() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
+  // Load the document library once for the per-card attachment dropdown.
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const r = await fetch('/api/admin/attachments', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!r.ok) return;
+        const data = await r.json() as { files: { filename: string }[] };
+        setAttachmentFiles(data.files || []);
+      } catch { /* non-fatal: dropdown still shows "No attachment" + Update link */ }
+    })();
+  }, []);
+
   // Open an attachment in a new tab. The download endpoint needs the bearer
   // token, so fetch as a blob and open an object URL (a plain link would not
   // carry auth).
@@ -241,10 +255,13 @@ export default function OutreachPage() {
       // Pass edited subject/body if user modified the draft, plus the attach
       // override when this campaign has a document available.
       const contactForSend = contacts.find(c => c.contact_id === contactId) as any;
-      const payload: { subject?: string; body?: string; attach_document?: boolean } =
+      const payload: { subject?: string; body?: string; attachment_filename?: string | null } =
         edit ? { subject: edit.subject, body: edit.body } : {};
-      if (contactForSend?.attachment_document) {
-        payload.attach_document = attachChoice[contactId] ?? !!contactForSend.attachment_default;
+      if (contactForSend?.channel === 'email') {
+        // The card's current selection (filename), defaulting to the campaign
+        // document. '' or none -> send with no attachment.
+        const sel = attachSel[contactId] ?? (contactForSend.attachment_document || '');
+        payload.attachment_filename = sel || null;
       }
       const body = payload;
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -1122,22 +1139,29 @@ export default function OutreachPage() {
                     className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 font-sans focus:border-gray-400 focus:outline-none resize-y"
                   />
                 </div>
-                {(contact as any).attachment_document && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={attachChoice[contact.contact_id] ?? !!(contact as any).attachment_default}
-                        onChange={e => setAttachChoice(prev => ({ ...prev, [contact.contact_id]: e.target.checked }))}
-                        className="h-3.5 w-3.5 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
-                      <span>Attach <span className="font-mono text-gray-600">{(contact as any).attachment_document}</span></span>
-                    </label>
-                    <button type="button" onClick={() => openAttachment((contact as any).attachment_document)}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-medium text-gray-600">Attachment:</label>
+                  <select
+                    value={attachSel[contact.contact_id] ?? ((contact as any).attachment_document || '')}
+                    onChange={e => setAttachSel(prev => ({ ...prev, [contact.contact_id]: e.target.value }))}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-gray-500 focus:outline-none">
+                    <option value="">No attachment</option>
+                    {attachmentFiles.map(f => (
+                      <option key={f.filename} value={f.filename}>{f.filename}</option>
+                    ))}
+                    {(() => {
+                      const cur = attachSel[contact.contact_id] ?? ((contact as any).attachment_document || '');
+                      return cur && !attachmentFiles.some(f => f.filename === cur)
+                        ? <option value={cur}>{cur} (missing)</option> : null;
+                    })()}
+                  </select>
+                  {(attachSel[contact.contact_id] ?? (contact as any).attachment_document) && (
+                    <button type="button" onClick={() => openAttachment(attachSel[contact.contact_id] ?? (contact as any).attachment_document)}
                       className="text-xs font-medium text-blue-600 hover:text-blue-800">View</button>
-                    <a href="/admin/attachments" target="_blank" rel="noopener noreferrer"
-                      className="text-xs font-medium text-blue-600 hover:text-blue-800">Update</a>
-                  </div>
-                )}
+                  )}
+                  <a href="/admin/attachments" target="_blank" rel="noopener noreferrer"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800">Upload / update</a>
+                </div>
               </div>
             )}
 

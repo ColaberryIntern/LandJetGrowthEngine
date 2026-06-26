@@ -959,14 +959,14 @@ Foundation for the TX customer-outreach split Ryan proposed 2026-06-08 (BC 99747
   - Verification: backend `tsc --noEmit` clean; frontend `tsc --noEmit` clean. Backward compatible -- Investor Outreach's existing step-4 wiring surfaces as the selected document with that step checked. (Deploy + live click-through pending in this session.)
   - Notes: One document per campaign by design (matches "the investor document"); the full deck / franchise pieces remain selectable from the same dropdown.
 
-- [x] **Per-send attachment checkbox on the /outreach review queue (Ali 2026-06-26)**
+- [x] **Per-send attachment selector on the /outreach review queue (Ali 2026-06-26)**
   - Date: 2026-06-26
-  - Why: Ali expected the attach control where Ryan actually works -- the per-lead "Approve & Send" queue -- not only the campaign Strategy tab. He wants to tick a box on the specific email going out, and open/update the document from there.
+  - Why: Ali expected the attach control where Ryan actually works -- the per-lead "Approve & Send" queue -- not only the campaign Strategy tab ("i don't see where i can add the button"). A first cut keyed the control off the campaign document, but that hid it: the card Ali was on had no campaign document, and Investor Outreach (which has one) currently has no leads at an email step (all 1,569 are at LinkedIn stages 1/3). So the control is now ALWAYS shown on email cards.
   - What changed:
-    - `src/routes/admin/outreachRoutes.ts`: added `campaignAttachmentDoc(campaign)` helper (settings.attachment_document, falling back to any step's attachment_path). `GET /today` now returns `attachment_document` (the file the card can attach, or null) and `attachment_default` (whether the current step is already configured to attach) per contact. `POST /:id/advance` accepts `attach_document` (boolean): true attaches the campaign document even if the step was not configured to, false attaches nothing, undefined keeps the legacy step-config behavior (so API callers are unaffected).
-    - `frontend/app/outreach/page.tsx`: each email card now shows a checkbox "Attach <document>" (defaulting to the step's configured state) plus View (blob-fetch open) and Update links, when the campaign has a document. The choice is passed to `/advance` on Approve & Send.
-  - Verification: backend + frontend `tsc --noEmit` clean. Legacy default preserved (no `attach_document` -> step config drives it, unchanged from before).
-  - Notes: Complements the campaign Strategy tab control (set-and-forget default); this is the in-the-moment per-send override. Same document source of truth for both.
+    - `src/routes/admin/outreachRoutes.ts`: added `campaignAttachmentDoc(campaign)` helper (settings.attachment_document, falling back to any step's attachment_path). `GET /today` returns `attachment_document` (the campaign's default doc, or null) per email card. `POST /:id/advance` now accepts `attachment_filename` (string -> attach that library file; '' -> none) and still honors the earlier `attach_document` boolean; neither present keeps the legacy step-config behavior, so API callers are unaffected. `loadAttachmentFromPath` enforces the safePath guard on whatever filename is chosen.
+    - `frontend/app/outreach/page.tsx`: every email card shows an "Attachment:" dropdown (No attachment + the document library, fetched once) defaulting to the campaign document, plus View (blob-fetch open) and "Upload / update" links. Selection is passed as `attachment_filename` to `/advance` on Approve & Send. Missing-file selections render with a "(missing)" label.
+  - Verification: backend + frontend `tsc --noEmit` clean; deployed; authenticated `/today` returns the field; `campaignAttachmentDoc(Investor Outreach)` resolves to `LandJet-Investor-One-Pager-2026.pdf`.
+  - Notes: Complements the campaign Strategy tab control (set-and-forget default). Operator can now attach any library doc to any individual send, which is the "more control" Ali asked for.
 
 - [x] **AI hallucination guard on inbound quote response (BookRides flow)**
   - Date: 2026-06-09 (BC 9946698753)
