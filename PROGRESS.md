@@ -968,6 +968,12 @@ Foundation for the TX customer-outreach split Ryan proposed 2026-06-08 (BC 99747
   - Verification: backend + frontend `tsc --noEmit` clean; deployed; authenticated `/today` returns the field; `campaignAttachmentDoc(Investor Outreach)` resolves to `LandJet-Investor-One-Pager-2026.pdf`.
   - Notes: Complements the campaign Strategy tab control (set-and-forget default). Operator can now attach any library doc to any individual send, which is the "more control" Ali asked for.
 
+- [x] **Inline document viewer on /admin/attachments (Ali 2026-06-26)**
+  - Date: 2026-06-26
+  - Why: Ali wanted to open the uploaded documents from the attachments page, ideally previewing inline like an email client rather than downloading.
+  - What changed (frontend only): `frontend/app/admin/attachments/page.tsx` -- filename is now a clickable link and each row has a "View" action. Clicking fetches the file via the existing `GET /:filename/download` (blob, so the bearer token is sent) and renders it in a modal: PDFs in an `<iframe>` (browser's native PDF viewer), images in an `<img>`, other types (docx/pptx) fall back to a Download button. Modal has Open-in-new-tab / Download / Close; object URL is revoked on close. Also replaced the stale amber "set sequence_steps[i].attachment_path by hand / BC 9956274272" note with current guidance (Strategy tab campaign document + the Outreach queue per-email dropdown).
+  - Verification: frontend `tsc --noEmit` clean. No backend change (download endpoint already serves inline with the safePath guard).
+
 - [x] **AI hallucination guard on inbound quote response (BookRides flow)**
   - Date: 2026-06-09 (BC 9946698753)
   - Why: Per Ali, "when the AI hallucinates ... I would make sure that there is a more deterministic step that doesn't rely on AI, and just kind of follows the calculation." The BookRides parser + pricing engine are already deterministic (regex + pure math). The only place AI is in the loop is the response-drafting stage in `inboundLeadService.generateQuoteResponse`, where GPT writes the email body using pre-computed pricing as context. Three real risks: rounding the grand total, inventing surcharges/perks, or dropping/mis-spelling key facts.

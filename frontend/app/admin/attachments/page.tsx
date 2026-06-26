@@ -48,6 +48,10 @@ export default function AttachmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Inline preview: fetched as a blob (the download endpoint needs the bearer
+  // token) and shown in a modal, so a click previews without leaving the page.
+  const [viewing, setViewing] = useState<{ filename: string; url: string; kind: 'pdf' | 'image' | 'other' } | null>(null);
+  const [viewLoading, setViewLoading] = useState<string | null>(null);
 
   async function fetchList() {
     setLoading(true);
@@ -113,6 +117,30 @@ export default function AttachmentsPage() {
     } finally { setDeleting(null); }
   }
 
+  function kindOf(filename: string): 'pdf' | 'image' | 'other' {
+    const ext = (filename.toLowerCase().split('.').pop() || '');
+    if (ext === 'pdf') return 'pdf';
+    if (['png', 'jpg', 'jpeg'].includes(ext)) return 'image';
+    return 'other';
+  }
+
+  async function openViewer(filename: string) {
+    setViewLoading(filename);
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/attachments/${encodeURIComponent(filename)}/download`, { headers: authHeaders() });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      setViewing({ filename, url: URL.createObjectURL(blob), kind: kindOf(filename) });
+    } catch (e) {
+      setError(`Could not open ${filename}: ${(e as Error).message}`);
+    } finally { setViewLoading(null); }
+  }
+
+  function closeViewer() {
+    setViewing(prev => { if (prev) URL.revokeObjectURL(prev.url); return null; });
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-6">
@@ -159,10 +187,19 @@ export default function AttachmentsPage() {
             <tbody className="divide-y divide-gray-100">
               {files.map(f => (
                 <tr key={f.filename} className="hover:bg-gray-50">
-                  <td className="px-5 py-3 font-mono text-xs text-gray-900">{f.filename}</td>
+                  <td className="px-5 py-3">
+                    <button onClick={() => openViewer(f.filename)} title="Preview"
+                      className="font-mono text-xs text-blue-700 hover:text-blue-900 hover:underline text-left">
+                      {f.filename}
+                    </button>
+                  </td>
                   <td className="px-5 py-3 text-xs text-gray-600">{fmtSize(f.size_bytes)}</td>
                   <td className="px-5 py-3 text-xs text-gray-600">{new Date(f.uploaded_at).toLocaleString()}</td>
-                  <td className="px-5 py-3 text-right">
+                  <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => openViewer(f.filename)} disabled={viewLoading === f.filename}
+                      className="mr-4 text-xs font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                      {viewLoading === f.filename ? 'Opening…' : 'View'}
+                    </button>
                     <button onClick={() => handleDelete(f.filename)} disabled={deleting === f.filename}
                       className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50">
                       {deleting === f.filename ? 'Deleting…' : 'Delete'}
@@ -175,9 +212,41 @@ export default function AttachmentsPage() {
         )}
       </div>
 
-      <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
-        <strong>Wiring an attachment to a campaign step:</strong> After uploading, set <code className="rounded bg-amber-100 px-1 py-0.5">sequence_steps[i].attachment_path = "&lt;filename&gt;"</code> on the campaign you want it on. Per-step attachment selector in the campaign editor is a separate task (BC 9956274272); until that ships, use the campaign PATCH endpoint or the DB directly. Once set, the next time a lead advances to that step, the outreach engine reads the file from the directory above and attaches it to the email automatically.
+      <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900">
+        <strong>Attaching a document to outreach:</strong> Open a campaign, go to the <strong>Strategy</strong> tab, pick a <strong>Campaign document</strong>, and check it on whichever email steps you want. You can also attach a document to an individual send from the <strong>Outreach</strong> review queue using the per-email <em>Attachment</em> dropdown. Click any file above to preview it.
       </div>
+
+      {viewing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog" aria-modal="true" onClick={closeViewer}>
+          <div className="flex h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-white shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+              <h3 className="truncate font-mono text-sm font-medium text-gray-800">{viewing.filename}</h3>
+              <div className="flex items-center gap-3">
+                <a href={viewing.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-600 hover:text-blue-800">Open in new tab</a>
+                <a href={viewing.url} download={viewing.filename} className="text-xs font-medium text-blue-600 hover:text-blue-800">Download</a>
+                <button onClick={closeViewer} aria-label="Close" className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-800">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-100">
+              {viewing.kind === 'pdf' && (
+                <iframe title={viewing.filename} src={viewing.url} className="h-full w-full border-0" />
+              )}
+              {viewing.kind === 'image' && (
+                <div className="flex h-full items-center justify-center p-4">
+                  <img src={viewing.url} alt={viewing.filename} className="max-h-full max-w-full object-contain" />
+                </div>
+              )}
+              {viewing.kind === 'other' && (
+                <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-gray-600">
+                  <p>This file type can&apos;t be previewed in the browser (Office documents need to be downloaded).</p>
+                  <a href={viewing.url} download={viewing.filename} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">Download {viewing.filename}</a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
