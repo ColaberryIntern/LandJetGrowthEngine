@@ -21,7 +21,7 @@ import { ReservationQuote, ReservationQuoteStatus, ReservationLifecycle } from '
 import { processInboundEmailNL, priceTripResult, InboundProcessResult } from './inboundQuoteEngine';
 import { roadMilesBetween } from './googleDistance';
 import { classifyInboundIntent, classifyOutboundIntent, InboundIntent } from './inboundIntent';
-import { isNonQuoteEmail, isPostBookingEmail, missingForQuote, firstDateInText } from './reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail, missingForQuote, firstDateInText, looksLikeReservationCandidate } from './reservationClassify';
 import { lookupClassifierDecision } from './reservationClassifierRules';
 import { auditAction } from './auditLogService';
 
@@ -479,6 +479,18 @@ export function isBookingIntent(r: InboundProcessResult): boolean {
   return false;
 }
 
+// In-process memory of GENERAL-mailbox message ids the LLM already judged NOT a
+// booking. Such emails are never persisted, so the DB dedup (graph_message_id)
+// cannot skip them -- which previously caused the SAME email to be re-extracted
+// every ~10-minute ingest cycle for 72h, the dominant LLM cost ($100/8 days).
+// Bounded; cleared on restart (a message is then re-examined at most once).
+const _seenNonBooking = new Set<string>();
+function rememberNonBooking(id: string): void {
+  if (!id) return;
+  if (_seenNonBooking.size >= 20000) _seenNonBooking.clear();
+  _seenNonBooking.add(id);
+}
+
 /**
  * Fetch -> price -> persist. Idempotent by Graph message id. `fetcher` is
  * injectable for tests; defaults to the live Graph fetch.
@@ -501,6 +513,17 @@ export async function ingestReservationQuotes(opts: {
     try {
       const existing = await ReservationQuote.findOne({ where: { graph_message_id: e.id }, attributes: ['id'] });
       if (existing) { counts.skipped_existing++; continue; }
+
+      // COST GUARD -- general mailboxes only (rlandry@, percy@). A normal email
+      // in Ryan's/Percy's inbox must never reach the paid LLM. Two cheap checks
+      // BEFORE extraction: (1) skip anything with no transportation signal at
+      // all; (2) skip a message we already LLM-examined this run and found to be
+      // a non-booking. The dedicated booking mailbox (onlyBookings=false) is
+      // never pre-filtered, so BookRides requests always flow through.
+      if (onlyBookings) {
+        if (!looksLikeReservationCandidate(e.from, e.subject, e.body)) { counts.filtered++; continue; }
+        if (_seenNonBooking.has(e.id)) { counts.skipped_existing++; continue; }
+      }
 
       // Include the SUBJECT in the text we extract from -- dates and routes are
       // often there ("LandJet ... 6/29/26 & 7/14/26") and the body alone misses them.
@@ -534,7 +557,7 @@ export async function ingestReservationQuotes(opts: {
       // On a general inbox, only persist genuine trip/quote requests so the
       // reservations queue is not flooded with replies, newsletters, and other
       // non-booking mail. The dedicated booking mailbox keeps everything.
-      if (onlyBookings && !isBookingIntent(result)) { counts.filtered++; continue; }
+      if (onlyBookings && !isBookingIntent(result)) { counts.filtered++; rememberNonBooking(e.id); continue; }
 
       const { confidence, status } = deriveConfidenceAndStatus(result);
       const total = result.quote ? result.quote.grand_total : null;

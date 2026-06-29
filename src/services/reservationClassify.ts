@@ -37,6 +37,37 @@ export function isPostBookingEmail(subject?: string | null, body?: string | null
   return POST_BOOKING_SUBJECT.test(s);
 }
 
+// BookRides web-form requests always come from this address; they are the
+// dedicated booking source and must never be pre-filtered out.
+const BOOKRIDES_SENDER = /no-?reply@bookridesonline\.com/i;
+
+// Positive ground-transportation signals. Used as a CHEAP pre-filter BEFORE the
+// paid LLM extraction on GENERAL mailboxes (rlandry@, percy@) -- a normal
+// relationship/business email in Ryan's inbox has none of these, so it never
+// reaches the LLM. (The dedicated booking mailbox is NOT pre-filtered.)
+const RESERVATION_SIGNALS = new RegExp([
+  'pick ?-?up', 'drop ?-?off', 'passenger', '\\bpax\\b', 'round ?-?trip', 'one ?-?way',
+  '\\bairport\\b', '\\bterminal\\b', '\\bflight\\b', 'charter', 'chauffeur', '\\bsedan\\b',
+  '\\bsuv\\b', 'sprinter', '\\blimo', 'limousine', 'shuttle', 'town ?car', 'black ?car',
+  'motor ?coach', '\\bcoach\\b', 'transportation', '\\btransport\\b', '\\bchauffeured\\b',
+  'reservation', '\\breserve\\b', '\\bquote\\b', 'estimate', 'itinerary', '\\bhourly\\b',
+  'book(?:ing)? (?:a|the|us|me|our|ground|car|ride|trip|transportation)',
+  'need (?:a|ground|transportation|a car|a ride|to get)', '\\britede?s?\\b', '\\brides?\\b',
+  'number of passengers', 'how many passengers', '\\bvehicle\\b', '\\bdriver\\b',
+].join('|'), 'i');
+
+/**
+ * Cheap, LLM-free check: could this email plausibly be a ground-transportation
+ * request? BookRides mail always qualifies; otherwise we require at least one
+ * transportation signal in the subject or body. Used to gate the paid NL
+ * extraction on general mailboxes so a normal email never costs an LLM call.
+ */
+export function looksLikeReservationCandidate(from?: string | null, subject?: string | null, body?: string | null): boolean {
+  if (BOOKRIDES_SENDER.test(from || '')) return true;
+  const hay = `${subject || ''}\n${(body || '').slice(0, 4000)}`;
+  return RESERVATION_SIGNALS.test(hay);
+}
+
 /** True when the email is automated/non-customer noise rather than a quote request. */
 export function isNonQuoteEmail(from?: string | null, subject?: string | null, body?: string | null): boolean {
   const f = (from || '').toLowerCase();

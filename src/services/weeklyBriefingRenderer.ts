@@ -12,6 +12,7 @@ import { classifyReply, ReplyTone } from './replyClassification';
 
 export interface BriefingData {
   totalSends: number;
+  sends7d: number;
   totalInbound: number;
   totalTouchedLeads: number;
   totalActive: number;
@@ -413,12 +414,12 @@ export function renderBriefingHtml(d: BriefingData, now: Date): string {
 
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="${PAL.navy}" style="background:${PAL.navy};background-image:linear-gradient(135deg, ${PAL.navy} 0%, ${PAL.navyDark} 60%, ${PAL.purple} 120%);border-radius:14px;margin-bottom:24px"><tr><td style="padding:32px 30px 28px;color:#fff">
     <div style="font-size:11px;font-weight:800;color:${PAL.goldLight};text-transform:uppercase;letter-spacing:.18em">LandJet Growth Engine | Friday Pre-Call Briefing</div>
-    <div style="font-size:32px;font-weight:800;margin-top:10px;line-height:1.1;color:#ffffff">What Ryan is sending through the system</div>
-    <div style="font-size:14px;color:#cbd5e1;margin-top:10px">${dateRange} | ${d.totalSends} logged sends across ${d.activeCampaigns} live campaigns | snapshot taken ${now.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Chicago' })} CT</div>
+    <div style="font-size:32px;font-weight:800;margin-top:10px;line-height:1.1;color:#ffffff">Campaign outreach the engine sent</div>
+    <div style="font-size:14px;color:#cbd5e1;margin-top:10px">${d.sends7d} campaign sends this week | ${d.totalSends} to date across ${d.activeCampaigns} live campaigns | snapshot taken ${now.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Chicago' })} CT</div>
   </td></tr></table>
 
   <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:14px"><tr>
-    <td width="33%" style="padding-right:6px;vertical-align:top">${kpiTile('Emails sent (logged)', fmtNumber(d.totalSends), `since ${d.firstSend} (comm_logs began 5/14)`, PAL.navy)}</td>
+    <td width="33%" style="padding-right:6px;vertical-align:top">${kpiTile('Campaign emails this week', fmtNumber(d.sends7d), `${fmtNumber(d.totalSends)} to date since ${d.firstSend} - campaign sends only`, PAL.navy)}</td>
     <td width="34%" style="padding:0 6px;vertical-align:top">${kpiTile('Total leads reached', fmtNumber(d.totalTouchedLeads), `${fmtNumber(d.leadsEmailed)} emailed, ${fmtNumber(d.leadsLinkedInOnly)} LinkedIn-only`, PAL.purple)}</td>
     <td width="33%" style="padding-left:6px;vertical-align:top">${kpiTile('Replies received', fmtNumber(d.totalInbound), replyTileSub(d), d.totalInbound > 0 ? PAL.green : PAL.red)}</td>
   </tr></table>

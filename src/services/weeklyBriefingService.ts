@@ -170,13 +170,14 @@ export async function collectBriefingData(): Promise<BriefingData> {
   );
 
   const [totalsRow] = await sequelize.query<{
-    total_sends: string; total_inbound: string; total_active: string;
+    total_sends: string; total_sends_7d: string; total_inbound: string; total_active: string;
     total_reachable: string; unique_recipients: string; unique_responded: string;
     active_campaigns: string; total_touched: string;
     first_send: string | null; last_send: string | null;
   }>(
     `SELECT
        (SELECT COUNT(*)::text FROM communication_logs WHERE direction='outbound') AS total_sends,
+       (SELECT COUNT(*)::text FROM communication_logs WHERE direction='outbound' AND created_at > now() - interval '7 days') AS total_sends_7d,
        (SELECT COUNT(*)::text FROM communication_logs WHERE direction='inbound') AS total_inbound,
        (SELECT COUNT(*)::text FROM leads WHERE status='active') AS total_active,
        (SELECT COUNT(*)::text FROM leads WHERE status='active' AND email IS NOT NULL) AS total_reachable,
@@ -215,6 +216,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
 
   return {
     totalSends: +totalsRow.total_sends,
+    sends7d: +totalsRow.total_sends_7d,
     totalInbound: +totalsRow.total_inbound,
     totalActive: +totalsRow.total_active,
     totalReachable: +totalsRow.total_reachable,
@@ -318,9 +320,9 @@ export async function sendWeeklyBriefing(now: Date = new Date()): Promise<{ mess
 
   const recipients = (process.env.WEEKLY_BRIEFING_RECIPIENTS || DEFAULT_RECIPIENTS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 
-  const text = stripEmDashes(`LandJet Growth Engine - Friday Pre-Call Briefing\n\nWindow: ${data.firstSend} to ${data.lastSend}\nLogged sends: ${data.totalSends}\nLeads touched: ${data.totalTouchedLeads}\nReplies received: ${data.totalInbound}\nLive campaigns: ${data.activeCampaigns}\nPool reach: ${data.totalReachable > 0 ? ((data.uniqueRecipients / data.totalReachable) * 100).toFixed(2) : '0.00'}%\nDays since last send: ${data.daysSinceLastSend}\n\nOpen the HTML version for the full report with charts and takeaways.\n\n${SIG_TEXT}`);
+  const text = stripEmDashes(`LandJet Growth Engine - Friday Pre-Call Briefing\n\nCampaign sends this week (last 7 days): ${data.sends7d}\nCampaign sends to date (all campaigns since ${data.firstSend}): ${data.totalSends}\nLeads touched: ${data.totalTouchedLeads}\nReplies received: ${data.totalInbound}\nLive campaigns: ${data.activeCampaigns}\nPool reach: ${data.totalReachable > 0 ? ((data.uniqueRecipients / data.totalReachable) * 100).toFixed(2) : '0.00'}%\nDays since last send: ${data.daysSinceLastSend}\n\nNote: counts are outbound CAMPAIGN emails the engine sent (each tied to a campaign + lead). Normal mailbox email is not included.\n\nOpen the HTML version for the full report with charts and takeaways.\n\n${SIG_TEXT}`);
 
-  const subject = `Friday briefing: ${data.totalSends} sends, ${data.totalInbound} replies, ${data.totalReachable > 0 ? ((data.uniqueRecipients / data.totalReachable) * 100).toFixed(2) : '0.00'}% pool reach`;
+  const subject = `Friday briefing: ${data.sends7d} sends this week (${data.totalSends} to date), ${data.totalInbound} replies, ${data.totalReachable > 0 ? ((data.uniqueRecipients / data.totalReachable) * 100).toFixed(2) : '0.00'}% pool reach`;
 
   const transport = nodemailer.createTransport({
     host: 'smtp.mandrillapp.com', port: 587,

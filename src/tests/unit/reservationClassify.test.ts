@@ -1,4 +1,31 @@
-import { isNonQuoteEmail, isPostBookingEmail, missingForQuote } from '../../services/reservationClassify';
+import { isNonQuoteEmail, isPostBookingEmail, missingForQuote, looksLikeReservationCandidate } from '../../services/reservationClassify';
+
+describe('looksLikeReservationCandidate (cheap pre-filter before the paid LLM on general mailboxes)', () => {
+  it('ALWAYS passes BookRides web-form mail (the dedicated booking source)', () => {
+    expect(looksLikeReservationCandidate('no-reply@bookridesonline.com', 'Anything', '')).toBe(true);
+    expect(looksLikeReservationCandidate('noreply@bookridesonline.com', '', 'plain text')).toBe(true);
+  });
+
+  it('passes real booking-shaped requests (so we never miss a quote)', () => {
+    expect(looksLikeReservationCandidate('cust@acme.com', 'Need a ride to the airport', 'Can you take 6 of us to DFW Friday?')).toBe(true);
+    expect(looksLikeReservationCandidate('cust@acme.com', 'Quote please', 'Pickup at the Omni, drop off at the stadium, 4 passengers')).toBe(true);
+    expect(looksLikeReservationCandidate('cust@acme.com', 'Round trip transportation', 'We need a sprinter van for a round-trip')).toBe(true);
+    expect(looksLikeReservationCandidate('cust@acme.com', 'Reservation', 'Looking for an estimate on a one-way charter')).toBe(true);
+    expect(looksLikeReservationCandidate('cust@acme.com', 'Town car', 'Need a chauffeur for an executive pickup')).toBe(true);
+  });
+
+  it('SKIPS normal relationship / business email (so it never costs an LLM call)', () => {
+    expect(looksLikeReservationCandidate('investor@fund.com', 'Re: catching up', 'Great to see you last week, let us grab coffee soon.')).toBe(false);
+    expect(looksLikeReservationCandidate('partner@firm.com', 'Q3 deck', 'Attached is the updated investor deck, talk tomorrow.')).toBe(false);
+    expect(looksLikeReservationCandidate('friend@gmail.com', 'Dinner Saturday?', 'Are you free for dinner this weekend?')).toBe(false);
+    expect(looksLikeReservationCandidate('newsletter@news.com', 'This week in tech', 'Top stories and headlines for you.')).toBe(false);
+  });
+
+  it('is case-insensitive and reads subject or body', () => {
+    expect(looksLikeReservationCandidate('x@y.com', 'AIRPORT PICKUP', '')).toBe(true);
+    expect(looksLikeReservationCandidate('x@y.com', 'hello', 'how many PASSENGERS will there be?')).toBe(true);
+  });
+});
 
 describe('isNonQuoteEmail (keep inbox noise out of Needs reply)', () => {
   it('flags social / system notifications and receipts', () => {
